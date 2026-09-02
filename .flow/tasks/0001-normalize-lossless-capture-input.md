@@ -1,14 +1,14 @@
 ---
 id: "later-0001"
 title: "Normalize inbound content without losing capture context"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "codex-later-0001-01a05aa4"
 created: "2026-09-02"
 started: "2026-09-02T14:33:54Z"
-branch: ""
-pr: ""
+branch: "flow/later-0001-normalize-inbound-content"
+pr: "https://github.com/CandidDan/later/pull/3"
 issue: ""
 blocked_reason: ""
 serves: ["G1"]
