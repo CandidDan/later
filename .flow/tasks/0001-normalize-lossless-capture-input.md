@@ -1,12 +1,12 @@
 ---
 id: "later-0001"
 title: "Normalize inbound content without losing capture context"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "codex-later-0001-01a05aa4"
 created: "2026-09-02"
-started: ""
+started: "2026-09-02T14:33:54Z"
 branch: ""
 pr: ""
 issue: ""
