@@ -1,7 +1,7 @@
 ---
 id: "later-0001"
 title: "Normalize inbound content without losing capture context"
-status: "in_review"
+status: "done"
 priority: 3
 project: "later"
 owner: "codex-later-0001-01a05aa4"
