@@ -1,0 +1,15 @@
+name: flow-done
+
+# Thin caller — the merge-closes-the-task transition lives in canonical (CandidDan/flow) as a
+# reusable workflow, adopted here by reference. See docs/flow-reusable-workflows.md in the flow repo.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  flow-done:
+    permissions:
+      contents: write
+    uses: CandidDan/flow-protocol/.github/workflows/_flow-done.yml@v1.2.0

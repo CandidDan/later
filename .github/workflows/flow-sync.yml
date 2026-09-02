@@ -1,0 +1,37 @@
+name: flow-sync
+
+# Thin caller — the Flow infra adopt mechanism (propagation plan, Phase 4) lives in canonical
+# (CandidDan/flow) as a reusable workflow, adopted here by reference. When this repo's
+# .flow/VERSION falls behind canonical, it opens a REVIEWED PR pulling the update in — the
+# complement to flow-doctor's drift *warning*. FLOW_PAT is passed by name (CAN-58) so the sync
+# PR triggers flow-gates, not via `secrets: inherit`: this job has no use for
+# CLAUDE_CODE_OAUTH_TOKEN and should not carry it. See docs/flow-reusable-workflows.md in the
+# flow repo.
+#
+# Safe to run anytime: it only ever opens a reviewed PR (never auto-merges, never pushes to main),
+# so it needs no FLOW_AI gate. Bump `canonical_ref` if your other callers pin a tag other than v1.
+
+on:
+  schedule:
+    - cron: "27 6 * * 1"       # weekly, Monday ~06:27 UTC — off the :00 mark
+  workflow_dispatch:
+    inputs:
+      canonical_ref:
+        description: "Canonical ref to adopt from (tag/branch). Default v1.2.0."
+        required: false
+        type: string
+
+concurrency:
+  group: flow-sync
+  cancel-in-progress: false
+
+jobs:
+  flow-sync:
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: CandidDan/flow-protocol/.github/workflows/_flow-sync.yml@v1.2.0
+    with:
+      canonical_ref: ${{ inputs.canonical_ref || 'v1.2.0' }}
+    secrets:
+      FLOW_PAT: ${{ secrets.FLOW_PAT }}

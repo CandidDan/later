@@ -1,0 +1,15 @@
+name: flow-status
+
+# Thin caller — PR-event status sync lives in canonical (CandidDan/flow) as a reusable
+# workflow, adopted here by reference. See docs/flow-reusable-workflows.md in the flow repo.
+
+on:
+  pull_request:
+    types: [opened, reopened, closed]
+    branches: [main]
+
+jobs:
+  flow-status:
+    permissions:
+      contents: write
+    uses: CandidDan/flow-protocol/.github/workflows/_flow-status.yml@v1.2.0

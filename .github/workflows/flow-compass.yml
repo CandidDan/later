@@ -1,0 +1,28 @@
+name: flow-compass
+
+# Thin caller — the drift-audit logic lives in canonical (CandidDan/flow) as a reusable
+# workflow, adopted here by reference. This caller owns the schedule and passes
+# CLAUDE_CODE_OAUTH_TOKEN by name — the only secret the reusable declares — rather than
+# `secrets: inherit`, which would also hand this job FLOW_PAT it never uses. See
+# docs/flow-reusable-workflows.md in the flow repo.
+#
+# DISABLED BY DEFAULT — the reusable job is gated on repo variable FLOW_AI=true and needs the
+# CLAUDE_CODE_OAUTH_TOKEN secret. Adjust the cron to taste.
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"   # weekly, Monday mornings — adjust to taste
+  workflow_dispatch:
+
+jobs:
+  flow-compass:
+    # id-token: write must be granted on the caller — OIDC is never in the default GITHUB_TOKEN,
+    # and a reusable workflow can't raise it above the caller's grant. A permissions block is
+    # exhaustive, so contents/issues are re-listed. See docs/flow-reusable-workflows.md.
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    uses: CandidDan/flow-protocol/.github/workflows/_flow-compass.yml@v1.2.0
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

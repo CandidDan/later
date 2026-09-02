@@ -1,0 +1,24 @@
+name: flow-open-pr
+
+# Thin caller — the auto-PR-on-push logic (CAN-50) lives in canonical (CandidDan/flow) as a
+# reusable workflow, adopted here by reference. This caller owns the `push` trigger and passes
+# FLOW_PAT by name (CAN-58 — so the PR this opens triggers flow-gates), not `secrets: inherit`:
+# this job fires on every push with no human review, and has no use for CLAUDE_CODE_OAUTH_TOKEN,
+# so it should not carry it. See docs/flow-reusable-workflows.md in the flow repo.
+#
+# Opens a PR automatically when a worker pushes a flow/<id>-… branch ahead of main with no PR
+# yet — so a worker that stops short of `gh pr create` no longer strands the task. Idempotent.
+
+on:
+  push:
+    branches:
+      - "flow/**"
+
+jobs:
+  flow-open-pr:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: CandidDan/flow-protocol/.github/workflows/_flow-open-pr.yml@v1.2.0
+    secrets:
+      FLOW_PAT: ${{ secrets.FLOW_PAT }}

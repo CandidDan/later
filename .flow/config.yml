@@ -1,0 +1,57 @@
+# .flow/config.yml — the ONLY file that changes per stack.
+#
+# Written by flow-init from CandidDan/flow-protocol@v1.2.0. Every value below was
+# SUPPLIED, not guessed — flow-init has no defaults for the commands, the source roots or the
+# coverage floor. Recalibrate by hand (it is a normal file) or re-run flow-init --force.
+
+project:
+  name: "later"            # short slug, also the task-id prefix
+  language: "typescript"
+  description: "Zero-friction universal capture and near-real-time intent processing for things saved for later."
+
+# Commands. Each must exit non-zero on failure so CI and the qa-verifier can trust them.
+#
+# COVER EVERY SOURCE TREE. The gate only validates what these commands actually reach. A tree
+# no command parses is never checked until production. (Real incident: edge functions were
+# Deno-only, the gate ran only in app/, and a parse error took down inbound for ~7 days.)
+#
+# NOTE for lockfile stacks: if `install` is strict (`npm ci`, `pnpm i --frozen-lockfile`,
+# `poetry install --sync`), re-run it locally after adding any dependency and commit the
+# resynced lockfile. A half-updated lock passes a lenient local install and fails the gate.
+commands:
+  install:  "pnpm install --frozen-lockfile"
+  build:    "pnpm build"
+  lint:     "pnpm lint"
+  test:     "pnpm test"
+  coverage: "pnpm test:coverage"
+
+# The coverage FLOOR — a backstop, not the real gate. It's a blunt, game-able signal (lines
+# executed, not behaviour proven), so the actual correctness check is the qa-verifier's
+# criterion->test mapping; this just stops coverage quietly collapsing. Raise it over time,
+# never lower it silently. Sitting exactly at the floor proves nothing.
+coverage_min: 15
+
+# Source roots — the gate-coverage floor. flow-doctor FAILS on a declared root that is missing
+# or has no check, and on any top-level source tree not covered here, so a runtime added six
+# months from now can't slip in ungated. If a tree genuinely shouldn't be gated, add it to
+# flow-doctor's ROOT_IGNORE rather than leaving it silently uncovered.
+source_roots:
+  - path: "src/"
+    check: "pnpm lint"
+
+# Security expectations the security-reviewer enforces on top of its general review.
+security:
+  secrets_scan: true            # no credentials, tokens, keys committed
+  dependency_audit: true        # e.g. "npm audit" / "pip-audit" — wire into CI
+  focus:
+    - "Twilio webhook validation"
+    - "inbound email authentication"
+    - "Supabase row-level security"
+    - "secret handling"
+    - "private captured content"
+
+# Branch + PR conventions (kept here so agents and CI agree).
+git:
+  base_branch: "main"
+  branch_prefix: "flow/"        # branches are flow/<task-id>-<slug>
+  protect_main: true            # never commit to base directly

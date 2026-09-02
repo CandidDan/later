@@ -1,0 +1,19 @@
+name: flow-gates
+
+# Thin caller — the gate logic lives in canonical (CandidDan/flow) as a reusable workflow,
+# adopted here by reference instead of copied. Pinned to a tag for stability; bump the tag to
+# adopt a new Flow version (the flow-doctor drift check warns when this repo falls behind).
+# See docs/flow-reusable-workflows.md in the flow repo.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  flow-gates:
+    uses: CandidDan/flow-protocol/.github/workflows/_flow-gates.yml@v1.2.0
+    # Node 22 is the default. Non-Node stack? Pass setup_node_version: "" and provision the
+    # toolchain inside the .flow/config.yml commands:
+    # with:
+    #   setup_node_version: ""

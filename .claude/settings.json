@@ -1,0 +1,32 @@
+{
+  "$comment": "Committed, repo-level Claude Code settings. Makes the private Flow plugin marketplace known to every session on this repo without a manual `claude plugin marketplace add`. After cloning, run `claude plugin install flow@flow` (or enable via /plugin). The worker also auto-discovers this repo's own .claude/skills + .claude/agents, so the gate still runs even if the plugin isn't installed; the plugin is what makes task-writer / board-builder / portfolio-manager work from a Cowork orchestrator session. Personal/local overrides go in .claude/settings.local.json (gitignored).",
+  "extraKnownMarketplaces": {
+    "flow": {
+      "source": { "source": "github", "repo": "CandidDan/flow-plugin" }
+    }
+  },
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "auto",
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "Flow: context budget exceeded — handoff required",
+            "command": "printf '%s' '{\"systemMessage\":\"Flow: context is full. Write the handoff and end this session — start a fresh one for the next step.\",\"hookSpecificOutput\":{\"hookEventName\":\"PreCompact\",\"additionalContext\":\"FLOW SESSION HYGIENE - auto-compaction just fired, so this session is already over its context budget. Per CLAUDE.md (Session hygiene): compaction is a symptom, not permission to continue. Before anything else, write the handoff - append a notes entry to the active task file in .flow/tasks/ on main covering (1) what is genuinely done vs only apparently done, (2) the branch and PR if they exist, (3) any decision a fresh session would otherwise re-litigate and why it went that way, (4) the exact next action, specific enough to execute without reading this thread. Commit it to main. Then tell the human this session is finished and the work should continue in a new one. If there is no active task file (an orchestrator session), flush your thinking into task files now - the tasks are the handoff.\"}}'"
+          }
+        ]
+      },
+      {
+        "matcher": "manual",
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "Flow: handoff before compacting",
+            "command": "printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreCompact\",\"additionalContext\":\"FLOW SESSION HYGIENE - a manual compaction was requested, so this session is at its context budget. Per CLAUDE.md (Session hygiene), compacting is not a substitute for handing off. If the current task is unfinished, first append a notes entry to its file in .flow/tasks/ on main: what is done vs only apparently done, the branch and PR, decisions a fresh session would re-litigate, and the exact next action. Commit to main before continuing.\"}}'"
+          }
+        ]
+      }
+    ]
+  }
+}

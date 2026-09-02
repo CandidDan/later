@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flightdeck · project board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#16130f; --bg-2:#1e1a14; --panel:#221d16; --line:#332b20;
+    --ink:#efe6d6; --ink-dim:#b7ab93; --ink-faint:#7d735f;
+    --amber:#f0a830; --amber-soft:#3a2c12;
+    --green:#7fae6b; --blue:#6fa8c7; --red:#cf6b5a; --violet:#9b86c4;
+    --p1:#cf6b5a; --p2:#f0a830; --p3:#c7b46f; --p4:#8a9a7e; --p5:#7d735f;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(900px 500px at 12% -8%, #241d14 0%, transparent 60%),
+      radial-gradient(700px 600px at 105% 0%, #1c211f 0%, transparent 55%),
+      var(--bg);
+    color:var(--ink); font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:13px; line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.035;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+  header{padding:30px 34px 18px;border-bottom:1px solid var(--line);display:flex;align-items:flex-end;justify-content:space-between;gap:24px;flex-wrap:wrap}
+  .brand{display:flex;flex-direction:column;gap:2px}
+  .kicker{font-size:11px;letter-spacing:.34em;text-transform:uppercase;color:var(--amber)}
+  h1{font-family:"Fraunces",serif;font-weight:900;font-size:36px;line-height:1;margin:4px 0 0;letter-spacing:-.01em}
+  .meta{color:var(--ink-faint);font-size:11.5px}
+  .actions{display:flex;gap:10px;align-items:center}
+  button{font-family:inherit;font-size:12px;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:9px 14px;border-radius:9px;transition:.16s}
+  button:hover{border-color:var(--amber);color:var(--amber)}
+  button.primary{background:var(--amber);color:#1a1408;border-color:var(--amber);font-weight:600}
+  button.primary:hover{filter:brightness(1.08);color:#1a1408}
+  .board{display:flex;gap:16px;padding:24px 34px 60px;overflow-x:auto;align-items:flex-start}
+  .col{flex:1 0 230px;min-width:230px;background:linear-gradient(180deg,var(--bg-2),transparent 40%);border:1px solid var(--line);border-radius:14px;padding:12px;min-height:120px}
+  .col.drop{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber) inset}
+  .col h2{font-family:"Fraunces",serif;font-weight:600;font-size:15px;margin:4px 6px 12px;display:flex;align-items:center;justify-content:space-between}
+  .col h2 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:8px}
+  .col .count{font-family:"IBM Plex Mono";font-size:11px;color:var(--ink-faint)}
+  .card{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--p3);border-radius:10px;padding:11px 12px;margin-bottom:10px;cursor:grab;transition:.14s}
+  .card:hover{border-color:#4a3e2d;transform:translateY(-1px)}
+  .card.dragging{opacity:.4;cursor:grabbing}
+  .card .id{font-size:10.5px;color:var(--ink-faint);letter-spacing:.06em}
+  .card .t{font-size:12.5px;color:var(--ink);margin:3px 0 7px;line-height:1.35}
+  .card .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .chip{font-size:10px;padding:2px 7px;border-radius:20px;border:1px solid var(--line);color:var(--ink-dim)}
+  .chip.pri{border:none;color:#1a1408;font-weight:600}
+  .card.changed{border-left-color:var(--amber);box-shadow:0 0 0 1px var(--amber-soft) inset}
+  .panel{position:fixed;top:0;right:0;height:100%;width:min(440px,92vw);background:var(--bg-2);border-left:1px solid var(--line);transform:translateX(100%);transition:.24s cubic-bezier(.4,0,.2,1);padding:28px;overflow-y:auto;z-index:20}
+  .panel.open{transform:none}
+  .panel .close{position:absolute;top:18px;right:20px}
+  .panel h3{font-family:"Fraunces",serif;font-weight:600;font-size:22px;margin:24px 0 6px;line-height:1.2}
+  .panel .lbl{font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--amber);margin-top:18px}
+  .panel .val{color:var(--ink-dim);white-space:pre-wrap;margin-top:4px}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--green);color:#11210c;padding:11px 20px;border-radius:10px;font-weight:600;transition:.3s;z-index:40}
+  .toast.show{transform:translateX(-50%)}
+  .empty{color:var(--ink-faint);font-size:11px;text-align:center;padding:14px 0;font-style:italic;font-family:"Fraunces",serif}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="kicker">Flightdeck</span>
+    <h1 id="projName">project board</h1>
+    <span class="meta" id="meta">— tasks · source of truth: .flow/tasks/</span>
+  </div>
+  <div class="actions">
+    <button id="connect">Connect store (live)</button>
+    <button id="refresh">Refresh</button>
+    <button id="reset">Reset edits</button>
+    <button id="download">Download edits</button>
+    <button class="primary" id="apply">Apply edits</button>
+  </div>
+</header>
+
+<div class="board" id="board"></div>
+
+<aside class="panel" id="panel">
+  <button class="close" onclick="closePanel()">close</button>
+  <div id="panelBody"></div>
+</aside>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ─────────────────────────────────────────────────────────────────────────────
+   DATA — board-builder swaps this array from .flow/tasks/*.md. The files are the
+   source of truth; this is a rendered snapshot. "Apply edits" writes the changed
+   fields to .flow/board-edits.json — via the File System Access API where available
+   (Chromium, over http/localhost — not file://), otherwise a plain download you drop into
+   .flow/. The committed .flow/bin/apply-board-edits.mjs then patches the task files from it.
+   The board never writes task files directly and never round-trips JSON through the clipboard.
+   ───────────────────────────────────────────────────────────────────────────── */
+const TASKS = [
+];
+
+// Set to "owner/repo" (or have board-builder inject it) to light up the per-task
+// "Work this →" link, which opens the flow-queue-runner so you can dispatch a worker for
+// that task. Empty = link hidden. The link goes to GitHub's authed Run-workflow page (no
+// token in the browser); you click Run with the task id pre-shown.
+const REPO = "CandidDan/later";
+
+const COLS = [
+  {key:"ready",       label:"Ready",       color:"var(--blue)"},
+  {key:"in_progress", label:"In progress", color:"var(--amber)"},
+  {key:"in_review",   label:"In review",   color:"var(--violet)"},
+  {key:"blocked",     label:"Blocked",     color:"var(--red)"},
+  {key:"done",        label:"Done",        color:"var(--green)"},
+];
+const PRI = {1:"var(--p1)",2:"var(--p2)",3:"var(--p3)",4:"var(--p4)",5:"var(--p5)"};
+
+let original = JSON.parse(JSON.stringify(TASKS));
+let state = JSON.parse(JSON.stringify(TASKS));
+let dirHandle = null;   // File System Access handle to .flow/ once connected — enables live mode
+let live = false;
+
+function changed(t){const o=original.find(x=>x.id===t.id);return o && (o.status!==t.status || o.priority!==t.priority);}
+
+function render(){
+  document.getElementById("projName").textContent = (state[0]?.project || "project") + " board";
+  document.getElementById("meta").textContent = `${state.length} tasks · ${live?"LIVE from":"snapshot of"} .flow/tasks/`;
+  const board = document.getElementById("board"); board.innerHTML="";
+  COLS.forEach(col=>{
+    const items = state.filter(t=>t.status===col.key).sort((a,b)=>a.priority-b.priority);
+    const el=document.createElement("div"); el.className="col"; el.dataset.col=col.key;
+    el.innerHTML=`<h2><span><span class="dot" style="background:${col.color}"></span>${col.label}</span><span class="count">${items.length}</span></h2>`;
+    items.forEach(t=>el.appendChild(cardEl(t)));
+    if(!items.length) el.insertAdjacentHTML("beforeend",`<div class="empty">— empty —</div>`);
+    addDrop(el); board.appendChild(el);
+  });
+}
+
+function cardEl(t){
+  const c=document.createElement("div");
+  c.className="card"+(changed(t)?" changed":""); c.draggable=true; c.dataset.id=t.id;
+  c.style.borderLeftColor=PRI[t.priority]||"var(--p3)";
+  const labels=(t.labels||[]).map(l=>`<span class="chip">${l}</span>`).join("");
+  c.innerHTML=`<div class="id">${t.id}${t.owner?` · @${t.owner}`:""}</div>
+    <div class="t">${t.title}</div>
+    <div class="row"><span class="chip pri" style="background:${PRI[t.priority]}">P${t.priority}</span>${labels}${t.pr?`<span class="chip">PR</span>`:""}</div>`;
+  c.addEventListener("dragstart",e=>{c.classList.add("dragging");e.dataTransfer.setData("id",t.id);});
+  c.addEventListener("dragend",()=>c.classList.remove("dragging"));
+  c.addEventListener("click",e=>{if(!c.classList.contains("dragging"))openPanel(t.id);});
+  return c;
+}
+
+function addDrop(col){
+  col.addEventListener("dragover",e=>{e.preventDefault();col.classList.add("drop");});
+  col.addEventListener("dragleave",()=>col.classList.remove("drop"));
+  col.addEventListener("drop",e=>{
+    e.preventDefault();col.classList.remove("drop");
+    const id=e.dataTransfer.getData("id");const t=state.find(x=>x.id===id);
+    if(t){t.status=col.dataset.col;render();}
+  });
+}
+
+function openPanel(id){
+  const t=state.find(x=>x.id===id);const b=document.getElementById("panelBody");
+  b.innerHTML=`<div class="lbl">${t.id}</div><h3>${t.title}</h3>
+    <div class="lbl">Status</div><div class="val">${t.status}</div>
+    <div class="lbl">Priority</div>
+      <div class="val"><button onclick="bump('${t.id}',-1)">▲ raise</button>
+      <span style="margin:0 10px">P${t.priority}</span>
+      <button onclick="bump('${t.id}',1)">▼ lower</button></div>
+    ${t.owner?`<div class="lbl">Owner</div><div class="val">@${t.owner}</div>`:""}
+    ${t.blocked_reason?`<div class="lbl">Blocked because</div><div class="val">${t.blocked_reason}</div>`:""}
+    ${t.pr?`<div class="lbl">PR</div><div class="val"><a href="${t.pr}" target="_blank" rel="noopener">${t.pr}</a></div>`:""}
+    ${(t.labels||[]).length?`<div class="lbl">Labels</div><div class="val">${t.labels.join(", ")}</div>`:""}
+    ${REPO && t.status==="ready" ? `<div class="lbl">Work this</div><div class="val"><a href="https://github.com/${REPO}/actions/workflows/flow-queue-runner.yml" target="_blank" rel="noopener">Dispatch a worker →</a><br><span style="color:var(--ink-faint);font-size:11px">opens flow-queue-runner — click “Run workflow”, enter task id <b>${t.id}</b></span></div>` : ""}
+    <div class="lbl">Full spec</div><div class="val">Open .flow/tasks/ — the file body holds context, scope, and acceptance criteria.</div>`;
+  document.getElementById("panel").classList.add("open");
+}
+function closePanel(){document.getElementById("panel").classList.remove("open");}
+function bump(id,d){const t=state.find(x=>x.id===id);t.priority=Math.max(1,Math.min(5,t.priority+d));render();openPanel(id);}
+
+/* ── live mode: read .flow/tasks/ directly via the File System Access API (Chromium) ── */
+function parseTaskFile(text){
+  if(!text.startsWith("---"))return null;
+  const end=text.indexOf("\n---",3); if(end===-1)return null;
+  const head=text.slice(3,end);
+  const get=k=>{const m=head.match(new RegExp("^"+k+":\\s*(.*)$","m"));return m?m[1].split("#")[0].trim():"";};
+  const unq=v=>v.replace(/^"(.*)"$/,"$1");
+  const labels=((get("labels").match(/\[(.*)\]/)||[,""])[1]||"").split(",").map(s=>s.trim().replace(/^["']|["']$/g,"")).filter(Boolean);
+  const t={id:unq(get("id")),title:unq(get("title")),status:unq(get("status")),priority:parseInt(get("priority"))||3,
+           project:unq(get("project")),owner:unq(get("owner")),pr:unq(get("pr")),
+           blocked_reason:unq(get("blocked_reason")),labels};
+  return t.id?t:null;
+}
+
+async function refreshFromStore(){
+  const tasksDir=await dirHandle.getDirectoryHandle("tasks");
+  const tasks=[];
+  for await(const entry of tasksDir.values()){
+    if(entry.kind!=="file"||!entry.name.endsWith(".md")||entry.name==="_TEMPLATE.md")continue;
+    const t=parseTaskFile(await (await entry.getFile()).text());
+    if(t)tasks.push(t);
+  }
+  original=JSON.parse(JSON.stringify(tasks));state=JSON.parse(JSON.stringify(tasks));
+  live=true;render();toast(`Live: ${tasks.length} task(s) read from the store`);
+}
+
+document.getElementById("connect").addEventListener("click",async()=>{
+  if(!window.showDirectoryPicker){toast("Live mode needs Chromium (File System Access API) — use the snapshot");return;}
+  try{
+    dirHandle=await window.showDirectoryPicker({id:"flow-store",mode:"readwrite"});
+    await refreshFromStore();
+  }catch(e){
+    if(e&&e.name==="AbortError"){toast("Cancelled");return;}
+    dirHandle=null;toast("Couldn't read tasks — pick the .flow folder itself");
+  }
+});
+
+document.getElementById("refresh").addEventListener("click",async()=>{
+  if(!dirHandle){toast("Connect the store first");return;}
+  try{await refreshFromStore();}catch(e){toast("Refresh failed — reconnect the store");}
+});
+
+function collectEdits(){return state.filter(changed).map(t=>({id:t.id,status:t.status,priority:t.priority}));}
+function payloadOf(diff){return JSON.stringify({generated:new Date().toISOString(),updates:diff},null,2);}
+
+function downloadPayload(payload,n){
+  const blob=new Blob([payload],{type:"application/json"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download="board-edits.json";a.click();URL.revokeObjectURL(a.href);
+  toast(`Downloaded board-edits.json (${n}) — move into .flow/ and run apply-board-edits.mjs`);
+}
+
+// Apply: write .flow/board-edits.json straight into the project via the File System
+// Access API — no clipboard. The committed apply-board-edits.mjs reads it and patches
+// the task frontmatter, so the board never writes task files itself.
+document.getElementById("apply").addEventListener("click",async()=>{
+  const diff=collectEdits();
+  if(!diff.length){toast("No edits to apply");return;}
+  const payload=payloadOf(diff);
+  if(window.showDirectoryPicker){
+    try{
+      if(!dirHandle) dirHandle=await window.showDirectoryPicker({id:"flow-store",mode:"readwrite"});
+      const fh=await dirHandle.getFileHandle("board-edits.json",{create:true});
+      const w=await fh.createWritable();await w.write(payload);await w.close();
+      toast(`Wrote board-edits.json (${diff.length}) — run apply-board-edits.mjs, then Refresh`);
+      return;
+    }catch(err){if(err&&err.name==="AbortError"){toast("Cancelled");return;}/* else fall through to download */}
+  }
+  downloadPayload(payload,diff.length);
+});
+
+// Explicit download / fallback for browsers without the File System Access API.
+document.getElementById("download").addEventListener("click",()=>{
+  const diff=collectEdits();
+  if(!diff.length){toast("No edits to download");return;}
+  downloadPayload(payloadOf(diff),diff.length);
+});
+
+document.getElementById("reset").addEventListener("click",()=>{state=JSON.parse(JSON.stringify(original));render();toast("Edits reset");});
+
+function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2400);}
+
+render();
+</script>
+</body>
+</html>
