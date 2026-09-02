@@ -1,12 +1,12 @@
 ---
 id: "later-0002"
 title: "Create the secure Supabase capture schema"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "codex-later-0002-01a0628b"
 created: "2026-09-02"
-started: ""
+started: "2026-09-02T14:36:51Z"
 branch: ""
 pr: ""
 issue: ""
