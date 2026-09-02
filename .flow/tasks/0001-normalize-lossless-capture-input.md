@@ -14,7 +14,7 @@ blocked_reason: ""
 serves: ["G1"]
 touches: ["src/lib/capture/**"]
 labels: ["capture", "domain"]
-notes: []
+notes: ["Worker handoff 2026-09-02: Implemented the provider-neutral capture types and pure deterministic normalization on flow/later-0001-normalize-inbound-content; PR https://github.com/CandidDan/later/pull/3 is open. AC1-AC5 are proved by the named tests in src/lib/capture/normalize.test.ts. Local build (webpack backend because sandboxed Turbopack could not bind its helper port), lint, test, and coverage passed; coverage was 88.09% lines against the 15% floor. Hosted Flow gate, touches, QA, code-review, security, status, tooling, and auto-opener checks are green. Decision: preserve supplied payload and attachment references exactly, classify only a sole recognized platform, and use text/link/attachment/mixed/unknown conservative kinds. Genuinely done: implementation, tests, PR, and all checks. Not done: human validation and merge. Next action: review PR #3 and merge it if accepted; flow-done will then mark the task done."]
 ---
 
 ## Context
