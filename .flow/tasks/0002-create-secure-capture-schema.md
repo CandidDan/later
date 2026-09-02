@@ -14,7 +14,9 @@ blocked_reason: ""
 serves: ["G1"]
 touches: ["supabase/**"]
 labels: ["database", "security"]
-notes: ["The new supabase/ tree is intentional greenfield infrastructure from Phase 1 of the approved v0 build order."]
+notes:
+  - "The new supabase/ tree is intentional greenfield infrastructure from Phase 1 of the approved v0 build order."
+  - "Handoff 2026-09-02: Implemented the secure schema, private bucket, RLS policies, and 42-assertion database suite on flow/later-0002-secure-supabase-schema in PR #4. Two clean local migration applications passed 42/42 each; hosted build, scope, QA, security, and code-review checks are green. Provider idempotency is scoped by user to prevent cross-tenant suppression. Nothing only appears done. Next action: human reviews and merges PR #4; do not modify or merge from a worker session."
 ---
 
 ## Context
