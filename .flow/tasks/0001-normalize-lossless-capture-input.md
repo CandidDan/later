@@ -1,0 +1,54 @@
+---
+id: "later-0001"
+title: "Normalize inbound content without losing capture context"
+status: "ready"
+priority: 3
+project: "later"
+owner: ""
+created: "2026-09-02"
+started: ""
+branch: ""
+pr: ""
+issue: ""
+blocked_reason: ""
+serves: ["G1"]
+touches: ["src/lib/capture/**"]
+labels: ["capture", "domain"]
+notes: []
+---
+
+## Context
+
+Later must preserve what the user actually sent before any intelligence is applied. The approved Capture & Intent v0 spec treats a capture as the whole inbound act, not one record per URL, and requires deterministic preprocessing to retain all naturally available capture-time context. This task establishes that provider-neutral boundary without involving a database, webhook, media download or model.
+
+## Scope
+
+- Define the typed provider-neutral input and normalized capture shapes used by later channel adapters.
+- Normalize capture channel, kind, raw text, explicit user note, external message id, capture time, raw provider payload and attachment metadata without discarding supplied values.
+- Extract every HTTP(S) URL from message text in encounter order while retaining the original text unchanged and keeping the message as one capture.
+- Classify Instagram, YouTube and Spotify deterministically from recognized hostnames. Set the single `sourcePlatform` only when the capture has exactly one distinct recognized platform; leave it unknown for unrecognized or mixed-platform input.
+- Derive a conservative capture kind from the supplied text, URLs and attachment metadata, using `unknown` rather than guessing when there is insufficient evidence.
+- Keep the module pure and deterministic by accepting the capture timestamp as input.
+- Do not add persistence, Supabase, provider authentication, API routes, media retrieval, jobs, AI inference, source resolution or user-facing UI.
+
+## Acceptance criteria
+
+- [ ] Given one inbound message containing explanatory text and two URLs, when it is normalized, then exactly one capture is returned, both URLs remain in encounter order, and the original text and raw payload are unchanged.
+- [ ] Given URLs on `instagram.com`, `youtu.be` or `youtube.com`, and `open.spotify.com`, when each single-platform capture is normalized, then its deterministic source platform is respectively `instagram`, `youtube` or `spotify`; an unrecognized or mixed-platform capture has no asserted source platform.
+- [ ] Given an explicit user note, external message id, capture channel, capture timestamp and attachment metadata, when the input is normalized, then each value is retained separately and exactly in the normalized result.
+- [ ] Given text-only, URL-only, attachment-only, mixed and empty inputs, when they are normalized, then their capture kinds are respectively conservative and valid, with empty input producing `unknown` instead of throwing.
+- [ ] Given equivalent input values on repeated calls, when normalization runs, then it returns deeply equal output and performs no network, filesystem, database or clock access.
+
+## Definition of done (inherited — do not edit)
+
+Every criterion has a proving test (qa check passes) · security check no high/critical, or
+visibly skipped as out of its trigger paths · code-review check blocking items resolved ·
+build + lint + test pass · coverage ≥ `coverage_min` (a floor, not the gate) · PR open, task
+linked, criteria checklist ticked with the proving test named.
+
+The first three are **checks on the PR**, not subagents the worker runs — it does not certify
+its own work. Build, lint, test and coverage are the worker's, and are owed before the PR opens.
+
+## Notes / open questions
+
+This task deliberately preserves explicit `userNote` input but does not invent a note by splitting ordinary provider text. Channel adapters may supply a note only when their input makes that distinction explicit.
