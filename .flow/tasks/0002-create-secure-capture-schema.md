@@ -1,14 +1,14 @@
 ---
 id: "later-0002"
 title: "Create the secure Supabase capture schema"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "codex-later-0002-01a0628b"
 created: "2026-09-02"
 started: "2026-09-02T14:36:51Z"
-branch: ""
-pr: ""
+branch: "flow/later-0002-secure-supabase-schema"
+pr: "https://github.com/CandidDan/later/pull/4"
 issue: ""
 blocked_reason: ""
 serves: ["G1"]
