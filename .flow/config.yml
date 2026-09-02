@@ -19,7 +19,7 @@ project:
 # `poetry install --sync`), re-run it locally after adding any dependency and commit the
 # resynced lockfile. A half-updated lock passes a lenient local install and fails the gate.
 commands:
-  install:  "pnpm install --frozen-lockfile"
+  install:  "npm install --global pnpm@11.19.0 && pnpm install --frozen-lockfile"
   build:    "pnpm build"
   lint:     "pnpm lint"
   test:     "pnpm test"
