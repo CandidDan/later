@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(39);
+select plan(42);
 
 select has_table('public', 'captures', 'captures table exists');
 select has_table('public', 'capture_assets', 'capture_assets table exists');
@@ -32,8 +32,13 @@ values
 
 select throws_ok(
   $$insert into public.captures (user_id, capture_channel, external_message_id, captured_at) values
-    ('22222222-2222-2222-2222-222222222222', 'whatsapp', 'SM-unique', now())$$,
+    ('11111111-1111-1111-1111-111111111111', 'whatsapp', 'SM-unique', now())$$,
   '23505', null, 'channel and external message id are idempotent'
+);
+select lives_ok(
+  $$insert into public.captures (user_id, capture_channel, external_message_id, captured_at) values
+    ('22222222-2222-2222-2222-222222222222', 'whatsapp', 'SM-unique', now())$$,
+  'provider idempotency cannot suppress another user capture'
 );
 select lives_ok(
   $$insert into public.captures (user_id, capture_channel, external_message_id, captured_at) values
@@ -93,11 +98,17 @@ select throws_ok(
 );
 
 select lives_ok(
+  $$delete from public.captures where id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2'$$,
+  'cross-owner delete matches no rows without exposing them'
+);
+select lives_ok(
   $$delete from public.captures where id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1'$$,
   'owner can permanently delete their capture'
 );
 
 reset role;
+select is((select count(*)::integer from public.captures where id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2'), 1,
+  'authenticated users cannot delete another user capture');
 select is((select count(*)::integer from public.captures where id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1'), 0,
   'owned capture was deleted');
 select is((select count(*)::integer from public.capture_assets where capture_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1'), 0,

@@ -23,7 +23,7 @@ create table public.captures (
 );
 
 create unique index captures_provider_message_uidx
-  on public.captures (capture_channel, external_message_id)
+  on public.captures (user_id, capture_channel, external_message_id)
   where external_message_id is not null;
 create index captures_user_chronological_idx
   on public.captures (user_id, captured_at desc, id);
