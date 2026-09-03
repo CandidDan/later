@@ -1,7 +1,7 @@
 ---
 id: "later-0002"
 title: "Create the secure Supabase capture schema"
-status: "in_review"
+status: "done"
 priority: 3
 project: "later"
 owner: "codex-later-0002-01a0628b"
