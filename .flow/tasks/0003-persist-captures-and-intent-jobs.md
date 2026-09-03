@@ -14,7 +14,9 @@ blocked_reason: ""
 serves: ["G1"]
 touches: [".env.example", "package.json", "pnpm-lock.yaml", "supabase/**", "src/lib/capture/**", "src/lib/jobs/**", "src/lib/supabase/**"]
 labels: ["capture", "database"]
-notes: ["Depends on later-0001 and later-0002 so persistence consumes the normalized capture contract and migrated schema."]
+notes:
+  - "Depends on later-0001 and later-0002 so persistence consumes the normalized capture contract and migrated schema."
+  - "Worker handoff 2026-09-03: Genuinely done on flow/later-0003-persist-captures-and-intent-work in PR https://github.com/CandidDan/later/pull/5: server-only Supabase client, narrow provider-neutral persistence API, transactional capture/assets/intent-job RPC, idempotent provider retry handling, distinct no-external-id captures, and all AC1-AC6 proving tests. Local build passed; lint passed with zero errors and three pre-existing Flow-tool warnings; 21/21 Vitest tests passed; coverage was 81.69% lines against the 15% floor; both clean Supabase resets passed all 60 pgTAP assertions. Hosted gate, touches, tooling, QA, security, code-review, status, planning, and PR automation checks are green. The QA kickback was resolved by making the configured AC2 test stage capture and asset mutations before an injected job failure and assert transaction discard. Decisions: keep privileged client construction behind server-only boundaries; expose only the RPC-shaped adapter surface; persist original asset JSON unchanged in metadata while deriving deterministic private storage paths; accept normalized link kind without removing the existing url value. Nothing only looks done. Not done: human validation and merge. Next action: review PR #5 and merge it if accepted; flow-done will mark the task done."
 ---
 
 ## Context
