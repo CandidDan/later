@@ -14,7 +14,7 @@ blocked_reason: ""
 serves: ["G1"]
 touches: [".env.example", "package.json", "pnpm-lock.yaml", "src/app/api/jobs/process/**", "src/lib/jobs/**", "src/lib/processing/**"]
 labels: ["intent", "anthropic", "experiment"]
-notes: ["Depends on later-0003 for capture, analysis and job persistence. The Anthropic model is selected by configuration so the experiment can compare Haiku and Sonnet without changing code."]
+notes: ["Depends on later-0003 for capture, analysis and job persistence. The Anthropic model is selected by configuration so the experiment can compare Haiku and Sonnet without changing code.", "2026-09-03: branch flow/later-0005-analyse-intent-in-shadow-mode pushed with the full implementation (src/lib/processing/**, src/lib/jobs/**, src/app/api/jobs/process/route.ts, .env.example, @anthropic-ai/sdk added). Typecheck is clean. NOT yet done: acceptance tests, build/lint/test/coverage gate, PR. Next action: write the proving tests under src/lib/processing/ and src/lib/jobs/, run pnpm build/lint/test/test:coverage, then open the PR titled [later-0005]."]
 ---
 
 ## Context
