@@ -1,7 +1,7 @@
 ---
 id: "later-0005"
 title: "Analyse capture intent in Anthropic shadow mode"
-status: "in_review"
+status: "done"
 priority: 3
 project: "later"
 owner: "claude-code-1788419549"
