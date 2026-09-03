@@ -1,7 +1,7 @@
 ---
 id: "later-0004"
 title: "Accept authenticated WhatsApp captures immediately"
-status: "in_review"
+status: "done"
 priority: 3
 project: "later"
 owner: "codex-later-0004-01a064fe"
