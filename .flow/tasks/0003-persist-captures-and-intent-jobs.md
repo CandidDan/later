@@ -1,12 +1,12 @@
 ---
 id: "later-0003"
 title: "Persist captures and enqueue intent work atomically"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "codex-later-0003-01a064e0"
 created: "2026-09-02"
-started: ""
+started: "2026-09-03T01:28:51Z"
 branch: ""
 pr: ""
 issue: ""
