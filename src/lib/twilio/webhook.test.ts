@@ -57,10 +57,10 @@ function dependencies(
 
 describe("POST /api/inbound/whatsapp", () => {
   it.each([
-    ["missing", null],
-    ["invalid", "not-a-valid-signature"],
+    ["a missing", null],
+    ["an invalid", "not-a-valid-signature"],
   ])(
-    "AC1 rejects a %s Twilio signature before normalization or persistence",
+    "AC1 rejects %s Twilio signature before normalization or persistence",
     async (_case, suppliedSignature) => {
       const normalize = vi.fn(normalizeCaptureInput);
       const persist = vi.fn<WhatsAppWebhookDependencies["persist"]>();
