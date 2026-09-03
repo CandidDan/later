@@ -1,14 +1,14 @@
 ---
 id: "later-0003"
 title: "Persist captures and enqueue intent work atomically"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "codex-later-0003-01a064e0"
 created: "2026-09-02"
 started: "2026-09-03T01:28:51Z"
-branch: ""
-pr: ""
+branch: "flow/later-0003-persist-captures-and-intent-work"
+pr: "https://github.com/CandidDan/later/pull/5"
 issue: ""
 blocked_reason: ""
 serves: ["G1"]
