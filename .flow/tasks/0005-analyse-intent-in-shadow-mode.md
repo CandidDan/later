@@ -1,14 +1,14 @@
 ---
 id: "later-0005"
 title: "Analyse capture intent in Anthropic shadow mode"
-status: "blocked"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "claude-code-1788419549"
 created: "2026-09-02"
 started: "2026-09-03T07:12:29Z"
 branch: "flow/later-0005-analyse-intent-in-shadow-mode"
-pr: ""
+pr: "https://github.com/CandidDan/later/pull/7"
 issue: ""
 blocked_reason: "Work is complete, pushed and gate-green on flow/later-0005-analyse-intent-in-shadow-mode, but the worker cannot open the PR: gh pr create and POST /repos/CandidDan/later/pulls both return 403 'GitHub Actions is not permitted to create or approve pull requests'. flow-open-pr holds FLOW_PAT but is push-triggered, and a push made with the Actions GITHUB_TOKEN does not trigger push workflows, so the safety net cannot fire for a flow-queue-runner worker. Needs a human to open the PR titled [later-0005] Analyse capture intent in Anthropic shadow mode (body ready to paste in Notes below), or a repo/infra fix. Issue creation is also barred for this token, so this task file is the only surface the worker could reach."
 serves: ["G1"]
