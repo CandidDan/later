@@ -14,7 +14,9 @@ blocked_reason: ""
 serves: ["G1"]
 touches: [".env.example", "package.json", "pnpm-lock.yaml", "src/app/api/inbound/whatsapp/**", "src/lib/twilio/**"]
 labels: ["capture", "whatsapp", "security"]
-notes: ["Depends on later-0003 for the normalized capture persistence operation and idempotency boundary."]
+notes:
+  - "Depends on later-0003 for the normalized capture persistence operation and idempotency boundary."
+  - "Worker handoff 2026-09-03: Genuinely done on flow/later-0004-accept-whatsapp-captures in PR https://github.com/CandidDan/later/pull/6: the Twilio-compatible POST webhook validates signatures with the official SDK against TWILIO_WEBHOOK_URL, losslessly normalizes text, sender payload and all declared media metadata, atomically persists before returning the exact Saved for Later acknowledgement, and relies on later-0003 idempotency for MessageSid retries. AC1-AC6 are proved by the named tests in src/lib/twilio/webhook.test.ts. Local webpack production build passed because this worker host prohibits Turbopack helper-port binding; lint passed with zero errors and three pre-existing Flow-tool warnings; 29/29 Vitest tests passed; coverage was 81.3% lines against the 15% floor. Hosted gate/build, touches, Flow tooling, QA, security, code-review, status, planning, and rerun auto-opener checks are green. Decision: attribute this single-user v0 channel through server-only TWILIO_CAPTURE_USER_ID while preserving From, To, WaId and ProfileName in the raw provider payload; no untrusted sender value becomes a database user id. Nothing only looks done. Not done: human validation and merge. Next action: review PR #6 and merge it if accepted; flow-done will mark the task done."
 ---
 
 ## Context
