@@ -16,6 +16,7 @@ class AtomicMemoryDatabase implements AtomicCaptureRpcClient {
   assets: Array<{ captureId: string; metadata: RpcArguments["p_assets"][number] }> = [];
   jobs: Array<{ id: string; captureId: string; type: "intent_analysis"; status: "pending" }> = [];
   failNextJob = false;
+  lastAbortedTransaction?: { stagedCaptures: number; stagedAssets: number; stagedJobs: number };
 
   async rpc(functionName: "persist_capture_with_intent_job", input: RpcArguments) {
     expect(functionName).toBe("persist_capture_with_intent_job");
@@ -43,15 +44,29 @@ class AtomicMemoryDatabase implements AtomicCaptureRpcClient {
       captureId,
       metadata: structuredClone(metadata),
     }));
+    const transactionCaptures = [...this.captures, pendingCapture];
+    const transactionAssets = [...this.assets, ...pendingAssets];
+    const transactionJobs = [...this.jobs];
 
     if (this.failNextJob) {
       this.failNextJob = false;
+      this.lastAbortedTransaction = {
+        stagedCaptures: transactionCaptures.length,
+        stagedAssets: transactionAssets.length,
+        stagedJobs: transactionJobs.length,
+      };
       return { data: null, error: { message: "injected job insert failure" } };
     }
 
-    this.captures.push(pendingCapture);
-    this.assets.push(...pendingAssets);
-    this.jobs.push({ id: jobId, captureId, type: "intent_analysis", status: "pending" });
+    transactionJobs.push({
+      id: jobId,
+      captureId,
+      type: "intent_analysis",
+      status: "pending",
+    });
+    this.captures = transactionCaptures;
+    this.assets = transactionAssets;
+    this.jobs = transactionJobs;
     return {
       data: [{ capture_id: captureId, intent_job_id: jobId, created: true }],
       error: null,
@@ -113,6 +128,11 @@ describe("persistCapture", () => {
       ),
     ).rejects.toThrow("injected job insert failure");
 
+    expect(database.lastAbortedTransaction).toEqual({
+      stagedCaptures: 1,
+      stagedAssets: 1,
+      stagedJobs: 0,
+    });
     expect(database.captures).toEqual([]);
     expect(database.assets).toEqual([]);
     expect(database.jobs).toEqual([]);
