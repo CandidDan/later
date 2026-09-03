@@ -1,14 +1,14 @@
 ---
 id: "later-0004"
 title: "Accept authenticated WhatsApp captures immediately"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "codex-later-0004-01a064fe"
 created: "2026-09-02"
 started: "2026-09-03T02:01:19Z"
-branch: ""
-pr: ""
+branch: "flow/later-0004-accept-whatsapp-captures"
+pr: "https://github.com/CandidDan/later/pull/6"
 issue: ""
 blocked_reason: ""
 serves: ["G1"]
