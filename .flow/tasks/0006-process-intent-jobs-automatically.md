@@ -1,12 +1,12 @@
 ---
 id: "later-0006"
 title: "Process pending intent jobs automatically"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "codex-01a076ff-34b2-79b1-b891-59f8f632bd0b"
 created: "2026-09-06"
-started: "2026-09-06T13:45:54Z"
+started: "2026-09-07T04:50:39Z"
 branch: ""
 pr: ""
 issue: ""
