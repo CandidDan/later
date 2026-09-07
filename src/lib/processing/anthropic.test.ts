@@ -3,7 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 
 vi.mock("server-only", () => ({}));
 
-const { configuredIntentModel, createIntentAnalyser } = await import("./anthropic");
+const { configuredIntentModel, createIntentAnalyser, createAnthropicClient } = await import("./anthropic");
 const { buildIntentInputSnapshot } = await import("./intent-input");
 const { IntentAnalysisError } = await import("./errors");
 const { IntentResultSchemaError } = await import("./intent-result");
@@ -67,6 +67,15 @@ afterEach(() => {
 });
 
 describe("createIntentAnalyser", () => {
+  it("bounds each provider call and leaves retries to the durable queue", () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "TEST-ONLY-NOT-A-CREDENTIAL");
+    try {
+      const client = createAnthropicClient() as Anthropic;
+      expect(client.timeout).toBe(20_000);
+      expect(client.maxRetries).toBe(0);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it.each([
     ["a Haiku model", "claude-haiku-4-5", "claude-haiku-4-5"],
     ["a Sonnet model", "claude-sonnet-5", "claude-sonnet-5-20260101"],

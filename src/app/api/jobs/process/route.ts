@@ -4,6 +4,7 @@ import { processNextIntentJob, type IntentProcessingOutcome } from "@/lib/proces
 import { createIntentAnalyser } from "@/lib/processing/server";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 /**
  * Built on first use, not per request: an unauthenticated caller must not be able to trigger

@@ -77,26 +77,19 @@ function createFakeStore(options: { capture?: CaptureRecord; pendingJobs?: numbe
     async loadCapture(captureId: string): Promise<CaptureRecord | undefined> {
       return captureId === stored.id ? stored : undefined;
     },
-    async appendAnalysis(record: AnalysisRecordInput): Promise<string> {
-      analyses.push(record);
-      return `analysis-${analyses.length}`;
-    },
-    async completeJob(jobId: string): Promise<void> {
-      completed.push(jobId);
-    },
-    async releaseJob(jobId: string, message: string): Promise<void> {
-      releases.push({ jobId, message });
-    },
-    async countPendingJobs(captureId: string, jobType: CaptureJobType): Promise<number> {
-      return jobs.filter(
-        (job) => job.captureId === captureId && job.jobType === jobType && job.status === "pending",
-      ).length;
-    },
-    async enqueueJob(captureId: string, jobType: CaptureJobType): Promise<string> {
-      enqueued += 1;
-      const id = `resolution-${enqueued}`;
-      jobs.push({ id, captureId, jobType, status: "pending" });
-      return id;
+    async finishAttempt(job, record, errorCode) {
+      if (record) analyses.push(record);
+      if (errorCode) {
+        releases.push({ jobId: job.id, message: errorCode });
+        return { analysisId: record ? `analysis-${analyses.length}` : null };
+      }
+      completed.push(job.id);
+      let resolutionJobId: string | undefined;
+      if (record?.result?.resolutionRequired && !jobs.some(j => j.jobType === "source_resolution" && j.status === "pending")) {
+        resolutionJobId = `resolution-${++enqueued}`;
+        jobs.push({ id: resolutionJobId, captureId: job.captureId, jobType: "source_resolution", status: "pending" });
+      }
+      return { analysisId: `analysis-${analyses.length}`, ...(resolutionJobId ? { resolutionJobId } : {}) };
     },
   };
 }
@@ -196,14 +189,15 @@ describe("processNextIntentJob", () => {
       },
     });
 
-    expect(store.releases[0].message).toBe("provider_response_invalid (IntentAnalysisError)");
+    expect(store.releases[0].message).toBe("provider_response_invalid");
     expect(store.releases[0].message).not.toContain("sourdough");
   });
 
   it("AC3 leaves a prior successful analysis untouched when a later run fails", async () => {
     const persistentStore = createFakeStore();
+    let nextJob = 0;
     persistentStore.claimNextJob = async (jobType) => ({
-      id: "job-1",
+      id: `job-${++nextJob}`,
       captureId: capture.id,
       jobType,
       attempts: 1,
@@ -224,10 +218,11 @@ describe("processNextIntentJob", () => {
     expect(persistentStore.analyses[1].status).toBe("failed");
   });
 
-  it("AC4 appends a distinct record on a second successful run and never edits the first", async () => {
+  it("AC4 appends a distinct record for a second intent job and never edits the first", async () => {
     const persistentStore = createFakeStore();
+    let nextJob = 0;
     persistentStore.claimNextJob = async (jobType) => ({
-      id: "job-1",
+      id: `job-${++nextJob}`,
       captureId: capture.id,
       jobType,
       attempts: 1,
@@ -302,4 +297,20 @@ describe("processNextIntentJob", () => {
     expect(orphaned.analyses).toStrictEqual([]);
     expect(orphaned.releases).toStrictEqual([{ jobId: "job-1", message: "capture_missing" }]);
   });
+  it("AC5 a late worker cannot report a success after its lease is recovered", async () => {
+    store.finishAttempt = async () => undefined;
+    const outcome = await processNextIntentJob({ store, analyse: analyserReturning(intentResult()) });
+    expect(outcome).toMatchObject({ status: "failed", errorCode: "lease_lost" });
+    expect(store.analyses).toEqual([]);
+    expect(store.completed).toEqual([]);
+  });
+
+  it("AC3 hostile provider error names and messages are never persisted", async () => {
+    const error = new Error("private credential and capture text");
+    error.name = "private credential and capture text";
+    await processNextIntentJob({ store, analyse: async () => { throw error; } });
+    expect(store.releases).toEqual([{ jobId: "job-1", message: "provider_unavailable" }]);
+    expect(store.analyses[0].errorCode).toBe("provider_unavailable");
+  });
+
 });

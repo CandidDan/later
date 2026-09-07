@@ -23,24 +23,16 @@ export interface ProcessIntentJobDependencies {
 }
 
 /**
- * The recorded failure reason is a code plus the failing error's class, never its message.
+ * The recorded failure reason is an allowlisted code, never provider-controlled text.
  * Provider errors and rejected model output can both quote the capture back at us, and a
  * `last_error` column is the least protected place that text could end up.
  */
-function classifyFailure(error: unknown): { code: string; detail: string } {
-  const code =
-    error instanceof IntentResultSchemaError
+function classifyFailure(error: unknown): string {
+  return error instanceof IntentResultSchemaError
       ? "result_schema_invalid"
       : error instanceof IntentAnalysisError
         ? "provider_response_invalid"
         : "provider_unavailable";
-  const status = (error as { status?: unknown } | null)?.status;
-  const name = error instanceof Error ? error.name : "UnknownError";
-
-  return {
-    code,
-    detail: typeof status === "number" ? `${code} (${name}, HTTP ${status})` : `${code} (${name})`,
-  };
 }
 
 /** The validated result as plain JSON, which also proves it is storable without loss. */
@@ -68,7 +60,7 @@ export async function processNextIntentJob({
   const capture = await store.loadCapture(job.captureId);
 
   if (capture === undefined) {
-    await store.releaseJob(job.id, "capture_missing");
+    await store.finishAttempt(job, null, "capture_missing");
     return { status: "failed", jobId: job.id, captureId: job.captureId, errorCode: "capture_missing" };
   }
 
@@ -78,9 +70,9 @@ export async function processNextIntentJob({
   try {
     analysis = await analyse(inputSnapshot);
   } catch (error) {
-    const { code, detail } = classifyFailure(error);
+    const code = classifyFailure(error);
 
-    await store.appendAnalysis({
+    await store.finishAttempt(job, {
       captureId: capture.id,
       status: "failed",
       inputSnapshot,
@@ -90,13 +82,12 @@ export async function processNextIntentJob({
       promptVersion: PROMPT_VERSION,
       pipelineVersion: PIPELINE_VERSION,
       errorCode: code,
-    });
-    await store.releaseJob(job.id, detail);
+    }, code);
 
     return { status: "failed", jobId: job.id, captureId: capture.id, errorCode: code };
   }
 
-  const analysisId = await store.appendAnalysis({
+  const finished = await store.finishAttempt(job, {
     captureId: capture.id,
     status: "succeeded",
     inputSnapshot,
@@ -108,17 +99,11 @@ export async function processNextIntentJob({
     errorCode: null,
   });
 
-  let resolutionJobId: string | undefined;
-
-  if (analysis.result.resolutionRequired) {
-    const pending = await store.countPendingJobs(capture.id, "source_resolution");
-
-    if (pending === 0) {
-      resolutionJobId = await store.enqueueJob(capture.id, "source_resolution");
-    }
+  // A recovered/expired lease is no longer authorized to publish a result.
+  if (!finished?.analysisId) {
+    return { status: "failed", jobId: job.id, captureId: capture.id, errorCode: "lease_lost" };
   }
-
-  await store.completeJob(job.id);
+  const { analysisId, resolutionJobId } = finished;
 
   return {
     status: "succeeded",

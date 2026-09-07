@@ -14,25 +14,18 @@ interface QueryOutcome {
 
 interface FilterBuilder extends PromiseLike<QueryOutcome> {
   eq(column: string, value: unknown): FilterBuilder;
-  lte(column: string, value: unknown): FilterBuilder;
   order(column: string, options: { ascending: boolean }): FilterBuilder;
   limit(count: number): FilterBuilder;
 }
 
-interface MutationBuilder extends PromiseLike<QueryOutcome> {
-  eq(column: string, value: unknown): MutationBuilder;
-  select(columns: string): FilterBuilder;
-}
-
 interface TableBuilder {
   select(columns: string): FilterBuilder;
-  insert(values: Record<string, unknown>): MutationBuilder;
-  update(values: Record<string, unknown>): MutationBuilder;
 }
 
 /** The subset of a PostgREST client this store uses, mirroring the capture-persistence shape. */
 export interface CaptureJobTableClient {
-  from(table: "captures" | "capture_assets" | "capture_analyses" | "capture_jobs"): TableBuilder;
+  rpc(name: string, args: Record<string, unknown>): PromiseLike<QueryOutcome>;
+  from(table: "captures" | "capture_assets"): TableBuilder;
 }
 
 function rowsFrom(outcome: QueryOutcome, action: string): Record<string, unknown>[] {
@@ -68,60 +61,20 @@ function jsonObject(value: unknown): Record<string, JsonValue> {
     : {};
 }
 
-/**
- * Persistence for intent processing over Supabase.
- *
- * Claiming is a conditional update rather than a plain read: the row is only handed over if it
- * is still `pending` when the update lands, so two concurrent processors cannot both take the
- * same job. Analyses are inserted and never updated — a run is evidence, and evidence is
- * appended.
- */
+/** Claims and finalization are database transactions, fenced by the claimed attempt. */
 export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): CaptureJobStore {
   return {
     async claimNextJob(jobType: CaptureJobType): Promise<CaptureJob | undefined> {
-      const candidates = rowsFrom(
-        await client
-          .from("capture_jobs")
-          .select("id, capture_id, attempts")
-          .eq("job_type", jobType)
-          .eq("status", "pending")
-          .lte("available_at", new Date().toISOString())
-          .order("available_at", { ascending: true })
-          .order("created_at", { ascending: true })
-          .limit(1),
-        "read pending capture jobs",
-      );
-
-      if (candidates.length === 0) {
-        return undefined;
-      }
-
-      const candidateId = requireString(candidates[0], "id");
-      const attempts = Number(candidates[0].attempts ?? 0);
       const claimed = rowsFrom(
-        await client
-          .from("capture_jobs")
-          .update({
-            status: "processing",
-            attempts: attempts + 1,
-            locked_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", candidateId)
-          .eq("status", "pending")
-          .select("id, capture_id, attempts"),
+        await client.rpc("claim_intent_job", { p_job_type: jobType }),
         "claim a capture job",
       );
-
-      if (claimed.length === 0) {
-        return undefined;
-      }
-
+      if (claimed.length === 0) return undefined;
       return {
         id: requireString(claimed[0], "id"),
         captureId: requireString(claimed[0], "capture_id"),
         jobType,
-        attempts: Number(claimed[0].attempts ?? attempts + 1),
+        attempts: Number(claimed[0].attempts),
       };
     },
 
@@ -169,94 +122,22 @@ export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): Ca
       };
     },
 
-    async appendAnalysis(record: AnalysisRecordInput): Promise<string> {
-      const inserted = rowsFrom(
-        await client
-          .from("capture_analyses")
-          .insert({
-            capture_id: record.captureId,
-            analysis_type: "intent",
-            status: record.status,
-            input_snapshot: record.inputSnapshot,
-            result: record.result,
-            confidence: record.confidence,
-            model_id: record.modelId,
-            prompt_version: record.promptVersion,
-            pipeline_version: record.pipelineVersion,
-            error_code: record.errorCode,
-          })
-          .select("id"),
-        "append the capture analysis",
+    async finishAttempt(job: CaptureJob, record: AnalysisRecordInput | null, errorCode?: string) {
+      const finished = rowsFrom(
+        await client.rpc("finish_intent_attempt", {
+          p_job_id: job.id,
+          p_attempt: job.attempts,
+          p_record: record,
+          p_error_code: errorCode ?? null,
+        }),
+        "finish the capture attempt",
       );
-
-      if (inserted.length === 0) {
-        throw new Error("Failed to append the capture analysis: no row was returned");
-      }
-
-      return requireString(inserted[0], "id");
-    },
-
-    async completeJob(jobId: string): Promise<void> {
-      const completedAt = new Date().toISOString();
-
-      rowsFrom(
-        await client
-          .from("capture_jobs")
-          .update({
-            status: "completed",
-            completed_at: completedAt,
-            locked_at: null,
-            last_error: null,
-            updated_at: completedAt,
-          })
-          .eq("id", jobId)
-          .select("id"),
-        "complete the capture job",
-      );
-    },
-
-    async releaseJob(jobId: string, errorMessage: string): Promise<void> {
-      rowsFrom(
-        await client
-          .from("capture_jobs")
-          .update({
-            status: "pending",
-            locked_at: null,
-            last_error: errorMessage,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", jobId)
-          .select("id"),
-        "return the capture job to the queue",
-      );
-    },
-
-    async countPendingJobs(captureId: string, jobType: CaptureJobType): Promise<number> {
-      return rowsFrom(
-        await client
-          .from("capture_jobs")
-          .select("id")
-          .eq("capture_id", captureId)
-          .eq("job_type", jobType)
-          .eq("status", "pending"),
-        "count pending capture jobs",
-      ).length;
-    },
-
-    async enqueueJob(captureId: string, jobType: CaptureJobType): Promise<string> {
-      const inserted = rowsFrom(
-        await client
-          .from("capture_jobs")
-          .insert({ capture_id: captureId, job_type: jobType, status: "pending" })
-          .select("id"),
-        "enqueue a capture job",
-      );
-
-      if (inserted.length === 0) {
-        throw new Error("Failed to enqueue a capture job: no row was returned");
-      }
-
-      return requireString(inserted[0], "id");
+      if (finished.length === 0) return undefined;
+      const resolutionJobId = optionalString(finished[0], "resolution_job_id");
+      return {
+        analysisId: optionalString(finished[0], "analysis_id"),
+        ...(resolutionJobId === null ? {} : { resolutionJobId }),
+      };
     },
   };
 }
