@@ -1,12 +1,12 @@
 ---
 id: "later-0007"
 title: "Store WhatsApp media privately and enrich intent analysis"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "codex-01a07a71-31a3-7642-9e99-cf1cf53c6add"
 created: "2026-09-06"
-started: ""
+started: "2026-09-07T05:58:58Z"
 branch: ""
 pr: ""
 issue: ""
