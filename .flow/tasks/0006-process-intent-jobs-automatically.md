@@ -1,7 +1,7 @@
 ---
 id: "later-0006"
 title: "Process pending intent jobs automatically"
-status: "in_review"
+status: "done"
 priority: 3
 project: "later"
 owner: "codex-01a076ff-34b2-79b1-b891-59f8f632bd0b"
