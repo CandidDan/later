@@ -1,14 +1,14 @@
 ---
 id: "later-0006"
 title: "Process pending intent jobs automatically"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "codex-01a076ff-34b2-79b1-b891-59f8f632bd0b"
 created: "2026-09-06"
 started: "2026-09-07T04:50:39Z"
-branch: ""
-pr: ""
+branch: "codex/later-0006-automatic-processing"
+pr: "https://github.com/CandidDan/later/pull/8"
 issue: ""
 blocked_reason: ""
 serves: ["G1"]
