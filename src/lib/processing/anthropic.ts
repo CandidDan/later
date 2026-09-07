@@ -5,10 +5,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   INTENT_RESULT_JSON_SCHEMA,
   INTENT_SYSTEM_PROMPT,
+  ENRICHED_INTENT_SYSTEM_PROMPT,
   buildIntentUserMessage,
 } from "./prompt";
 import { parseIntentResult, type IntentResult } from "./intent-result";
 import { IntentAnalysisError } from "./errors";
+import type { IntentImage } from "./media-input";
 import type { IntentInputSnapshot } from "./intent-input";
 
 const MAX_OUTPUT_TOKENS = 2048;
@@ -20,7 +22,7 @@ export interface IntentAnalysis {
 }
 
 export interface IntentAnalyser {
-  (snapshot: IntentInputSnapshot): Promise<IntentAnalysis>;
+  (snapshot: IntentInputSnapshot, images?: readonly IntentImage[]): Promise<IntentAnalysis>;
 }
 
 /** The subset of the Anthropic SDK the analyser uses, so tests can supply a stand-in. */
@@ -81,13 +83,21 @@ export function createIntentAnalyser(
   client: IntentMessagesClient = createAnthropicClient(),
   model: string = configuredIntentModel(),
 ): IntentAnalyser {
-  return async (snapshot) => {
+  return async (snapshot, images = []) => {
     const message = await client.messages.create({
       model,
       max_tokens: MAX_OUTPUT_TOKENS,
-      system: INTENT_SYSTEM_PROMPT,
+      system: snapshot.analysisPhase === "enriched"
+        ? ENRICHED_INTENT_SYSTEM_PROMPT
+        : INTENT_SYSTEM_PROMPT,
       output_config: { format: { type: "json_schema", schema: INTENT_RESULT_JSON_SCHEMA } },
-      messages: [{ role: "user", content: buildIntentUserMessage(snapshot) }],
+      messages: [{ role: "user", content: images.length ? [
+        { type: "text", text: buildIntentUserMessage(snapshot) },
+        ...images.flatMap((image): Anthropic.ContentBlockParam[] => [
+          { type: "text", text: `Captured image assetId: ${image.assetId}` },
+          { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
+        ]),
+      ] : buildIntentUserMessage(snapshot) }],
     });
 
     if (message.stop_reason === "refusal") {

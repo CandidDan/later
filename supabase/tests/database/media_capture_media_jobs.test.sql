@@ -1,0 +1,67 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set search_path = public, extensions;
+select no_plan();
+insert into auth.users(id,email) values ('77777777-7777-7777-7777-777777777777','media-owner@example.test');
+create temp table saved as select * from persist_capture_with_intent_job(
+ '77777777-7777-7777-7777-777777777777','whatsapp','SM-media-test','attachment',null,null,null,now(),'{}',
+ '[{"contentType":"image/png","url":"https://provider.example/first"},{"contentType":"audio/amr","url":"https://provider.example/second"}]');
+select is((select count(*)::int from capture_assets where capture_id=(select capture_id from saved)),2,'AC1 two assets commit');
+select is((select count(*)::int from capture_jobs where capture_id=(select capture_id from saved) and job_type='media_download' and status='pending'),2,'AC1 two pending durable downloads commit');
+select is((select count(distinct asset_id)::int from capture_jobs where job_type='media_download'),2,'AC4 one download per asset');
+select lives_ok($$select * from persist_capture_with_intent_job('77777777-7777-7777-7777-777777777777','whatsapp','SM-media-test','attachment',null,null,null,now(),'{}','[]')$$,'AC4 duplicate capture succeeds');
+select is((select count(*)::int from captures where external_message_id='SM-media-test'),1,'AC4 webhook retries keep one capture');
+select is((select count(*)::int from capture_jobs where job_type='media_download'),2,'AC4 webhook retries keep two download jobs');
+create temp table initial_job as select * from claim_intent_job('intent_analysis');
+select * from finish_intent_attempt((select id from initial_job),1,jsonb_build_object('captureId',(select capture_id from saved),'status','succeeded','inputSnapshot','{"original":true}'::jsonb,'result','{"resolutionRequired":false}'::jsonb,'confidence',0.5,'modelId','test','promptVersion','test','pipelineVersion','initial'));
+create temp table original_run as select * from capture_analyses;
+create temp table m1 as select * from claim_media_job();
+create temp table m2 as select * from claim_media_job();
+select isnt((select id from m1),(select id from m2),'concurrent claims cannot take the same leased job');
+select is((select count(*)::int from claim_media_job()),0,'active leases are not reclaimable');
+select ok(not finish_media_attempt((select id from m1),2,'{}'), 'AC4 stale attempt cannot finalize');
+select ok(finish_media_attempt((select id from m1),1,'{"mediaType":"image/png","byteSize":68,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'),'AC2 valid evidence finalizes storage');
+select is((select storage_state from capture_assets where id=(select asset_id from m1)),'stored','AC2 asset is terminal stored');
+select is((select stored_byte_size from capture_assets where id=(select asset_id from m1)),68::bigint,'AC2 observed byte size stored');
+select ok((select stored_at is not null from capture_assets where id=(select asset_id from m1)),'AC2 stored timestamp recorded');
+select ok((select metadata ? 'url' and metadata ? 'contentType' from capture_assets where id=(select asset_id from m1)),'AC2 original provider metadata survives');
+select is((select count(*)::int from capture_jobs where intent_phase='enriched'),0,'AC5 no enrichment until all assets terminal');
+select ok(finish_media_attempt((select id from m2),1,null,'unsafe_redirect'),'AC3 invalid redirect terminates safely');
+select is((select status from capture_jobs where id=(select id from m2)),'failed','AC3 unsafe input is not retried');
+select is((select storage_state from capture_assets where id=(select asset_id from m2)),'failed','AC3 failed asset is terminal');
+select is((select count(*)::int from captures where external_message_id='SM-media-test'),1,'AC3 failure does not lose capture');
+select is((select count(*)::int from capture_jobs where intent_phase='enriched'),1,'AC5 exactly one enriched intent job');
+select ok(not finish_media_attempt((select id from m1),1,'{}'),'AC4 duplicate finalization is rejected');
+select enqueue_media_enrichment((select capture_id from saved));
+select is((select count(*)::int from capture_jobs where intent_phase='enriched'),1,'AC4 repeated terminal scheduling cannot duplicate enrichment');
+create temp table enrichment as select * from claim_intent_job('intent_analysis');
+select * from finish_intent_attempt((select id from enrichment),1,jsonb_build_object('captureId',(select capture_id from saved),'status','succeeded','inputSnapshot','{"analysisPhase":"enriched"}'::jsonb,'result','{}'::jsonb,'confidence',0.7,'modelId','test','promptVersion','test','pipelineVersion','media'));
+select is((select count(*)::int from capture_analyses),2,'AC5 enrichment appends exactly one new run');
+select is((select row_to_json(a)::text from capture_analyses a where a.id=(select id from original_run)),(select row_to_json(o)::text from original_run o),'AC5 original analysis remains byte-for-byte unchanged');
+-- Media can finish before initial intent; scheduling waits and then runs from its terminal trigger.
+create temp table saved2 as select * from persist_capture_with_intent_job('77777777-7777-7777-7777-777777777777','whatsapp','SM-media-second','attachment',null,null,null,now(),'{}','[{"contentType":"audio/amr"}]');
+create temp table retry as select * from claim_media_job();
+select ok(finish_media_attempt((select id from retry),1,null,'secret unsafe provider message'),'AC3 transient failure is sanitized');
+select is((select last_error from capture_jobs where id=(select id from retry)),'media_unavailable','AC3 arbitrary error text cannot persist');
+select is((select status from capture_jobs where id=(select id from retry)),'pending','AC3 transient failure retries');
+select ok((select available_at > now() from capture_jobs where id=(select id from retry)),'AC3 retry has backoff');
+update capture_jobs set attempts=3,status='processing',locked_at=now()-interval '11 minutes' where id=(select id from retry);
+select * from claim_media_job();
+select is((select storage_state from capture_assets where id=(select asset_id from retry)),'failed','AC3 exhausted crashed workers make the asset terminal');
+select is((select count(*)::int from capture_jobs where capture_id=(select capture_id from saved2) and intent_phase='enriched'),0,'AC5 media-first completion waits for initial intent');
+update capture_jobs set status='failed',last_error='attempts_exhausted' where id=(select intent_job_id from saved2);
+select is((select count(*)::int from capture_jobs where capture_id=(select capture_id from saved2) and intent_phase='enriched'),1,'AC5 initial-terminal transition schedules waiting enrichment');
+select function_privs_are('public','claim_media_job',array[]::text[],'authenticated',array[]::text[],'AC7 owners cannot claim privileged download work');
+select function_privs_are('public','finish_media_attempt',array['uuid','integer','jsonb','text'],'anon',array[]::text[],'AC7 public cannot forge storage receipts');
+select is((select public from storage.buckets where id='capture-assets'),false,'AC7 bucket remains private');
+create function pg_temp.reject_media_job() returns trigger language plpgsql as $$
+begin
+  if new.job_type='media_download' then raise exception 'injected media failure'; end if;
+  return new;
+end;
+$$;
+create trigger reject_media_job before insert on capture_jobs for each row execute function pg_temp.reject_media_job();
+select throws_ok($$select * from persist_capture_with_intent_job('77777777-7777-7777-7777-777777777777','whatsapp','SM-media-rollback','attachment',null,null,null,now(),'{}','[{"contentType":"image/png"}]')$$,'P0001','injected media failure','AC1 media-job creation is part of the capture transaction');
+select is((select count(*)::int from captures where external_message_id='SM-media-rollback'),0,'AC1 failed media enqueue cannot leave a partial capture');
+select * from finish();
+rollback;

@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CaptureJobStore } from "@/lib/jobs/types";
 
-const factories = vi.hoisted(() => ({ store: vi.fn(), analyser: vi.fn() }));
+const factories = vi.hoisted(() => ({ store: vi.fn(), analyser: vi.fn(), media: vi.fn(() => async () => ({ status: "idle" })), reader: vi.fn() }));
+vi.mock("@/lib/assets/server", () => ({ createMediaProcessor: factories.media, createPrivateImageReader: factories.reader }));
 vi.mock("@/lib/jobs/server", () => ({ createCaptureJobStore: factories.store }));
 vi.mock("@/lib/processing/server", () => ({ createIntentAnalyser: factories.analyser }));
 // Resolve the application's aliases locally without changing shared test configuration.
@@ -24,6 +25,8 @@ describe("scheduled processing route", () => {
     expect(await response.text()).not.toContain(token);
     expect(factories.store).not.toHaveBeenCalled();
     expect(factories.analyser).not.toHaveBeenCalled();
+    expect(factories.media).not.toHaveBeenCalled();
+    expect(factories.reader).not.toHaveBeenCalled();
   });
 
   it("AC1 processes a durable pending job independently of an inbound request", async () => {
