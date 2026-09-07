@@ -43,7 +43,8 @@ function requiredEnvironmentVariable(
 }
 
 export function createAnthropicClient(): IntentMessagesClient {
-  return new Anthropic({ apiKey: requiredEnvironmentVariable("ANTHROPIC_API_KEY") });
+  // The durable queue owns retries. Ten bounded calls fit the route's five-minute budget.
+  return new Anthropic({ apiKey: requiredEnvironmentVariable("ANTHROPIC_API_KEY"), timeout: 20_000, maxRetries: 0 });
 }
 
 /**

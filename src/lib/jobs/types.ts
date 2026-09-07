@@ -53,9 +53,9 @@ export interface AnalysisRecordInput {
 export interface CaptureJobStore {
   claimNextJob(jobType: CaptureJobType): Promise<CaptureJob | undefined>;
   loadCapture(captureId: string): Promise<CaptureRecord | undefined>;
-  appendAnalysis(record: AnalysisRecordInput): Promise<string>;
-  completeJob(jobId: string): Promise<void>;
-  releaseJob(jobId: string, errorMessage: string): Promise<void>;
-  countPendingJobs(captureId: string, jobType: CaptureJobType): Promise<number>;
-  enqueueJob(captureId: string, jobType: CaptureJobType): Promise<string>;
+  finishAttempt(
+    job: CaptureJob,
+    record: AnalysisRecordInput | null,
+    errorCode?: string,
+  ): Promise<{ analysisId: string | null; resolutionJobId?: string } | undefined>;
 }

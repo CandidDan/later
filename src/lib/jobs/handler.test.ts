@@ -22,7 +22,7 @@ describe("handleProcessJobsRequest", () => {
   it("AC7 refuses an unauthenticated caller without touching intent processing", async () => {
     const processNext = vi.fn(async (): Promise<IntentProcessingOutcome> => succeeded);
 
-    const response = await handleProcessJobsRequest(request(), { secret: "s3cret", processNext });
+    const response = await handleProcessJobsRequest(request(), { secret: "TEST-ONLY-NOT-A-CREDENTIAL", processNext });
 
     expect(response.status).toBe(401);
     expect(processNext).not.toHaveBeenCalled();
@@ -32,7 +32,7 @@ describe("handleProcessJobsRequest", () => {
     const processNext = vi.fn(async (): Promise<IntentProcessingOutcome> => succeeded);
 
     const response = await handleProcessJobsRequest(request("Bearer wrong-secret"), {
-      secret: "s3cret",
+      secret: "TEST-ONLY-NOT-A-CREDENTIAL",
       processNext,
     });
 
@@ -62,8 +62,8 @@ describe("handleProcessJobsRequest", () => {
       async (): Promise<IntentProcessingOutcome> => outcomes.shift() ?? { status: "idle" },
     );
 
-    const response = await handleProcessJobsRequest(request("Bearer s3cret"), {
-      secret: "s3cret",
+    const response = await handleProcessJobsRequest(request("Bearer TEST-ONLY-NOT-A-CREDENTIAL"), {
+      secret: "TEST-ONLY-NOT-A-CREDENTIAL",
       processNext,
     });
     const body = await response.text();
@@ -77,8 +77,8 @@ describe("handleProcessJobsRequest", () => {
   it("AC1 stops at the batch ceiling instead of draining without bound", async () => {
     const processNext = vi.fn(async (): Promise<IntentProcessingOutcome> => succeeded);
 
-    await handleProcessJobsRequest(request("Bearer s3cret"), {
-      secret: "s3cret",
+    await handleProcessJobsRequest(request("Bearer TEST-ONLY-NOT-A-CREDENTIAL"), {
+      secret: "TEST-ONLY-NOT-A-CREDENTIAL",
       processNext,
       maxJobs: 3,
     });
