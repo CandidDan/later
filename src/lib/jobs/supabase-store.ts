@@ -75,6 +75,7 @@ export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): Ca
         captureId: requireString(claimed[0], "capture_id"),
         jobType,
         attempts: Number(claimed[0].attempts),
+        ...(claimed[0].intent_phase === "enriched" ? { intentPhase: "enriched" as const } : {}),
       };
     },
 
@@ -97,7 +98,7 @@ export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): Ca
       const assets = rowsFrom(
         await client
           .from("capture_assets")
-          .select("filename, media_type, byte_size")
+          .select("id, filename, media_type, byte_size, storage_path, storage_state, observed_media_type, stored_byte_size, sha256")
           .eq("capture_id", captureId)
           .order("created_at", { ascending: true }),
         "read the capture assets",
@@ -116,6 +117,13 @@ export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): Ca
         rawPayload: jsonObject(capture.raw_payload),
         assets: assets.map((asset) => ({
           filename: requireString(asset, "filename"),
+          ...(typeof asset.id === "string" ? {
+            id: asset.id, storagePath: requireString(asset, "storage_path"),
+            storageState: requireString(asset, "storage_state"),
+            observedMediaType: optionalString(asset, "observed_media_type"),
+            storedByteSize: typeof asset.stored_byte_size === "number" ? asset.stored_byte_size : null,
+            sha256: optionalString(asset, "sha256"),
+          } : {}),
           mediaType: optionalString(asset, "media_type"),
           byteSize: typeof asset.byte_size === "number" ? asset.byte_size : null,
         })),

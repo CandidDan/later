@@ -1,13 +1,14 @@
 import { timingSafeEqual } from "node:crypto";
 
 import type { IntentProcessingOutcome } from "../processing/intent";
+import type { MediaOutcome } from "../assets/process";
 
 const DEFAULT_MAX_JOBS = 10;
 
 export interface ProcessJobsDependencies {
   /** The shared secret callers must present. An empty value disables the endpoint. */
   secret: string;
-  processNext: () => Promise<IntentProcessingOutcome>;
+  processNext: () => Promise<IntentProcessingOutcome | MediaOutcome>;
   maxJobs?: number;
 }
 

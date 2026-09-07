@@ -2,19 +2,27 @@ import type { JsonValue } from "../capture/persist";
 
 export type { JsonValue };
 
-export type CaptureJobType = "intent_analysis" | "source_resolution";
+export type CaptureJobType = "intent_analysis" | "source_resolution" | "media_download";
 
 export interface CaptureJob {
   id: string;
   captureId: string;
   jobType: CaptureJobType;
   attempts: number;
+  assetId?: string;
+  intentPhase?: "initial" | "enriched";
 }
 
 export interface CaptureAssetRecord {
   filename: string;
   mediaType: string | null;
   byteSize: number | null;
+  id?: string;
+  storagePath?: string;
+  storageState?: string;
+  observedMediaType?: string | null;
+  storedByteSize?: number | null;
+  sha256?: string | null;
 }
 
 /**

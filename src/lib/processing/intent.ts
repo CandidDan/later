@@ -1,7 +1,8 @@
 import { IntentAnalysisError } from "./errors";
 import { IntentResultSchemaError, overallConfidence, type IntentResult } from "./intent-result";
-import { PIPELINE_VERSION, PROMPT_VERSION } from "./prompt";
+import { PIPELINE_VERSION, PROMPT_VERSION, MEDIA_PIPELINE_VERSION, MEDIA_PROMPT_VERSION } from "./prompt";
 import { buildIntentInputSnapshot } from "./intent-input";
+import { buildEnrichedIntentInput, type ReadPrivateImage } from "./media-input";
 import type { IntentAnalyser } from "./anthropic";
 import type { CaptureJobStore, JsonValue } from "../jobs/types";
 
@@ -20,6 +21,7 @@ export type IntentProcessingOutcome =
 export interface ProcessIntentJobDependencies {
   store: CaptureJobStore;
   analyse: IntentAnalyser;
+  readImage?: ReadPrivateImage;
 }
 
 /**
@@ -50,6 +52,7 @@ function toStorableResult(result: IntentResult): Record<string, JsonValue> {
 export async function processNextIntentJob({
   store,
   analyse,
+  readImage,
 }: ProcessIntentJobDependencies): Promise<IntentProcessingOutcome> {
   const job = await store.claimNextJob("intent_analysis");
 
@@ -64,11 +67,19 @@ export async function processNextIntentJob({
     return { status: "failed", jobId: job.id, captureId: job.captureId, errorCode: "capture_missing" };
   }
 
-  const inputSnapshot = buildIntentInputSnapshot(capture);
+  let inputSnapshot = buildIntentInputSnapshot(capture);
+  const pipelineVersion = job.intentPhase === "enriched" ? MEDIA_PIPELINE_VERSION : PIPELINE_VERSION;
+  const promptVersion = job.intentPhase === "enriched" ? MEDIA_PROMPT_VERSION : PROMPT_VERSION;
   let analysis;
 
   try {
-    analysis = await analyse(inputSnapshot);
+    if (job.intentPhase === "enriched") {
+      const enriched = await buildEnrichedIntentInput(capture, readImage ?? (async () => { throw new Error("private_image_reader_missing"); }));
+      inputSnapshot = enriched.snapshot;
+      analysis = await analyse(inputSnapshot, enriched.images);
+    } else {
+      analysis = await analyse(inputSnapshot);
+    }
   } catch (error) {
     const code = classifyFailure(error);
 
@@ -79,8 +90,8 @@ export async function processNextIntentJob({
       result: null,
       confidence: null,
       modelId: null,
-      promptVersion: PROMPT_VERSION,
-      pipelineVersion: PIPELINE_VERSION,
+      promptVersion,
+      pipelineVersion,
       errorCode: code,
     }, code);
 
@@ -94,8 +105,8 @@ export async function processNextIntentJob({
     result: toStorableResult(analysis.result),
     confidence: overallConfidence(analysis.result),
     modelId: analysis.modelId,
-    promptVersion: PROMPT_VERSION,
-    pipelineVersion: PIPELINE_VERSION,
+    promptVersion,
+    pipelineVersion,
     errorCode: null,
   });
 
