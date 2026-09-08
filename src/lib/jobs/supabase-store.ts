@@ -98,7 +98,7 @@ export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): Ca
       const assets = rowsFrom(
         await client
           .from("capture_assets")
-          .select("id, filename, media_type, byte_size, storage_path, storage_state, observed_media_type, stored_byte_size, sha256")
+          .select("id, filename, media_type, byte_size, storage_path, storage_state, observed_media_type, stored_byte_size, sha256, metadata")
           .eq("capture_id", captureId)
           .order("created_at", { ascending: true }),
         "read the capture assets",
@@ -117,6 +117,9 @@ export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): Ca
         rawPayload: jsonObject(capture.raw_payload),
         assets: assets.map((asset) => ({
           filename: requireString(asset, "filename"),
+          ...(typeof jsonObject(asset.metadata).role === "string"
+            ? { role: jsonObject(asset.metadata).role as string }
+            : {}),
           ...(typeof asset.id === "string" ? {
             id: asset.id, storagePath: requireString(asset, "storage_path"),
             storageState: requireString(asset, "storage_state"),

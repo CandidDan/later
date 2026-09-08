@@ -2,7 +2,11 @@ import type { JsonValue } from "../capture/persist";
 
 export type { JsonValue };
 
-export type CaptureJobType = "intent_analysis" | "source_resolution" | "media_download";
+export type CaptureJobType =
+  | "intent_analysis"
+  | "source_resolution"
+  | "media_download"
+  | "email_enrichment";
 
 export interface CaptureJob {
   id: string;
@@ -15,6 +19,8 @@ export interface CaptureJob {
 
 export interface CaptureAssetRecord {
   filename: string;
+  /** What this asset is to its channel — e.g. an email's parsed representation vs an attachment. */
+  role?: string;
   mediaType: string | null;
   byteSize: number | null;
   id?: string;

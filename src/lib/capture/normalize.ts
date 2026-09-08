@@ -1,4 +1,4 @@
-export type CaptureKind = "text" | "link" | "attachment" | "mixed" | "unknown";
+export type CaptureKind = "text" | "link" | "attachment" | "email" | "mixed" | "unknown";
 
 export type SourcePlatform = "instagram" | "youtube" | "spotify";
 
@@ -13,6 +13,12 @@ export interface CaptureAttachment {
 
 export interface ProviderNeutralCaptureInput {
   channel?: string;
+  /**
+   * Set only by a channel whose medium is itself the capture — an inbound email is one
+   * message however many parts it arrives in, so its kind is stated rather than derived
+   * from whether the body happened to contain text, a link or an attachment.
+   */
+  kind?: CaptureKind;
   rawText?: string;
   userNote?: string;
   externalMessageId?: string;
@@ -117,7 +123,7 @@ export function normalizeCaptureInput(input: ProviderNeutralCaptureInput): Norma
 
   return {
     channel: input.channel,
-    kind: deriveKind(input.rawText, urls, input.attachments),
+    kind: input.kind ?? deriveKind(input.rawText, urls, input.attachments),
     rawText: input.rawText,
     userNote: input.userNote,
     externalMessageId: input.externalMessageId,
