@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CaptureJobStore } from "@/lib/jobs/types";
 
-const factories = vi.hoisted(() => ({ store: vi.fn(), analyser: vi.fn(), media: vi.fn(() => async () => ({ status: "idle" })), reader: vi.fn() }));
+const factories = vi.hoisted(() => ({ store: vi.fn(), analyser: vi.fn(), media: vi.fn(() => async () => ({ status: "idle" })), email: vi.fn(() => async () => ({ status: "idle" })), reader: vi.fn() }));
 vi.mock("@/lib/assets/server", () => ({ createMediaProcessor: factories.media, createPrivateImageReader: factories.reader }));
+vi.mock("@/lib/email/server", () => ({ createEmailEnrichmentProcessor: factories.email }));
 vi.mock("@/lib/jobs/server", () => ({ createCaptureJobStore: factories.store }));
 vi.mock("@/lib/processing/server", () => ({ createIntentAnalyser: factories.analyser }));
 // Resolve the application's aliases locally without changing shared test configuration.
@@ -26,6 +27,7 @@ describe("scheduled processing route", () => {
     expect(factories.store).not.toHaveBeenCalled();
     expect(factories.analyser).not.toHaveBeenCalled();
     expect(factories.media).not.toHaveBeenCalled();
+    expect(factories.email).not.toHaveBeenCalled();
     expect(factories.reader).not.toHaveBeenCalled();
   });
 
@@ -51,6 +53,21 @@ describe("scheduled processing route", () => {
     expect(counts.reduce((n, r) => n + r.succeeded, 0)).toBe(1);
     expect(finish).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ attempts: 1 }), expect.objectContaining({ status: "succeeded", captureId: "capture-test" }));
     expect(JSON.stringify(counts)).not.toMatch(/test capture|TEST-ONLY|analysis-test/u);
+  });
+
+  it("AC2 an unconfigured inbound-email channel does not stop the other queues draining", async () => {
+    factories.email.mockImplementation(() => { throw new Error("email_configuration_invalid"); });
+    const claim = vi.fn(async () => ({ id: "job-media", captureId: "capture-media" }));
+    factories.media.mockReturnValue(async () => { await claim(); return { status: "succeeded", jobId: "job-media", captureId: "capture-media" }; });
+    factories.store.mockReturnValue({ claimNextJob: async () => undefined, loadCapture: async () => undefined, finishAttempt: async () => undefined });
+    factories.analyser.mockReturnValue(async () => { throw new Error("unused"); });
+    const { POST } = await import("./route");
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ succeeded: 2 });
+    expect(claim).toHaveBeenCalledTimes(2);
   });
 
   it("AC2 database/provider exceptions produce no secret-bearing output or logs", async () => {
