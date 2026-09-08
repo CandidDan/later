@@ -1,12 +1,12 @@
 ---
 id: "later-0008"
 title: "Accept lossless inbound email captures"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "claude-code-later-0008"
 created: "2026-09-06"
-started: ""
+started: "2026-09-08T07:11:39Z"
 branch: ""
 pr: ""
 issue: ""
