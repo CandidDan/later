@@ -1,12 +1,12 @@
 ---
 id: "later-0010"
 title: "Resolve the underlying source of a capture"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "codex-01a0a00d-6a7d-71c2-a910-e2100d2f0b22"
 created: "2026-09-06"
-started: ""
+started: "2026-09-14T13:14:48Z"
 branch: ""
 pr: ""
 issue: ""
