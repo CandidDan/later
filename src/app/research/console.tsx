@@ -6,9 +6,9 @@ import {
   INITIAL_CONSOLE_STATE,
   researchConsoleReducer,
   type ConsoleState,
-} from "@/lib/research/console-state";
-import type { CaptureContext, RevealedRun } from "@/lib/research/types";
-import { browserSupabaseClient } from "@/lib/supabase/browser";
+} from "../../lib/research/console-state";
+import type { CaptureContext, RevealedRun } from "../../lib/research/types";
+import { browserSupabaseClient } from "../../lib/supabase/browser";
 
 import {
   EmptyPanel,

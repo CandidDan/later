@@ -1,5 +1,5 @@
-import { INTENT_ACCURACIES, RECALL_STATUSES } from "@/lib/research/types";
-import type { CaptureContext, RevealedRun } from "@/lib/research/types";
+import { INTENT_ACCURACIES, RECALL_STATUSES } from "../../lib/research/types";
+import type { CaptureContext, RevealedRun } from "../../lib/research/types";
 
 const RECALL_LABELS: Record<(typeof RECALL_STATUSES)[number], string> = {
   remembered: "I remember why I saved this",
