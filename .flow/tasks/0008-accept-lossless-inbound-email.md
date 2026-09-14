@@ -1,7 +1,7 @@
 ---
 id: "later-0008"
 title: "Accept lossless inbound email captures"
-status: "in_review"
+status: "done"
 priority: 3
 project: "later"
 owner: "claude-code-later-0008"
