@@ -1,7 +1,7 @@
 ---
 id: "later-0009"
 title: "Evaluate captured intent without hindsight"
-status: "in_review"
+status: "done"
 priority: 3
 project: "later"
 owner: "claude-code-20260914T072107Z"
