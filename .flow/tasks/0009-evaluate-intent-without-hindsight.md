@@ -1,12 +1,12 @@
 ---
 id: "later-0009"
 title: "Evaluate captured intent without hindsight"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "claude-code-20260914T072107Z"
 created: "2026-09-06"
-started: ""
+started: "2026-09-14T07:21:07Z"
 branch: ""
 pr: ""
 issue: ""
