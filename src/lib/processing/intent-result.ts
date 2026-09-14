@@ -39,6 +39,7 @@ export const EVIDENCE_FIELDS = [
   "capturedAt",
   "messageMetadata",
   "assets",
+  "email",
 ] as const;
 
 export type EvidenceField = (typeof EVIDENCE_FIELDS)[number];
