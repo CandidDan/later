@@ -1,14 +1,14 @@
 ---
 id: "later-0009"
 title: "Evaluate captured intent without hindsight"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "claude-code-20260914T072107Z"
 created: "2026-09-06"
 started: "2026-09-14T07:21:07Z"
-branch: ""
-pr: ""
+branch: "flow/later-0009-evaluate-intent-without-hindsight"
+pr: "https://github.com/CandidDan/later/pull/12"
 issue: ""
 blocked_reason: ""
 serves: ["G1"]
