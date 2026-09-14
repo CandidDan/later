@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(31);
+select plan(34);
 
 select has_table('public', 'capture_evaluations', 'capture_evaluations table exists');
 select col_is_fk('public', 'capture_evaluations', 'capture_id', 'evaluations belong to captures');
@@ -132,6 +132,18 @@ select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111
 
 select is((select count(*)::integer from public.capture_evaluations), 2,
   'an evaluator reads only their own evaluations');
+select is(
+  (select count(*)::integer from public.research_pending_evaluations),
+  1, 'only the unevaluated capture with a successful run is offered');
+select is(
+  (select capture_id from public.research_pending_evaluations),
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3'::uuid,
+  'the already-evaluated capture is not offered again');
+select is(
+  (select count(*)::integer from information_schema.columns
+   where table_schema = 'public' and table_name = 'research_pending_evaluations'
+     and column_name in ('result', 'model_id', 'confidence', 'prompt_version', 'input_snapshot')),
+  0, 'the recall-phase view exposes no analysis column');
 select lives_ok(
   $$update public.capture_evaluations set notes = 'still relevant'
     where id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeee1'$$,

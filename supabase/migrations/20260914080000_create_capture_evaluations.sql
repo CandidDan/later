@@ -158,3 +158,34 @@ create policy "evaluators rate own evaluations"
 
 revoke all on public.capture_evaluations from anon, authenticated;
 grant select, insert, update on public.capture_evaluations to authenticated;
+
+-- Selection of the next capture to evaluate. Expressed as a security-invoker view so the
+-- evaluator's own row-level security still applies: the console cannot widen its reach by
+-- asking a different question. The view exposes capture-time columns only — no analysis
+-- result, model id or confidence can leak through it during the recall phase.
+create view public.research_pending_evaluations
+with (security_invoker = true) as
+select
+  c.id as capture_id,
+  c.user_id,
+  c.capture_channel,
+  c.capture_kind,
+  c.raw_text,
+  c.user_note,
+  c.source_platform,
+  c.captured_at
+from public.captures c
+where exists (
+  select 1 from public.capture_analyses a
+  where a.capture_id = c.id
+    and a.analysis_type = 'intent'
+    and a.status = 'succeeded'
+)
+and not exists (
+  select 1 from public.capture_evaluations e
+  where e.capture_id = c.id
+    and e.evaluator_id = c.user_id
+);
+
+revoke all on public.research_pending_evaluations from anon, authenticated;
+grant select on public.research_pending_evaluations to authenticated;
