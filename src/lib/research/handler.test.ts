@@ -40,10 +40,10 @@ const sonnetRun: RevealedRun = { ...haikuRun, evaluationId: SONNET_EVALUATION, a
 
 function store(overrides: Partial<ResearchStore> = {}): ResearchStore {
   return {
-    nextUnevaluatedCapture: async () => capture,
+    nextUnevaluatedCapture: async () => ({ capture, recallStored: false }),
     recordRecall: async () => ({ captureId: CAPTURE_ID, runs: 2, repeated: false }),
     revealRuns: async () => ({ status: "revealed", captureId: CAPTURE_ID, runs: [haikuRun, sonnetRun] }),
-    recordRating: async () => ({ status: "rated" }),
+    recordRating: async () => ({ status: "rated", repeated: false }),
     ...overrides,
   };
 }
@@ -109,6 +109,32 @@ describe("research API", () => {
     expect(JSON.stringify(payload)).not.toMatch(
       /summary|confidence|model|prompt_version|promptVersion|analysis/iu,
     );
+  });
+
+  it("AC6 resumes persisted recall directly at reveal after client state is lost", async () => {
+    const revealRuns = vi.fn<ResearchStore["revealRuns"]>(async () => ({
+      status: "revealed",
+      captureId: CAPTURE_ID,
+      runs: [haikuRun, sonnetRun],
+    }));
+    const response = await handleNextEvaluation(
+      get("/api/research/next"),
+      dependencies({
+        storeFor: () =>
+          store({
+            nextUnevaluatedCapture: async () => ({ capture, recallStored: true }),
+            revealRuns,
+          }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      phase: "reveal",
+      capture,
+      runs: [haikuRun, sonnetRun],
+    });
+    expect(revealRuns).toHaveBeenCalledWith(CAPTURE_ID);
   });
 
   it("AC3 the recall response reveals nothing beyond the fact that the answer was stored", async () => {
@@ -182,7 +208,7 @@ describe("research API", () => {
         store({
           recordRating: async (submission) => {
             rated.push(submission.evaluationId);
-            return { status: "rated" };
+            return { status: "rated", repeated: false };
           },
         }),
     });
@@ -204,7 +230,11 @@ describe("research API", () => {
 
     expect(responses.map((response) => response.status)).toEqual([200, 200]);
     expect(rated).toEqual([HAIKU_EVALUATION, SONNET_EVALUATION]);
-    expect(await responses[0].json()).toEqual({ phase: "rated", evaluationId: HAIKU_EVALUATION });
+    expect(await responses[0].json()).toEqual({
+      phase: "rated",
+      evaluationId: HAIKU_EVALUATION,
+      repeated: false,
+    });
   });
 
   it("AC6 reports a stable outcome when nothing is eligible", async () => {

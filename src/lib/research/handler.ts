@@ -73,11 +73,25 @@ export function handleNextEvaluation(
   dependencies: ResearchDependencies,
 ): Promise<Response> {
   return withSession(request, dependencies, async (store) => {
-    const capture = await store.nextUnevaluatedCapture();
+    const pending = await store.nextUnevaluatedCapture();
 
-    return capture
-      ? json({ phase: "recall", capture }, 200)
-      : json({ phase: "empty" }, 200);
+    if (!pending) {
+      return json({ phase: "empty" }, 200);
+    }
+
+    if (!pending.recallStored) {
+      return json({ phase: "recall", capture: pending.capture }, 200);
+    }
+
+    // Resume from persisted state after a refresh/crash. The store still verifies that recall
+    // rows exist before returning analysis fields; the view's boolean is routing, not authority.
+    const outcome = await store.revealRuns(pending.capture.captureId);
+
+    if (outcome.status === "recall_required") {
+      throw new Error("pending evaluation lost its persisted recall");
+    }
+
+    return json({ phase: "reveal", capture: pending.capture, runs: outcome.runs }, 200);
   });
 }
 
@@ -144,6 +158,9 @@ export function handleRatingSubmission(
       return json({ error: "recall_required" }, 409);
     }
 
-    return json({ phase: "rated", evaluationId: submission.evaluationId }, 200);
+    return json(
+      { phase: "rated", evaluationId: submission.evaluationId, repeated: outcome.repeated },
+      200,
+    );
   });
 }

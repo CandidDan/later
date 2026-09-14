@@ -18,6 +18,7 @@ export type ConsoleState =
 export type ConsoleEvent =
   | { type: "loading" }
   | { type: "loaded"; capture: CaptureContext | undefined }
+  | { type: "resumed"; capture: CaptureContext; runs: readonly RevealedRun[] }
   | { type: "recall_stored" }
   | { type: "revealed"; runs: readonly RevealedRun[] }
   | { type: "rated"; evaluationId: string }
@@ -34,6 +35,17 @@ export function researchConsoleReducer(state: ConsoleState, event: ConsoleEvent)
     case "loaded":
       // One capture at a time. There is no list to hold, so there is no backlog to display.
       return event.capture ? { phase: "recall", capture: event.capture } : { phase: "empty" };
+
+    case "resumed":
+      // A fresh client may restore model output only when the server reports persisted recall.
+      return state.phase === "loading"
+        ? {
+            phase: "reveal",
+            capture: event.capture,
+            runs: event.runs,
+            rated: event.runs.filter((run) => run.rated).map((run) => run.evaluationId),
+          }
+        : state;
 
     case "recall_stored":
       return state.phase === "recall" ? { phase: "recorded", capture: state.capture } : state;
@@ -63,9 +75,4 @@ export function researchConsoleReducer(state: ConsoleState, event: ConsoleEvent)
     case "failed":
       return { phase: "error", message: event.message };
   }
-}
-
-/** True once every revealed run has been rated, so nothing is left half-recorded. */
-export function isEvaluationComplete(state: ConsoleState): boolean {
-  return state.phase === "reveal" && state.rated.length === state.runs.length;
 }

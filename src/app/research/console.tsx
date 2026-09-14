@@ -80,6 +80,16 @@ export default function ResearchConsole() {
 
     try {
       const payload = await call(active, "/api/research/next");
+
+      if (payload.phase === "reveal") {
+        dispatch({
+          type: "resumed",
+          capture: payload.capture as CaptureContext,
+          runs: (payload.runs as RevealedRun[]) ?? [],
+        });
+        return;
+      }
+
       dispatch({
         type: "loaded",
         capture: (payload.capture as CaptureContext | undefined) ?? undefined,

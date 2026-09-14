@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(34);
+select plan(37);
 
 select has_table('public', 'capture_evaluations', 'capture_evaluations table exists');
 select col_is_fk('public', 'capture_evaluations', 'capture_id', 'evaluations belong to captures');
@@ -56,6 +56,22 @@ select is(
   (select count(distinct analysis_id)::integer from public.capture_evaluations
    where capture_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1'),
   2, 'each run is rated against its own analysis id');
+
+-- AC6: persisted recall remains discoverable after the client loses all in-memory state.
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', true);
+select is(
+  (select count(*)::integer from public.research_pending_evaluations),
+  2, 'fresh captures and persisted incomplete evaluations are both offered');
+select is(
+  (select recall_stored from public.research_pending_evaluations
+   where capture_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1'),
+  true, 'an incomplete evaluation advertises persisted recall for direct resume');
+select is(
+  (select recall_stored from public.research_pending_evaluations
+   where capture_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3'),
+  false, 'a fresh capture remains in the unaided recall phase');
+reset role;
 
 select throws_ok(
   $$insert into public.capture_evaluations (capture_id, analysis_id, evaluator_id, recall_status)

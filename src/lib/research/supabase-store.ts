@@ -49,7 +49,7 @@ export interface ResearchTableClient {
  * they have answered from memory.
  */
 const CAPTURE_COLUMNS =
-  "capture_id, capture_channel, capture_kind, raw_text, user_note, source_platform, captured_at";
+  "capture_id, capture_channel, capture_kind, raw_text, user_note, source_platform, captured_at, recall_stored";
 
 function rowsFrom(outcome: QueryOutcome, action: string): Record<string, unknown>[] {
   if (outcome.error) {
@@ -119,6 +119,8 @@ export function createSupabaseResearchStore(
           .from("research_pending_evaluations")
           .select(CAPTURE_COLUMNS)
           .eq("user_id", evaluatorId)
+          // A persisted-but-incomplete evaluation must survive a refresh before fresh work.
+          .order("recall_stored", { ascending: false })
           .order("captured_at", { ascending: true })
           .limit(1),
         "select the next capture to evaluate",
@@ -137,7 +139,10 @@ export function createSupabaseResearchStore(
         "select the capture's assets",
       );
 
-      return toCaptureContext({ ...captures[0], assets });
+      return {
+        capture: toCaptureContext({ ...captures[0], assets }),
+        recallStored: captures[0].recall_stored === true,
+      };
     },
 
     async recordRecall(submission: RecallSubmission): Promise<RecallOutcome | "no_eligible_runs"> {
@@ -232,7 +237,7 @@ export function createSupabaseResearchStore(
       const existing = rowsFrom(
         await client
           .from("capture_evaluations")
-          .select("id, revealed_at")
+          .select("id, revealed_at, rated_at")
           .eq("id", submission.evaluationId)
           .eq("evaluator_id", evaluatorId),
         "read the evaluation being rated",
@@ -244,6 +249,10 @@ export function createSupabaseResearchStore(
 
       if (typeof existing[0].revealed_at !== "string") {
         return { status: "not_revealed" };
+      }
+
+      if (typeof existing[0].rated_at === "string") {
+        return { status: "rated", repeated: true };
       }
 
       const updated = rowsFrom(
@@ -258,11 +267,13 @@ export function createSupabaseResearchStore(
           })
           .eq("id", submission.evaluationId)
           .eq("evaluator_id", evaluatorId)
+          .is("rated_at", null)
           .select("id"),
         "store the rating",
       );
 
-      return updated.length === 0 ? { status: "unknown" } : { status: "rated" };
+      // The conditional update also makes simultaneous retries idempotent.
+      return { status: "rated", repeated: updated.length === 0 };
     },
   };
 }

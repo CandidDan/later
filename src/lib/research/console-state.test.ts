@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   INITIAL_CONSOLE_STATE,
-  isEvaluationComplete,
   researchConsoleReducer,
   type ConsoleState,
 } from "./console-state";
@@ -62,6 +61,22 @@ describe("research console state", () => {
     expect(revealed).toEqual({ phase: "reveal", capture, runs: [haikuRun, sonnetRun], rated: [] });
   });
 
+  it("AC6 restores a persisted incomplete evaluation after client state is lost", () => {
+    const ratedHaiku = { ...haikuRun, rated: true };
+    const resumed = reduce(INITIAL_CONSOLE_STATE, {
+      type: "resumed",
+      capture,
+      runs: [ratedHaiku, sonnetRun],
+    });
+
+    expect(resumed).toEqual({
+      phase: "reveal",
+      capture,
+      runs: [ratedHaiku, sonnetRun],
+      rated: [haikuRun.evaluationId],
+    });
+  });
+
   it("AC5 tracks each run's rating separately and only finishes when both are recorded", () => {
     const revealed = reduce(
       INITIAL_CONSOLE_STATE,
@@ -72,7 +87,6 @@ describe("research console state", () => {
     const oneRated = reduce(revealed, { type: "rated", evaluationId: haikuRun.evaluationId });
 
     expect(oneRated).toMatchObject({ phase: "reveal", rated: [haikuRun.evaluationId] });
-    expect(isEvaluationComplete(oneRated)).toBe(false);
     // A repeated rating is not a second data point.
     expect(reduce(oneRated, { type: "rated", evaluationId: haikuRun.evaluationId })).toEqual(oneRated);
     expect(

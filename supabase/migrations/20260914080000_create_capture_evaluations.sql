@@ -173,7 +173,12 @@ select
   c.raw_text,
   c.user_note,
   c.source_platform,
-  c.captured_at
+  c.captured_at,
+  exists (
+    select 1 from public.capture_evaluations e
+    where e.capture_id = c.id
+      and e.evaluator_id = c.user_id
+  ) as recall_stored
 from public.captures c
 where exists (
   select 1 from public.capture_analyses a
@@ -181,10 +186,18 @@ where exists (
     and a.analysis_type = 'intent'
     and a.status = 'succeeded'
 )
-and not exists (
-  select 1 from public.capture_evaluations e
-  where e.capture_id = c.id
-    and e.evaluator_id = c.user_id
+and (
+  not exists (
+    select 1 from public.capture_evaluations e
+    where e.capture_id = c.id
+      and e.evaluator_id = c.user_id
+  )
+  or exists (
+    select 1 from public.capture_evaluations e
+    where e.capture_id = c.id
+      and e.evaluator_id = c.user_id
+      and e.rated_at is null
+  )
 );
 
 revoke all on public.research_pending_evaluations from anon, authenticated;

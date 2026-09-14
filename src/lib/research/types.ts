@@ -61,11 +61,20 @@ export interface RecallOutcome {
   repeated: boolean;
 }
 
+/** The next unit of work, including whether unaided recall already survived a prior session. */
+export interface PendingEvaluation {
+  capture: CaptureContext;
+  recallStored: boolean;
+}
+
 export type RevealOutcome =
   | { status: "revealed"; captureId: string; runs: readonly RevealedRun[] }
   | { status: "recall_required" };
 
-export type RatingOutcome = { status: "rated" } | { status: "unknown" } | { status: "not_revealed" };
+export type RatingOutcome =
+  | { status: "rated"; repeated: boolean }
+  | { status: "unknown" }
+  | { status: "not_revealed" };
 
 /**
  * The data the console needs, expressed so the handlers can be tested without a database.
@@ -73,8 +82,8 @@ export type RatingOutcome = { status: "rated" } | { status: "unknown" } | { stat
  * remains the enforcement, not a filter the application remembers to apply.
  */
 export interface ResearchStore {
-  /** The oldest capture with a successful intent run this evaluator has not yet evaluated. */
-  nextUnevaluatedCapture(): Promise<CaptureContext | undefined>;
+  /** Prefer an incomplete persisted evaluation, otherwise return the oldest fresh capture. */
+  nextUnevaluatedCapture(): Promise<PendingEvaluation | undefined>;
   recordRecall(submission: RecallSubmission): Promise<RecallOutcome | "no_eligible_runs">;
   /** Marks the runs revealed and returns them, or refuses while recall is missing. */
   revealRuns(captureId: string): Promise<RevealOutcome>;

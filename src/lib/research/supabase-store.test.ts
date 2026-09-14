@@ -105,26 +105,57 @@ describe("supabase research store", () => {
           user_note: null,
           source_platform: null,
           captured_at: "2026-09-01T10:00:00Z",
+          recall_stored: false,
         },
       ],
       "capture_assets:select": [{ filename: "photo.jpg", media_type: "image/jpeg" }],
     });
 
-    const capture = await createSupabaseResearchStore(client, EVALUATOR).nextUnevaluatedCapture();
+    const pending = await createSupabaseResearchStore(client, EVALUATOR).nextUnevaluatedCapture();
 
-    expect(capture).toEqual({
-      captureId: CAPTURE_ID,
-      channel: "whatsapp",
-      captureKind: "url",
-      rawText: "https://example.test/pasta",
-      userNote: null,
-      sourcePlatform: null,
-      capturedAt: "2026-09-01T10:00:00Z",
-      assets: [{ filename: "photo.jpg", mediaType: "image/jpeg" }],
+    expect(pending).toEqual({
+      recallStored: false,
+      capture: {
+        captureId: CAPTURE_ID,
+        channel: "whatsapp",
+        captureKind: "url",
+        rawText: "https://example.test/pasta",
+        userNote: null,
+        sourcePlatform: null,
+        capturedAt: "2026-09-01T10:00:00Z",
+        assets: [{ filename: "photo.jpg", mediaType: "image/jpeg" }],
+      },
     });
     expect(calls.map((call) => call.table)).not.toContain("capture_analyses");
     expect(calls[0].columns).not.toMatch(/result|model_id|confidence|prompt_version/u);
     expect(calls[0].filters).toContainEqual({ kind: "limit", column: "", value: 1 });
+    expect(calls[0].filters).toContainEqual({
+      kind: "order",
+      column: "recall_stored",
+      value: false,
+    });
+  });
+
+  it("AC6 keeps persisted but unrated recall reachable after client state is lost", async () => {
+    const { client } = fakeClient({
+      "research_pending_evaluations:select": [
+        {
+          capture_id: CAPTURE_ID,
+          capture_channel: "whatsapp",
+          capture_kind: "url",
+          raw_text: "https://example.test/pasta",
+          user_note: null,
+          source_platform: null,
+          captured_at: "2026-09-01T10:00:00Z",
+          recall_stored: true,
+        },
+      ],
+      "capture_assets:select": [],
+    });
+
+    await expect(
+      createSupabaseResearchStore(client, EVALUATOR).nextUnevaluatedCapture(),
+    ).resolves.toMatchObject({ recallStored: true, capture: { captureId: CAPTURE_ID } });
   });
 
   it("AC6 reports no capture rather than inventing one when the view is empty", async () => {
@@ -296,7 +327,7 @@ describe("supabase research store", () => {
         consumedBeforeEvaluation: false,
         notes: null,
       }),
-    ).resolves.toEqual({ status: "rated" });
+    ).resolves.toEqual({ status: "rated", repeated: false });
 
     const [update] = callsTo(calls, "capture_evaluations", "update");
     expect(update.values).toMatchObject({
@@ -307,7 +338,31 @@ describe("supabase research store", () => {
     });
     expect(update.filters).toContainEqual({ kind: "eq", column: "id", value: HAIKU_EVALUATION });
     expect(update.filters).toContainEqual({ kind: "eq", column: "evaluator_id", value: EVALUATOR });
+    expect(update.filters).toContainEqual({ kind: "is", column: "rated_at", value: null });
     expect(callsTo(calls, "capture_analyses", "update")).toEqual([]);
+  });
+
+  it("AC6 treats a repeated rating as a no-op instead of overwriting evidence", async () => {
+    const { client, calls } = fakeClient({
+      "capture_evaluations:select": [
+        {
+          id: HAIKU_EVALUATION,
+          revealed_at: "2026-09-14T07:00:00Z",
+          rated_at: "2026-09-14T07:05:00Z",
+        },
+      ],
+    });
+
+    await expect(
+      createSupabaseResearchStore(client, EVALUATOR).recordRating({
+        evaluationId: HAIKU_EVALUATION,
+        intentAccuracy: "wrong",
+        stillInterested: false,
+        consumedBeforeEvaluation: true,
+        notes: "conflicting retry",
+      }),
+    ).resolves.toEqual({ status: "rated", repeated: true });
+    expect(callsTo(calls, "capture_evaluations", "update")).toEqual([]);
   });
 
   it("AC6 refuses a rating for an unknown row or one that was never revealed", async () => {
@@ -334,14 +389,15 @@ describe("supabase research store", () => {
   });
 
   it("AC6 turns a database error into a failure instead of an empty result", async () => {
+    const failing = Promise.resolve({ data: null, error: { message: "permission denied" } });
+    const ordered = {
+      order: () => ordered,
+      limit: () => failing,
+    };
     const client = {
       from: () => ({
         select: () => ({
-          eq: () => ({
-            order: () => ({
-              limit: () => Promise.resolve({ data: null, error: { message: "permission denied" } }),
-            }),
-          }),
+          eq: () => ordered,
         }),
       }),
     } as unknown as ResearchTableClient;
