@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { digest, type DownloadedMedia, type MediaEvidence } from "../assets/media";
 import type { EmailRetrievalConfiguration } from "./config";
 import { processNextEmailEnrichmentJob } from "./enrich";
-import { parseStoredRepresentation } from "./representation";
+import { buildStoredRepresentation, serializeRepresentation, parseStoredRepresentation } from "./representation";
 import type { EmailAsset, EmailEnrichmentJob, EmailEnrichmentStore } from "./store";
 
 const config: EmailRetrievalConfiguration = {
@@ -372,6 +372,27 @@ describe("email enrichment", () => {
     expect(vi.mocked(fetcher).mock.calls.map(([input]) => String(input))).not.toContain(
       "https://inbound-cdn.resend.com/att-1?signature=sig-1",
     );
+  });
+
+  it("AC6 reconciles uploaded email bytes without refetching or changing provenance", async () => {
+    const recorder = recordingStore([REPRESENTATION]);
+    const bytes = serializeRepresentation(buildStoredRepresentation(
+      EMAIL_ID, emailResponse, "2026-09-08T10:00:30.000Z",
+    ));
+    recorder.objects.set(REPRESENTATION.storagePath, {
+      bytes, mediaType: "application/json", byteSize: bytes.length, sha256: digest(bytes),
+    });
+    const fetcher = fakeFetch({}); // The provider may be unavailable after the upload.
+
+    const outcome = await processNextEmailEnrichmentJob(recorder.store, config, fetcher);
+
+    expect(outcome.status).toBe("succeeded");
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(recorder.objects.get(REPRESENTATION.storagePath)?.bytes).toEqual(bytes);
+    expect(recorder.finishedAssets[0]).toMatchObject({
+      assetId: REPRESENTATION.id,
+      evidence: { sha256: digest(bytes), byteSize: bytes.length, mediaType: "application/json" },
+    });
   });
 
   it("skips assets a previous attempt already settled", async () => {

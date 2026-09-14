@@ -7,7 +7,7 @@ insert into auth.users(id,email) values ('88888888-8888-8888-8888-888888888888',
 -- AC2: one signed event commits one capture, one initial intent job and one enrichment job.
 create temp table saved as select * from persist_capture_with_intent_job(
  '88888888-8888-8888-8888-888888888888','email','resend-email-1','email','Worth reading',null,null,now(),
- '{"provider":"resend","emailId":"resend-email-1","urls":["https://example.com/article"]}',
+ '{"provider":"resend","event":{"type":"email.received","data":{"email_id":"resend-email-1"}},"emailId":"resend-email-1","urls":["https://example.com/article"]}',
  '[{"role":"email_representation","fileName":"email.json","contentType":"application/json"},
    {"role":"email_attachment","id":"att-1","fileName":"brief.pdf","contentType":"application/pdf"},
    {"role":"email_attachment","id":"att-2","fileName":"cover.png","contentType":"image/png"}]');
@@ -17,7 +17,7 @@ select is((select count(*)::int from capture_assets where capture_id=(select cap
 select is((select count(*)::int from capture_jobs where capture_id=(select capture_id from saved) and job_type='email_enrichment' and status='pending'),1,'AC2 exactly one enrichment job is queued');
 select is((select count(*)::int from capture_jobs where capture_id=(select capture_id from saved) and job_type='intent_analysis'),1,'AC2 exactly one initial intent job is queued');
 select is((select count(*)::int from capture_jobs where capture_id=(select capture_id from saved) and job_type='media_download'),0,'AC2 email attachments do not enter the WhatsApp media queue');
-select ok((select raw_payload ? 'event' from captures where external_message_id='resend-email-1'),'AC2 the signed event payload is retained');
+select is((select raw_payload->'event' from captures where external_message_id='resend-email-1'),'{"type":"email.received","data":{"email_id":"resend-email-1"}}'::jsonb,'AC2 the signed event payload is retained unchanged');
 
 -- AC4: a replayed delivery of the same email id changes nothing.
 select lives_ok($$select * from persist_capture_with_intent_job('88888888-8888-8888-8888-888888888888','email','resend-email-1','email','Worth reading',null,null,now(),'{"provider":"resend","deliveryId":"second"}','[{"role":"email_representation","fileName":"email.json"}]')$$,'AC4 a replayed delivery succeeds');

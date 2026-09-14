@@ -57,16 +57,17 @@ async function storeRepresentation(
   fetcher: typeof fetch,
   now: () => Date,
 ): Promise<void> {
-  const response = await retrieveReceivedEmail(emailId, config, fetcher);
-  const bytes = serializeRepresentation(
-    buildStoredRepresentation(emailId, response, now().toISOString()),
+  // A crashed attempt can leave the object committed with no database receipt. Its
+  // bytes (including retrievedAt) must supply the receipt, not a new provider response.
+  const existing = await store.read(asset);
+  const bytes = existing?.bytes ?? serializeRepresentation(
+    buildStoredRepresentation(emailId, await retrieveReceivedEmail(emailId, config, fetcher), now().toISOString()),
   );
 
   if (bytes.length > config.maxBytes) throw new EmailError("email_too_large");
 
-  const media = validateMedia(bytes, REPRESENTATION_MEDIA_TYPE, REPRESENTATION_MEDIA_TYPE, config.maxBytes);
-  // A crashed attempt can leave the object committed with no database receipt.
-  if (!(await store.read(asset))) await store.put(asset, media);
+  const media = validateMedia(bytes, existing?.mediaType ?? REPRESENTATION_MEDIA_TYPE, REPRESENTATION_MEDIA_TYPE, config.maxBytes);
+  if (!existing) await store.put(asset, media);
 
   await store.finishAsset(job, asset, {
     mediaType: media.mediaType,
