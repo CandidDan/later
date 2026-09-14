@@ -1,14 +1,14 @@
 ---
 id: "later-0008"
 title: "Accept lossless inbound email captures"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "claude-code-later-0008"
 created: "2026-09-06"
 started: "2026-09-08T07:11:39Z"
-branch: ""
-pr: ""
+branch: "flow/later-0008-inbound-email"
+pr: "https://github.com/CandidDan/later/pull/10"
 issue: ""
 blocked_reason: ""
 serves: ["G1"]
