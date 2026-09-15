@@ -1,12 +1,12 @@
 ---
 id: "later-0011"
 title: "Resolve the relevant segment from available source material"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "codex-01a0a55e-191e-7290-a889-a647e52bd32b"
 created: "2026-09-06"
-started: ""
+started: "2026-09-15T14:01:22Z"
 branch: ""
 pr: ""
 issue: ""
