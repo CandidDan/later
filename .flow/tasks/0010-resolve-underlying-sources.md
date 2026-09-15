@@ -1,14 +1,14 @@
 ---
 id: "later-0010"
 title: "Resolve the underlying source of a capture"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "codex-01a0a00d-6a7d-71c2-a910-e2100d2f0b22"
 created: "2026-09-06"
 started: "2026-09-14T13:14:48Z"
-branch: ""
-pr: ""
+branch: "flow/later-0010-resolve-underlying-sources"
+pr: "https://github.com/CandidDan/later/pull/13"
 issue: ""
 blocked_reason: ""
 serves: ["G1"]
