@@ -102,6 +102,17 @@ describe("createSupabaseCaptureJobStore", () => {
     expect(calls).toEqual([{ table: "claim_source_resolution_job", operation: "rpc", values: {}, filters: [] }]);
   });
 
+  it("AC1 claims segment work through its independent RPC with the exact source analysis id", async () => {
+    const { client, calls } = createFakeClient([{ data: [{
+      id: "segment-job-1", capture_id: "capture-1", attempts: 1, source_analysis_id: "source-1",
+    }] }]);
+    expect(await createSupabaseCaptureJobStore(client).claimNextJob("segment_resolution")).toEqual({
+      id: "segment-job-1", captureId: "capture-1", jobType: "segment_resolution", attempts: 1,
+      sourceAnalysisId: "source-1",
+    });
+    expect(calls).toEqual([{ table: "claim_segment_resolution_job", operation: "rpc", values: {}, filters: [] }]);
+  });
+
   it("sends the lease fence and safe failure in one finalization RPC", async () => {
     const { client, calls } = createFakeClient([{ data: [{ analysis_id: null, resolution_job_id: null }] }]);
     const store = createSupabaseCaptureJobStore(client);
@@ -128,6 +139,18 @@ describe("createSupabaseCaptureJobStore", () => {
     expect(result).toStrictEqual({ analysisId: "source-1", segmentJobId: "segment-1" });
     expect(calls).toEqual([{ table: "finish_source_resolution_attempt", operation: "rpc", values: {
       p_job_id: "source-job-1", p_attempt: 2, p_record: null, p_error_code: "provider_unavailable",
+    }, filters: [] }]);
+  });
+
+  it("AC6 finalizes segment work through the fenced dedicated RPC", async () => {
+    const { client, calls } = createFakeClient([{ data: [{ analysis_id: "segment-analysis-1" }] }]);
+    const result = await createSupabaseCaptureJobStore(client).finishAttempt({
+      id: "segment-job-1", captureId: "capture-1", jobType: "segment_resolution", attempts: 2,
+      sourceAnalysisId: "source-1",
+    }, null, "provider_unavailable");
+    expect(result).toStrictEqual({ analysisId: "segment-analysis-1" });
+    expect(calls).toEqual([{ table: "finish_segment_resolution_attempt", operation: "rpc", values: {
+      p_job_id: "segment-job-1", p_attempt: 2, p_record: null, p_error_code: "provider_unavailable",
     }, filters: [] }]);
   });
 
@@ -207,6 +230,26 @@ describe("createSupabaseCaptureJobStore", () => {
         { kind: "eq", column: "status", value: "succeeded" },
       ]),
     });
+  });
+
+  it("AC1 loads exactly the selected successful source analysis including deterministic model provenance", async () => {
+    const { client, calls } = createFakeClient([{ data: [{
+      id: "source-1", capture_id: "capture-1", input_snapshot: { intentAnalysis: { id: "intent-1" } },
+      result: { status: "resolved", transcriptUrl: "https://example.com/transcript.vtt" }, confidence: 1,
+      model_id: null, prompt_version: "source-direct-v0.1", pipeline_version: "source-pipeline-v0.1",
+    }] }]);
+    expect(await createSupabaseCaptureJobStore(client).loadSourceAnalysis("source-1", "capture-1"))
+      .toStrictEqual({
+        id: "source-1", captureId: "capture-1", inputSnapshot: { intentAnalysis: { id: "intent-1" } },
+        result: { status: "resolved", transcriptUrl: "https://example.com/transcript.vtt" }, confidence: 1,
+        modelId: null, promptVersion: "source-direct-v0.1", pipelineVersion: "source-pipeline-v0.1",
+      });
+    expect(calls[0]).toMatchObject({ table: "capture_analyses", operation: "select",
+      filters: expect.arrayContaining([
+        { kind: "eq", column: "id", value: "source-1" },
+        { kind: "eq", column: "analysis_type", value: "source_resolution" },
+        { kind: "eq", column: "status", value: "succeeded" },
+      ]) });
   });
 
   it("AC1 treats a missing capture as absent rather than as an empty capture", async () => {

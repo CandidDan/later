@@ -74,6 +74,17 @@ export interface StoredIntentAnalysis {
   pipelineVersion: string;
 }
 
+export interface StoredSourceAnalysis {
+  id: string;
+  captureId: string;
+  inputSnapshot: Record<string, JsonValue>;
+  result: Record<string, JsonValue>;
+  confidence: number;
+  modelId: string | null;
+  promptVersion: string;
+  pipelineVersion: string;
+}
+
 /**
  * Every database interaction intent processing needs, named as operations rather than as
  * queries so the processor can be exercised without a database.
@@ -97,4 +108,11 @@ export interface SourceResolutionJobStore extends CaptureJobStore {
     analysisId: string,
     captureId: string,
   ): Promise<StoredIntentAnalysis | undefined>;
+}
+
+export interface SegmentResolutionJobStore extends SourceResolutionJobStore {
+  loadSourceAnalysis(
+    analysisId: string,
+    captureId: string,
+  ): Promise<StoredSourceAnalysis | undefined>;
 }
