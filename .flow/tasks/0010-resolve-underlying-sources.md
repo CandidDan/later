@@ -1,7 +1,7 @@
 ---
 id: "later-0010"
 title: "Resolve the underlying source of a capture"
-status: "in_review"
+status: "done"
 priority: 3
 project: "later"
 owner: "codex-01a0a00d-6a7d-71c2-a910-e2100d2f0b22"
