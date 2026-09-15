@@ -6,6 +6,8 @@ import { handleProcessJobsRequest } from "@/lib/jobs/handler";
 import { createCaptureJobStore } from "@/lib/jobs/server";
 import { processNextIntentJob, type IntentProcessingOutcome } from "@/lib/processing";
 import { createIntentAnalyser } from "@/lib/processing/server";
+import type { SourceResolutionOutcome } from "@/lib/resolution";
+import { createSourceResolutionProcessor } from "@/lib/resolution/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -18,10 +20,11 @@ let dependencies: Parameters<typeof processNextIntentJob>[0] | undefined;
 
 let mediaProcessor: ReturnType<typeof createMediaProcessor> | undefined;
 let emailProcessor: ReturnType<typeof createEmailEnrichmentProcessor> | undefined;
+let sourceProcessor: ReturnType<typeof createSourceResolutionProcessor> | undefined;
 let nextQueue = 0;
 let imageReader: ReturnType<typeof createPrivateImageReader> | undefined;
 
-type Outcome = IntentProcessingOutcome | MediaOutcome | EmailEnrichmentOutcome;
+type Outcome = IntentProcessingOutcome | MediaOutcome | EmailEnrichmentOutcome | SourceResolutionOutcome;
 
 async function processNext(): Promise<Outcome> {
   // Rotate the queues so none can starve the others. Credential lookups happen only after
@@ -38,6 +41,10 @@ async function processNext(): Promise<Outcome> {
     () => {
       mediaProcessor ??= createMediaProcessor();
       return mediaProcessor();
+    },
+    () => {
+      sourceProcessor ??= createSourceResolutionProcessor();
+      return sourceProcessor();
     },
     async () => {
       // Inbound email is optional configuration. A deployment that has not set it up must

@@ -7,4 +7,6 @@ export type {
   CaptureJobType,
   CaptureRecord,
   JsonValue,
+  SourceResolutionJobStore,
+  StoredIntentAnalysis,
 } from "./types";
