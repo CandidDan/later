@@ -1,10 +1,11 @@
 import type {
   AnalysisRecordInput,
   CaptureJob,
-  CaptureJobStore,
   CaptureJobType,
   CaptureRecord,
   JsonValue,
+  SourceResolutionJobStore,
+  StoredIntentAnalysis,
 } from "./types";
 
 interface QueryOutcome {
@@ -25,7 +26,7 @@ interface TableBuilder {
 /** The subset of a PostgREST client this store uses, mirroring the capture-persistence shape. */
 export interface CaptureJobTableClient {
   rpc(name: string, args: Record<string, unknown>): PromiseLike<QueryOutcome>;
-  from(table: "captures" | "capture_assets"): TableBuilder;
+  from(table: "captures" | "capture_assets" | "capture_analyses"): TableBuilder;
 }
 
 function rowsFrom(outcome: QueryOutcome, action: string): Record<string, unknown>[] {
@@ -62,11 +63,17 @@ function jsonObject(value: unknown): Record<string, JsonValue> {
 }
 
 /** Claims and finalization are database transactions, fenced by the claimed attempt. */
-export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): CaptureJobStore {
+export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): SourceResolutionJobStore {
   return {
     async claimNextJob(jobType: CaptureJobType): Promise<CaptureJob | undefined> {
+      const rpcName = jobType === "source_resolution"
+        ? "claim_source_resolution_job"
+        : "claim_intent_job";
       const claimed = rowsFrom(
-        await client.rpc("claim_intent_job", { p_job_type: jobType }),
+        await client.rpc(
+          rpcName,
+          jobType === "source_resolution" ? {} : { p_job_type: jobType },
+        ),
         "claim a capture job",
       );
       if (claimed.length === 0) return undefined;
@@ -75,6 +82,12 @@ export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): Ca
         captureId: requireString(claimed[0], "capture_id"),
         jobType,
         attempts: Number(claimed[0].attempts),
+        ...(typeof claimed[0].intent_analysis_id === "string"
+          ? { intentAnalysisId: claimed[0].intent_analysis_id }
+          : {}),
+        ...(typeof claimed[0].source_analysis_id === "string"
+          ? { sourceAnalysisId: claimed[0].source_analysis_id }
+          : {}),
         ...(claimed[0].intent_phase === "enriched" ? { intentPhase: "enriched" as const } : {}),
       };
     },
@@ -133,9 +146,50 @@ export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): Ca
       };
     },
 
+    async loadIntentAnalysis(
+      analysisId: string,
+      captureId: string,
+    ): Promise<StoredIntentAnalysis | undefined> {
+      const analyses = rowsFrom(
+        await client
+          .from("capture_analyses")
+          .select(
+            "id, capture_id, input_snapshot, result, confidence, model_id, prompt_version, pipeline_version",
+          )
+          .eq("id", analysisId)
+          .eq("capture_id", captureId)
+          .eq("analysis_type", "intent")
+          .eq("status", "succeeded")
+          .limit(1),
+        "read the selected intent analysis",
+      );
+
+      if (analyses.length === 0) return undefined;
+      const analysis = analyses[0];
+      const confidence = analysis.confidence;
+
+      if (typeof confidence !== "number") {
+        throw new Error("Column confidence is missing from the returned analysis");
+      }
+
+      return {
+        id: requireString(analysis, "id"),
+        captureId: requireString(analysis, "capture_id"),
+        inputSnapshot: jsonObject(analysis.input_snapshot),
+        result: jsonObject(analysis.result),
+        confidence,
+        modelId: requireString(analysis, "model_id"),
+        promptVersion: requireString(analysis, "prompt_version"),
+        pipelineVersion: requireString(analysis, "pipeline_version"),
+      };
+    },
+
     async finishAttempt(job: CaptureJob, record: AnalysisRecordInput | null, errorCode?: string) {
+      const rpcName = job.jobType === "source_resolution"
+        ? "finish_source_resolution_attempt"
+        : "finish_intent_attempt";
       const finished = rowsFrom(
-        await client.rpc("finish_intent_attempt", {
+        await client.rpc(rpcName, {
           p_job_id: job.id,
           p_attempt: job.attempts,
           p_record: record,
@@ -145,9 +199,11 @@ export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): Ca
       );
       if (finished.length === 0) return undefined;
       const resolutionJobId = optionalString(finished[0], "resolution_job_id");
+      const segmentJobId = optionalString(finished[0], "segment_job_id");
       return {
         analysisId: optionalString(finished[0], "analysis_id"),
         ...(resolutionJobId === null ? {} : { resolutionJobId }),
+        ...(segmentJobId === null ? {} : { segmentJobId }),
       };
     },
   };

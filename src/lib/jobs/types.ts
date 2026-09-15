@@ -5,6 +5,7 @@ export type { JsonValue };
 export type CaptureJobType =
   | "intent_analysis"
   | "source_resolution"
+  | "segment_resolution"
   | "media_download"
   | "email_enrichment";
 
@@ -14,6 +15,8 @@ export interface CaptureJob {
   jobType: CaptureJobType;
   attempts: number;
   assetId?: string;
+  intentAnalysisId?: string;
+  sourceAnalysisId?: string;
   intentPhase?: "initial" | "enriched";
 }
 
@@ -60,6 +63,17 @@ export interface AnalysisRecordInput {
   errorCode: string | null;
 }
 
+export interface StoredIntentAnalysis {
+  id: string;
+  captureId: string;
+  inputSnapshot: Record<string, JsonValue>;
+  result: Record<string, JsonValue>;
+  confidence: number;
+  modelId: string;
+  promptVersion: string;
+  pipelineVersion: string;
+}
+
 /**
  * Every database interaction intent processing needs, named as operations rather than as
  * queries so the processor can be exercised without a database.
@@ -71,5 +85,16 @@ export interface CaptureJobStore {
     job: CaptureJob,
     record: AnalysisRecordInput | null,
     errorCode?: string,
-  ): Promise<{ analysisId: string | null; resolutionJobId?: string } | undefined>;
+  ): Promise<{
+    analysisId: string | null;
+    resolutionJobId?: string;
+    segmentJobId?: string;
+  } | undefined>;
+}
+
+export interface SourceResolutionJobStore extends CaptureJobStore {
+  loadIntentAnalysis(
+    analysisId: string,
+    captureId: string,
+  ): Promise<StoredIntentAnalysis | undefined>;
 }

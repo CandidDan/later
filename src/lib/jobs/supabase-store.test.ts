@@ -85,6 +85,23 @@ describe("createSupabaseCaptureJobStore", () => {
     expect(await createSupabaseCaptureJobStore(client).claimNextJob("intent_analysis")).toBeUndefined();
   });
 
+  it("AC1 claims source work through its independent RPC with the selected intent id", async () => {
+    const { client, calls } = createFakeClient([{ data: [{
+      id: "source-job-1",
+      capture_id: "capture-1",
+      attempts: 1,
+      intent_analysis_id: "intent-1",
+    }] }]);
+    expect(await createSupabaseCaptureJobStore(client).claimNextJob("source_resolution")).toEqual({
+      id: "source-job-1",
+      captureId: "capture-1",
+      jobType: "source_resolution",
+      attempts: 1,
+      intentAnalysisId: "intent-1",
+    });
+    expect(calls).toEqual([{ table: "claim_source_resolution_job", operation: "rpc", values: {}, filters: [] }]);
+  });
+
   it("sends the lease fence and safe failure in one finalization RPC", async () => {
     const { client, calls } = createFakeClient([{ data: [{ analysis_id: null, resolution_job_id: null }] }]);
     const store = createSupabaseCaptureJobStore(client);
@@ -97,6 +114,21 @@ describe("createSupabaseCaptureJobStore", () => {
   it("does not report success after losing the lease", async () => {
     const { client } = createFakeClient([{ data: [] }]);
     expect(await createSupabaseCaptureJobStore(client).finishAttempt({ id: "job-1", captureId: "capture-1", jobType: "intent_analysis", attempts: 1 }, null, "capture_missing")).toBeUndefined();
+  });
+
+  it("AC5 finalizes source work with the same lease fence and returns downstream work", async () => {
+    const { client, calls } = createFakeClient([{ data: [{ analysis_id: "source-1", segment_job_id: "segment-1" }] }]);
+    const result = await createSupabaseCaptureJobStore(client).finishAttempt({
+      id: "source-job-1",
+      captureId: "capture-1",
+      jobType: "source_resolution",
+      attempts: 2,
+      intentAnalysisId: "intent-1",
+    }, null, "provider_unavailable");
+    expect(result).toStrictEqual({ analysisId: "source-1", segmentJobId: "segment-1" });
+    expect(calls).toEqual([{ table: "finish_source_resolution_attempt", operation: "rpc", values: {
+      p_job_id: "source-job-1", p_attempt: 2, p_record: null, p_error_code: "provider_unavailable",
+    }, filters: [] }]);
   });
 
   it("AC1 loads the capture with its assets and no retrospective columns", async () => {
@@ -141,6 +173,40 @@ describe("createSupabaseCaptureJobStore", () => {
     await expect(
       createSupabaseCaptureJobStore(client).claimNextJob("intent_analysis"),
     ).rejects.toThrow(/connection lost/u);
+  });
+
+  it("AC2 loads exactly the selected successful intent analysis", async () => {
+    const { client, calls } = createFakeClient([{ data: [{
+      id: "intent-1",
+      capture_id: "capture-1",
+      input_snapshot: { captureId: "capture-1" },
+      result: { underlyingSource: { hints: ["episode"] } },
+      confidence: 0.7,
+      model_id: "intent-model",
+      prompt_version: "intent-v1",
+      pipeline_version: "intent-pipeline-v1",
+    }] }]);
+    expect(await createSupabaseCaptureJobStore(client).loadIntentAnalysis("intent-1", "capture-1"))
+      .toStrictEqual({
+        id: "intent-1",
+        captureId: "capture-1",
+        inputSnapshot: { captureId: "capture-1" },
+        result: { underlyingSource: { hints: ["episode"] } },
+        confidence: 0.7,
+        modelId: "intent-model",
+        promptVersion: "intent-v1",
+        pipelineVersion: "intent-pipeline-v1",
+      });
+    expect(calls[0]).toMatchObject({
+      table: "capture_analyses",
+      operation: "select",
+      filters: expect.arrayContaining([
+        { kind: "eq", column: "id", value: "intent-1" },
+        { kind: "eq", column: "capture_id", value: "capture-1" },
+        { kind: "eq", column: "analysis_type", value: "intent" },
+        { kind: "eq", column: "status", value: "succeeded" },
+      ]),
+    });
   });
 
   it("AC1 treats a missing capture as absent rather than as an empty capture", async () => {

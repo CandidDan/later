@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CaptureJobStore } from "@/lib/jobs/types";
 
-const factories = vi.hoisted(() => ({ store: vi.fn(), analyser: vi.fn(), media: vi.fn(() => async () => ({ status: "idle" })), email: vi.fn(() => async () => ({ status: "idle" })), reader: vi.fn() }));
+const factories = vi.hoisted(() => ({ store: vi.fn(), analyser: vi.fn(), media: vi.fn(() => async () => ({ status: "idle" })), email: vi.fn(() => async () => ({ status: "idle" })), source: vi.fn(() => async () => ({ status: "idle" })), reader: vi.fn() }));
 vi.mock("@/lib/assets/server", () => ({ createMediaProcessor: factories.media, createPrivateImageReader: factories.reader }));
 vi.mock("@/lib/email/server", () => ({ createEmailEnrichmentProcessor: factories.email }));
 vi.mock("@/lib/jobs/server", () => ({ createCaptureJobStore: factories.store }));
 vi.mock("@/lib/processing/server", () => ({ createIntentAnalyser: factories.analyser }));
+vi.mock("@/lib/resolution/server", () => ({ createSourceResolutionProcessor: factories.source }));
 // Resolve the application's aliases locally without changing shared test configuration.
 vi.mock("@/lib/jobs/handler", () => import("../../../../lib/jobs/handler"));
 vi.mock("@/lib/processing", () => import("../../../../lib/processing"));
@@ -28,6 +29,7 @@ describe("scheduled processing route", () => {
     expect(factories.analyser).not.toHaveBeenCalled();
     expect(factories.media).not.toHaveBeenCalled();
     expect(factories.email).not.toHaveBeenCalled();
+    expect(factories.source).not.toHaveBeenCalled();
     expect(factories.reader).not.toHaveBeenCalled();
   });
 
@@ -68,6 +70,37 @@ describe("scheduled processing route", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ succeeded: 2 });
     expect(claim).toHaveBeenCalledTimes(2);
+  });
+
+  it("AC1 drains source-resolution work as an independent queue", async () => {
+    factories.media.mockReturnValue(async () => ({ status: "idle" }));
+    factories.email.mockReturnValue(async () => ({ status: "idle" }));
+    let pending = true;
+    const processSource = vi.fn(async () => {
+      if (!pending) return { status: "idle" as const };
+      pending = false;
+      return {
+        status: "succeeded" as const,
+        jobId: "source-job",
+        captureId: "capture-source",
+        analysisId: "source-analysis",
+        modelId: null,
+      };
+    });
+    factories.source.mockReturnValue(processSource);
+    factories.store.mockReturnValue({
+      claimNextJob: async () => undefined,
+      loadCapture: async () => undefined,
+      finishAttempt: async () => undefined,
+    });
+    factories.analyser.mockReturnValue(async () => { throw new Error("unused"); });
+    const { POST } = await import("./route");
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ claimed: 1, succeeded: 1, failed: 0 });
+    expect(processSource).toHaveBeenCalled();
   });
 
   it("AC2 database/provider exceptions produce no secret-bearing output or logs", async () => {
