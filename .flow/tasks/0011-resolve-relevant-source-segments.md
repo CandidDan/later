@@ -1,20 +1,22 @@
 ---
 id: "later-0011"
 title: "Resolve the relevant segment from available source material"
-status: "ready"
+status: "blocked"
 priority: 3
 project: "later"
-owner: ""
+owner: "claude-later-0011-20260915T071420Z"
 created: "2026-09-06"
 started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
+blocked_reason: "Hard dependency unmet: later-0011 builds entirely on later-0010, which is still in_review in unmerged PR #13. On main there is no segment_resolution job type, no source_resolution analyses table or migration, and no src/lib/resolution/** at all (result schema, SSRF-safe bounded fetch boundary, Anthropic resolver, transcript-backed segment enqueue) - that whole 2110-line foundation exists only on flow/later-0010-resolve-underlying-sources. Every one of the seven acceptance criteria references a prior successful source-resolution analysis, its analysis id, or 'the same SSRF-safe, bounded fetch boundary as source resolution', so none can be built or proven on main. The two tasks also declare near-identical touches (.env.example, src/app/api/jobs/process/**, src/lib/jobs/**, src/lib/processing/**, src/lib/resolution/**). The only ways forward were to branch off an unmerged PR branch (protocol step 3 requires branching off latest main, and a kickback on #13 would tangle both PRs) or to reimplement later-0010's foundation inside later-0011 (scope widening plus a guaranteed merge conflict) - neither is the worker's call. Unblock condition: merge PR #13 so flow-done marks later-0010 done, then set later-0011 back to ready; no spec change is needed."
 serves: ["G1"]
 touches: [".env.example", "src/app/api/jobs/process/**", "src/lib/jobs/**", "src/lib/processing/**", "src/lib/resolution/**", "supabase/migrations/*segment_resolution.sql", "supabase/tests/database/*segment_resolution.test.sql"]
 labels: ["resolution", "segments", "anthropic", "experiment"]
-notes: ["Run after later-0010. This v0 task resolves only against source material that is already publicly available and identified by source resolution, such as plain text, JSON or WebVTT transcripts. It deliberately does not buy or build transcription infrastructure."]
+notes:
+  - "Run after later-0010. This v0 task resolves only against source material that is already publicly available and identified by source resolution, such as plain text, JSON or WebVTT transcripts. It deliberately does not buy or build transcription infrastructure."
+  - "2026-09-15 worker blocked: Did NOT claim later-0011 - it was never startable, so no in_progress claim was pushed, no branch was cut and no product code was written. Verified against origin/main at 11338fe: src/lib/resolution/ does not exist, supabase/migrations/ has no *source_resolution.sql, and CaptureJobType in src/lib/jobs/types.ts lists intent_analysis, source_resolution, media_download and email_enrichment but no segment_resolution. git diff --stat main...origin/flow/later-0010-resolve-underlying-sources shows 24 files and 2110 insertions still unmerged, including the full src/lib/resolution/** module this task must extend. PR #13 is OPEN and MERGEABLE with flow-gates, qa, code-review and security all SUCCESS (only flow-open-pr/open-pr failed, which does not gate merge) and no reviewDecision yet - it is waiting on human validation, not on more agent work. Nothing about later-0011 only looks done; nothing was started. Exact next action: a human reviews and merges PR #13; flow-done then sets later-0010 done; the orchestrator then flips later-0011 back to status ready with owner and blocked_reason cleared, and a fresh worker runs it against a main that already contains the source-resolution foundation. No spec or touches change is required."
 ---
 
 ## Context
