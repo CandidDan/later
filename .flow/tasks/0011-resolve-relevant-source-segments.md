@@ -1,16 +1,16 @@
 ---
 id: "later-0011"
 title: "Resolve the relevant segment from available source material"
-status: "blocked"
+status: "ready"
 priority: 3
 project: "later"
-owner: "claude-later-0011-20260915T071420Z"
+owner: ""
 created: "2026-09-06"
 started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Hard dependency unmet: later-0011 builds entirely on later-0010, which is still in_review in unmerged PR #13. On main there is no segment_resolution job type, no source_resolution analyses table or migration, and no src/lib/resolution/** at all (result schema, SSRF-safe bounded fetch boundary, Anthropic resolver, transcript-backed segment enqueue) - that whole 2110-line foundation exists only on flow/later-0010-resolve-underlying-sources. Every one of the seven acceptance criteria references a prior successful source-resolution analysis, its analysis id, or 'the same SSRF-safe, bounded fetch boundary as source resolution', so none can be built or proven on main. The two tasks also declare near-identical touches (.env.example, src/app/api/jobs/process/**, src/lib/jobs/**, src/lib/processing/**, src/lib/resolution/**). The only ways forward were to branch off an unmerged PR branch (protocol step 3 requires branching off latest main, and a kickback on #13 would tangle both PRs) or to reimplement later-0010's foundation inside later-0011 (scope widening plus a guaranteed merge conflict) - neither is the worker's call. Unblock condition: merge PR #13 so flow-done marks later-0010 done, then set later-0011 back to ready; no spec change is needed."
+blocked_reason: ""
 serves: ["G1"]
 touches: [".env.example", "src/app/api/jobs/process/**", "src/lib/jobs/**", "src/lib/processing/**", "src/lib/resolution/**", "supabase/migrations/*segment_resolution.sql", "supabase/tests/database/*segment_resolution.test.sql"]
 labels: ["resolution", "segments", "anthropic", "experiment"]
