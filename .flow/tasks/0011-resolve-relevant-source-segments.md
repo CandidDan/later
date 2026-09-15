@@ -1,14 +1,14 @@
 ---
 id: "later-0011"
 title: "Resolve the relevant segment from available source material"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "codex-01a0a55e-191e-7290-a889-a647e52bd32b"
 created: "2026-09-06"
 started: "2026-09-15T14:01:22Z"
-branch: ""
-pr: ""
+branch: "flow/later-0011-resolve-relevant-source-segments"
+pr: "https://github.com/CandidDan/later/pull/15"
 issue: ""
 blocked_reason: ""
 serves: ["G1"]
