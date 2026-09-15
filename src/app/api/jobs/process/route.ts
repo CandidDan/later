@@ -8,6 +8,8 @@ import { processNextIntentJob, type IntentProcessingOutcome } from "@/lib/proces
 import { createIntentAnalyser } from "@/lib/processing/server";
 import type { SourceResolutionOutcome } from "@/lib/resolution";
 import { createSourceResolutionProcessor } from "@/lib/resolution/server";
+import type { SegmentResolutionOutcome } from "@/lib/resolution/segment-process";
+import { createSegmentResolutionProcessor } from "@/lib/resolution/segment-server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -21,10 +23,11 @@ let dependencies: Parameters<typeof processNextIntentJob>[0] | undefined;
 let mediaProcessor: ReturnType<typeof createMediaProcessor> | undefined;
 let emailProcessor: ReturnType<typeof createEmailEnrichmentProcessor> | undefined;
 let sourceProcessor: ReturnType<typeof createSourceResolutionProcessor> | undefined;
+let segmentProcessor: ReturnType<typeof createSegmentResolutionProcessor> | undefined;
 let nextQueue = 0;
 let imageReader: ReturnType<typeof createPrivateImageReader> | undefined;
 
-type Outcome = IntentProcessingOutcome | MediaOutcome | EmailEnrichmentOutcome | SourceResolutionOutcome;
+type Outcome = IntentProcessingOutcome | MediaOutcome | EmailEnrichmentOutcome | SourceResolutionOutcome | SegmentResolutionOutcome;
 
 async function processNext(): Promise<Outcome> {
   // Rotate the queues so none can starve the others. Credential lookups happen only after
@@ -45,6 +48,10 @@ async function processNext(): Promise<Outcome> {
     () => {
       sourceProcessor ??= createSourceResolutionProcessor();
       return sourceProcessor();
+    },
+    () => {
+      segmentProcessor ??= createSegmentResolutionProcessor();
+      return segmentProcessor();
     },
     async () => {
       // Inbound email is optional configuration. A deployment that has not set it up must

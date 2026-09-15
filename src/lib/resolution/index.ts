@@ -21,3 +21,22 @@ export {
 } from "./input";
 export { fetchPublicMetadata, MetadataError } from "./metadata";
 export { recognizeSource } from "./recognized";
+export {
+  processNextSegmentResolutionJob,
+  UNAVAILABLE_SEGMENT_PROMPT_VERSION,
+  type ProcessSegmentResolutionDependencies,
+  type SegmentResolutionOutcome,
+} from "./segment-process";
+export {
+  parseSegmentResolutionResult,
+  SegmentResolutionResultSchemaError,
+  type ResolvedSegmentResult,
+  type SegmentResolutionResult,
+  type UnresolvedSegmentResult,
+} from "./segment-result";
+export {
+  fetchSegmentMaterial,
+  type SegmentEvidence,
+  type SegmentMaterial,
+  type SegmentRepresentation,
+} from "./segment-material";

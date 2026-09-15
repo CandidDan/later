@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CaptureJobStore } from "@/lib/jobs/types";
 
-const factories = vi.hoisted(() => ({ store: vi.fn(), analyser: vi.fn(), media: vi.fn(() => async () => ({ status: "idle" })), email: vi.fn(() => async () => ({ status: "idle" })), source: vi.fn(() => async () => ({ status: "idle" })), reader: vi.fn() }));
+const factories = vi.hoisted(() => ({ store: vi.fn(), analyser: vi.fn(), media: vi.fn(() => async () => ({ status: "idle" })), email: vi.fn(() => async () => ({ status: "idle" })), source: vi.fn(() => async () => ({ status: "idle" })), segment: vi.fn(() => async () => ({ status: "idle" })), reader: vi.fn() }));
 vi.mock("@/lib/assets/server", () => ({ createMediaProcessor: factories.media, createPrivateImageReader: factories.reader }));
 vi.mock("@/lib/email/server", () => ({ createEmailEnrichmentProcessor: factories.email }));
 vi.mock("@/lib/jobs/server", () => ({ createCaptureJobStore: factories.store }));
 vi.mock("@/lib/processing/server", () => ({ createIntentAnalyser: factories.analyser }));
 vi.mock("@/lib/resolution/server", () => ({ createSourceResolutionProcessor: factories.source }));
+vi.mock("@/lib/resolution/segment-server", () => ({ createSegmentResolutionProcessor: factories.segment }));
 // Resolve the application's aliases locally without changing shared test configuration.
 vi.mock("@/lib/jobs/handler", () => import("../../../../lib/jobs/handler"));
 vi.mock("@/lib/processing", () => import("../../../../lib/processing"));
@@ -30,6 +31,7 @@ describe("scheduled processing route", () => {
     expect(factories.media).not.toHaveBeenCalled();
     expect(factories.email).not.toHaveBeenCalled();
     expect(factories.source).not.toHaveBeenCalled();
+    expect(factories.segment).not.toHaveBeenCalled();
     expect(factories.reader).not.toHaveBeenCalled();
   });
 
@@ -101,6 +103,30 @@ describe("scheduled processing route", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ claimed: 1, succeeded: 1, failed: 0 });
     expect(processSource).toHaveBeenCalled();
+  });
+
+  it("AC1 drains segment-resolution work as an independent queue", async () => {
+    factories.media.mockReturnValue(async () => ({ status: "idle" }));
+    factories.email.mockReturnValue(async () => ({ status: "idle" }));
+    factories.source.mockReturnValue(async () => ({ status: "idle" }));
+    let pending = true;
+    const processSegment = vi.fn(async () => {
+      if (!pending) return { status: "idle" as const };
+      pending = false;
+      return { status: "succeeded" as const, jobId: "segment-job", captureId: "capture-segment",
+        analysisId: "segment-analysis", modelId: "segment-model" };
+    });
+    factories.segment.mockReturnValue(processSegment);
+    factories.store.mockReturnValue({ claimNextJob: async () => undefined, loadCapture: async () => undefined,
+      finishAttempt: async () => undefined });
+    factories.analyser.mockReturnValue(async () => { throw new Error("unused"); });
+    const { POST } = await import("./route");
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ claimed: 1, succeeded: 1, failed: 0 });
+    expect(processSegment).toHaveBeenCalled();
   });
 
   it("AC2 database/provider exceptions produce no secret-bearing output or logs", async () => {
