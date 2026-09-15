@@ -174,11 +174,39 @@ session is routine maintenance, not failure or lost work.
 - **The harness signals compaction** — a warning, or an auto-compact that already fired.
   Compaction means you are *already* over budget. It is a symptom, not a remedy: take it
   as the instruction to hand off, not as permission to keep going.
-- **You re-read a file you already read this session**, or re-derive a decision you
-  already made. Both mean recall has started failing.
+- **You re-read a file you already read this session and cannot recall what it said**, or
+  re-derive a decision you already made. Both mean recall has started failing.
 - **Three kickback rounds** on one task. The thread is now longer than the problem.
-- **A tool result landed that you could not read in full** — a wide API response, a long
-  log. A single one of those can cost more context than the entire task body.
+- **A single tool result landed in your context large enough to rival the task body** — a
+  wide API response, a full CI log, a dump you had to page through. One of those can cost
+  more context than the work itself.
+
+**What is not a trip condition.** These fire constantly in normal operation and say nothing
+about your budget. Handing off on one of them is the failure, not the discipline:
+
+- **The harness truncated or elided a tool result** — capped search hits, a clipped
+  directory listing, a "results truncated" banner. Truncation is the harness spending
+  *less* of your context, not more; the bullet above is about what entered your context,
+  never about what the harness kept out. If you need what was cut, narrow the query and
+  search again.
+- **A search returned more matches than you read.** Reading three of forty hits is how
+  search is supposed to work.
+- **A re-read you chose** — reopening a file to check an exact string before editing it, or
+  after something else changed it. That is verification, not recall failure.
+
+**The floor — a handoff must hand something off.** Two of the conditions above are symptoms of a
+thread going stale: the re-read, and the oversized tool result. A thread that has not done
+anything yet is not stale, so neither of those fires before you have done work worth preserving.
+If the honest note would read *"claimed the task, read some files, did not start"*, you have not
+tripped either one: you have flinched, and the next session pays your entire startup cost again
+to stand exactly where you are standing. Keep going.
+
+**The other three have no floor and take no account of progress.** A PR being open means the work
+is done by definition, and three kickback rounds means there was work to kick back. Compaction is
+the one that can genuinely fire with nothing to show for it — and it still fires: hand off anyway,
+mid-exploration and empty-handed if that is where it catches you. The budget is spent whether or
+not you spent it on anything, and continuing inside a context the harness has already flagged is
+how the next mistake gets made.
 
 Do not try to estimate your own context as a percentage — you cannot measure it and the
 guess will be wrong. Watch the conditions above; they are observable and they correlate.
