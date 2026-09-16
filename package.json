@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "launch:check": "node src/lib/operations/launch-readiness.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
