@@ -1,7 +1,7 @@
 ---
 id: "later-0012"
 title: "Prepare and validate the v0 production launch"
-status: "in_review"
+status: "done"
 priority: 3
 project: "later"
 owner: "01a0a876-8578-7991-8832-937d3b2a29e7"
