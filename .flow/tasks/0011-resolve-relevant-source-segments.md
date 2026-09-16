@@ -1,7 +1,7 @@
 ---
 id: "later-0011"
 title: "Resolve the relevant segment from available source material"
-status: "in_review"
+status: "done"
 priority: 3
 project: "later"
 owner: "codex-01a0a55e-191e-7290-a889-a647e52bd32b"
