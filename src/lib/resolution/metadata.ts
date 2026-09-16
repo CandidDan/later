@@ -13,6 +13,12 @@ const SUPPORTED_CONTENT_TYPES = new Set([
   "application/ld+json",
 ]);
 
+export const SEGMENT_CONTENT_TYPES = [
+  "text/plain",
+  "text/vtt",
+  "application/json",
+] as const;
+
 export type MetadataErrorCode =
   | "unsafe_url"
   | "unsafe_redirect"
@@ -53,6 +59,13 @@ export interface MetadataFetchOptions {
   maximumBytes?: number;
   timeoutMs?: number;
   maximumRedirects?: number;
+}
+
+export interface PublicDocument {
+  requestedUrl: string;
+  finalUrl: string;
+  contentType: string;
+  body: Uint8Array;
 }
 
 function unsafeIpv4(address: string): boolean {
@@ -145,7 +158,7 @@ const defaultRequest: MetadataRequest = (url, addresses, maximumBytes, timeoutMs
     path: `${url.pathname}${url.search}`,
     method: "GET",
     headers: {
-      accept: "text/html, application/json, application/ld+json",
+      accept: "text/html, text/plain, text/vtt, application/json, application/ld+json",
       "accept-encoding": "identity",
       "user-agent": "LaterSourceResolver/1.0",
     },
@@ -180,12 +193,15 @@ const defaultRequest: MetadataRequest = (url, addresses, maximumBytes, timeoutMs
   request.end();
 });
 
-function normalizedContentType(header: string | undefined): PublicMetadata["contentType"] {
+function normalizedContentType(
+  header: string | undefined,
+  supported: ReadonlySet<string>,
+): string {
   const contentType = header?.split(";", 1)[0]?.trim().toLowerCase();
-  if (!contentType || !SUPPORTED_CONTENT_TYPES.has(contentType)) {
+  if (!contentType || !supported.has(contentType)) {
     throw new MetadataError("metadata_unsupported");
   }
-  return contentType as PublicMetadata["contentType"];
+  return contentType;
 }
 
 function cleanText(value: unknown): string | undefined {
@@ -251,11 +267,15 @@ async function safeDiscoveredUrl(
   }
 }
 
-/** Fetch and reduce a public document to bounded metadata; raw response content is never returned. */
-export async function fetchPublicMetadata(
+/**
+ * Fetch a public HTTPS document through the resolver's single SSRF-safe boundary. DNS is
+ * pinned for each request and repeated after redirects; time, redirects and bytes are bounded.
+ */
+export async function fetchPublicDocument(
   rawUrl: string,
+  supportedContentTypes: readonly string[],
   options: MetadataFetchOptions = {},
-): Promise<PublicMetadata> {
+): Promise<PublicDocument> {
   const resolver = options.resolveHostname ?? defaultResolver;
   const request = options.request ?? defaultRequest;
   const maximumBytes = options.maximumBytes ?? DEFAULT_METADATA_MAX_BYTES;
@@ -284,8 +304,30 @@ export async function fetchPublicMetadata(
     break;
   }
   if (!resolved || !response) throw new MetadataError("metadata_unavailable");
-  const contentType = normalizedContentType(response.headers["content-type"]);
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(response.body);
+  const contentType = normalizedContentType(
+    response.headers["content-type"],
+    new Set(supportedContentTypes),
+  );
+  return {
+    requestedUrl: rawUrl,
+    finalUrl: resolved.url.href,
+    contentType,
+    body: response.body,
+  };
+}
+
+/** Fetch and reduce a public document to bounded metadata; raw response content is never returned. */
+export async function fetchPublicMetadata(
+  rawUrl: string,
+  options: MetadataFetchOptions = {},
+): Promise<PublicMetadata> {
+  const resolver = options.resolveHostname ?? defaultResolver;
+  const document = await fetchPublicDocument(rawUrl, [...SUPPORTED_CONTENT_TYPES], {
+    ...options,
+    resolveHostname: resolver,
+  });
+  const contentType = document.contentType as PublicMetadata["contentType"];
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(document.body);
   const values = contentType === "text/html" ? htmlValues(text) : jsonValues(text);
   const title = cleanText(values["og:title"] ?? values.title ?? values.documentTitle);
   const creatorValue = values.author_name ?? values.author ?? values.creator;
@@ -296,12 +338,12 @@ export async function fetchPublicMetadata(
   );
   const canonicalUrl = await safeDiscoveredUrl(
     values["og:url"] ?? values.canonical ?? values.canonical_url ?? values.url,
-    resolved.url,
+    new URL(document.finalUrl),
     resolver,
   );
   const transcriptUrl = await safeDiscoveredUrl(
     values.transcript ?? values.transcript_url,
-    resolved.url,
+    new URL(document.finalUrl),
     resolver,
   );
   const durationValue = values["video:duration"] ?? values.duration_seconds ?? values.duration;
@@ -310,7 +352,7 @@ export async function fetchPublicMetadata(
 
   return {
     requestedUrl: rawUrl,
-    finalUrl: resolved.url.href,
+    finalUrl: document.finalUrl,
     contentType,
     ...(title === undefined ? {} : { title }),
     ...(creator === undefined ? {} : { creator }),

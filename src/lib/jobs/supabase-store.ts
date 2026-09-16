@@ -4,8 +4,9 @@ import type {
   CaptureJobType,
   CaptureRecord,
   JsonValue,
-  SourceResolutionJobStore,
+  SegmentResolutionJobStore,
   StoredIntentAnalysis,
+  StoredSourceAnalysis,
 } from "./types";
 
 interface QueryOutcome {
@@ -63,16 +64,20 @@ function jsonObject(value: unknown): Record<string, JsonValue> {
 }
 
 /** Claims and finalization are database transactions, fenced by the claimed attempt. */
-export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): SourceResolutionJobStore {
+export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): SegmentResolutionJobStore {
   return {
     async claimNextJob(jobType: CaptureJobType): Promise<CaptureJob | undefined> {
       const rpcName = jobType === "source_resolution"
         ? "claim_source_resolution_job"
-        : "claim_intent_job";
+        : jobType === "segment_resolution"
+          ? "claim_segment_resolution_job"
+          : "claim_intent_job";
       const claimed = rowsFrom(
         await client.rpc(
           rpcName,
-          jobType === "source_resolution" ? {} : { p_job_type: jobType },
+          jobType === "source_resolution" || jobType === "segment_resolution"
+            ? {}
+            : { p_job_type: jobType },
         ),
         "claim a capture job",
       );
@@ -184,10 +189,46 @@ export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): So
       };
     },
 
+    async loadSourceAnalysis(
+      analysisId: string,
+      captureId: string,
+    ): Promise<StoredSourceAnalysis | undefined> {
+      const analyses = rowsFrom(
+        await client
+          .from("capture_analyses")
+          .select(
+            "id, capture_id, input_snapshot, result, confidence, model_id, prompt_version, pipeline_version",
+          )
+          .eq("id", analysisId)
+          .eq("capture_id", captureId)
+          .eq("analysis_type", "source_resolution")
+          .eq("status", "succeeded")
+          .limit(1),
+        "read the selected source analysis",
+      );
+      if (analyses.length === 0) return undefined;
+      const analysis = analyses[0];
+      if (typeof analysis.confidence !== "number") {
+        throw new Error("Column confidence is missing from the returned analysis");
+      }
+      return {
+        id: requireString(analysis, "id"),
+        captureId: requireString(analysis, "capture_id"),
+        inputSnapshot: jsonObject(analysis.input_snapshot),
+        result: jsonObject(analysis.result),
+        confidence: analysis.confidence,
+        modelId: optionalString(analysis, "model_id"),
+        promptVersion: requireString(analysis, "prompt_version"),
+        pipelineVersion: requireString(analysis, "pipeline_version"),
+      };
+    },
+
     async finishAttempt(job: CaptureJob, record: AnalysisRecordInput | null, errorCode?: string) {
       const rpcName = job.jobType === "source_resolution"
         ? "finish_source_resolution_attempt"
-        : "finish_intent_attempt";
+        : job.jobType === "segment_resolution"
+          ? "finish_segment_resolution_attempt"
+          : "finish_intent_attempt";
       const finished = rowsFrom(
         await client.rpc(rpcName, {
           p_job_id: job.id,
