@@ -1,14 +1,14 @@
 ---
 id: "later-0012"
 title: "Prepare and validate the v0 production launch"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "01a0a876-8578-7991-8832-937d3b2a29e7"
 created: "2026-09-16"
 started: "2026-09-16T04:26:46Z"
-branch: ""
-pr: ""
+branch: "flow/later-0012-production-launch"
+pr: "https://github.com/CandidDan/later/pull/16"
 issue: ""
 blocked_reason: ""
 serves: ["maintenance"]
