@@ -148,9 +148,12 @@ describe("processNextIntentJob", () => {
   it.each([
     ["a schema-invalid model response", new IntentResultSchemaError("contentType must be one of"), "result_schema_invalid"],
     ["an unusable provider response", new IntentAnalysisError("Anthropic declined"), "provider_response_invalid"],
+    ["an Anthropic authentication failure", Object.assign(new Error("private auth detail"), { status: 401 }), "provider_unavailable"],
+    ["an Anthropic rate limit", Object.assign(new Error("private rate detail"), { status: 429 }), "provider_unavailable"],
     ["an Anthropic outage", Object.assign(new Error("upstream down"), { status: 503 }), "provider_unavailable"],
+    ["an Anthropic network failure", new Error("private network detail"), "provider_unavailable"],
   ])(
-    "AC3 records %s as a failed attempt and leaves the job retryable",
+    "later-0013 AC4/AC5 records %s as a failed attempt and leaves the job retryable",
     async (_label, failure, expectedCode) => {
       const before = structuredClone(capture);
 
@@ -181,7 +184,7 @@ describe("processNextIntentJob", () => {
     },
   );
 
-  it("AC3 records the failure reason without echoing provider or capture text", async () => {
+  it("later-0013 AC5 records HTTP 400's mapped failure without provider or capture text", async () => {
     await processNextIntentJob({
       store,
       analyse: async () => {

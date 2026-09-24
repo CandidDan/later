@@ -37,7 +37,7 @@ export const ENRICHED_INTENT_SYSTEM_PROMPT = INTENT_SYSTEM_PROMPT
  * The JSON schema handed to the model, derived from the same constants the runtime validator
  * enforces so the two cannot drift apart.
  */
-export const INTENT_RESULT_JSON_SCHEMA: Record<string, unknown> = {
+export const INTENT_RESULT_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: [
@@ -93,7 +93,7 @@ export const INTENT_RESULT_JSON_SCHEMA: Record<string, unknown> = {
       },
     },
   },
-};
+} as const;
 
 export const HIGHEST_SIGNAL_PREFIX = "Highest-signal evidence:";
 

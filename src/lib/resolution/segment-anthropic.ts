@@ -1,6 +1,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
 
 import { createAnthropicClient, type IntentMessagesClient } from "../processing/anthropic";
+import { isAnthropicInvalidRequest } from "../processing/errors";
+import { anthropicOutputFormat } from "../processing/anthropic-schema";
 import type { SegmentResolutionInputSnapshot } from "./segment-input";
 import type { SegmentEvidence } from "./segment-material";
 import {
@@ -13,7 +15,7 @@ const MAX_OUTPUT_TOKENS = 2048;
 
 export type SegmentResolutionMessagesClient = IntentMessagesClient;
 
-export const SEGMENT_RESULT_JSON_SCHEMA: Record<string, unknown> = {
+export const SEGMENT_RESULT_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: [
@@ -32,7 +34,7 @@ export const SEGMENT_RESULT_JSON_SCHEMA: Record<string, unknown> = {
     confidence: { type: "number", minimum: 0, maximum: 1 },
     evidence: { type: "array", minItems: 1, uniqueItems: true, items: { type: "string" } },
   },
-};
+} as const;
 
 export const SEGMENT_SYSTEM_PROMPT = [
   "Locate the frozen captured interest in the supplied public source material.",
@@ -71,13 +73,21 @@ export function createSegmentResolutionAnalyser(
   model: string = configuredSegmentModel(),
 ): SegmentResolutionAnalyser {
   return async (snapshot, material, evidence: readonly SegmentEvidence[]) => {
-    const message = await client.messages.create({
-      model,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      system: SEGMENT_SYSTEM_PROMPT,
-      output_config: { format: { type: "json_schema", schema: SEGMENT_RESULT_JSON_SCHEMA } },
-      messages: [{ role: "user", content: buildSegmentResolutionUserMessage(snapshot) }],
-    });
+    let message: Anthropic.Message;
+    try {
+      message = await client.messages.create({
+        model,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        system: SEGMENT_SYSTEM_PROMPT,
+        output_config: { format: anthropicOutputFormat(SEGMENT_RESULT_JSON_SCHEMA) },
+        messages: [{ role: "user", content: buildSegmentResolutionUserMessage(snapshot) }],
+      });
+    } catch (error) {
+      if (isAnthropicInvalidRequest(error)) {
+        throw new SegmentResolutionAnalysisError("Anthropic rejected the segment request");
+      }
+      throw error;
+    }
     if (message.stop_reason === "refusal") {
       throw new SegmentResolutionAnalysisError("Anthropic declined the segment request");
     }

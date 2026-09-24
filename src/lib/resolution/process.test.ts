@@ -209,7 +209,11 @@ describe("source resolution processing", () => {
     ["transient metadata failure", new MetadataError("metadata_unavailable"), "metadata_unavailable"],
     ["Anthropic provider failure", new SourceResolutionAnalysisError("private upstream response"), "provider_response_invalid"],
     ["schema failure", new SourceResolutionResultSchemaError("invented identity"), "result_schema_invalid"],
-  ])("AC5 retries a %s with only a safe failure code and preserves successful analyses", async (_label, error, code) => {
+    ["Anthropic authentication failure", Object.assign(new Error("private auth detail"), { status: 401 }), "provider_unavailable"],
+    ["Anthropic rate limit", Object.assign(new Error("private rate detail"), { status: 429 }), "provider_unavailable"],
+    ["Anthropic server failure", Object.assign(new Error("private server detail"), { status: 503 }), "provider_unavailable"],
+    ["Anthropic network failure", new Error("private network detail"), "provider_unavailable"],
+  ])("later-0013 AC4/AC5 retries a %s with only a safe failure code and preserves successful analyses", async (_label, error, code) => {
     const previous: AnalysisRecordInput = {
       captureId: capture.id,
       status: "succeeded",
@@ -245,7 +249,7 @@ describe("source resolution processing", () => {
     expect(outcome).toMatchObject({ status: "failed", errorCode: code });
     expect(store.records[0]).toStrictEqual(previous);
     expect(store.records[1]).toMatchObject({ status: "failed", result: null, errorCode: code });
-    expect(JSON.stringify(store.records[1])).not.toContain("private upstream response");
+    expect(JSON.stringify(store.records[1])).not.toContain("private");
   });
 
   it("AC6 creates exactly one segment job for a supported transcript and none without one", async () => {

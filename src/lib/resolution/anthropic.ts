@@ -1,6 +1,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
 
 import { createAnthropicClient, type IntentMessagesClient } from "../processing/anthropic";
+import { isAnthropicInvalidRequest } from "../processing/errors";
+import { anthropicOutputFormat } from "../processing/anthropic-schema";
 import type { SourceResolutionInputSnapshot } from "./input";
 import {
   parseSourceResolutionResult,
@@ -15,7 +17,7 @@ const MAX_OUTPUT_TOKENS = 2048;
 
 export type SourceResolutionMessagesClient = IntentMessagesClient;
 
-export const SOURCE_RESULT_JSON_SCHEMA: Record<string, unknown> = {
+export const SOURCE_RESULT_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: [
@@ -33,7 +35,7 @@ export const SOURCE_RESULT_JSON_SCHEMA: Record<string, unknown> = {
     confidence: { type: "number", minimum: 0, maximum: 1 },
     evidence: { type: "array", minItems: 1, uniqueItems: true, items: { type: "string" } },
   },
-};
+} as const;
 
 export const SOURCE_SYSTEM_PROMPT = [
   "Identify an underlying canonical source only when the supplied immutable evidence proves it.",
@@ -71,13 +73,21 @@ export function createSourceResolutionAnalyser(
   model: string = configuredResolutionModel(),
 ): SourceResolutionAnalyser {
   return async (snapshot, evidence) => {
-    const message = await client.messages.create({
-      model,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      system: SOURCE_SYSTEM_PROMPT,
-      output_config: { format: { type: "json_schema", schema: SOURCE_RESULT_JSON_SCHEMA } },
-      messages: [{ role: "user", content: buildSourceResolutionUserMessage(snapshot) }],
-    });
+    let message: Anthropic.Message;
+    try {
+      message = await client.messages.create({
+        model,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        system: SOURCE_SYSTEM_PROMPT,
+        output_config: { format: anthropicOutputFormat(SOURCE_RESULT_JSON_SCHEMA) },
+        messages: [{ role: "user", content: buildSourceResolutionUserMessage(snapshot) }],
+      });
+    } catch (error) {
+      if (isAnthropicInvalidRequest(error)) {
+        throw new SourceResolutionAnalysisError("Anthropic rejected the source request");
+      }
+      throw error;
+    }
     if (message.stop_reason === "refusal") {
       throw new SourceResolutionAnalysisError("Anthropic declined the source request");
     }
