@@ -1,12 +1,12 @@
 ---
 id: "later-0013"
 title: "Send Anthropic-compatible structured-output schemas"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "codex-01a0d0e0-d8ac-7222-be12-4c2c529f371a"
 created: "2026-09-24"
-started: ""
+started: "2026-09-24T00:47:54Z"
 branch: ""
 pr: ""
 issue: ""
