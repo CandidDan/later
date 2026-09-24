@@ -9,9 +9,10 @@ import {
   buildIntentUserMessage,
 } from "./prompt";
 import { parseIntentResult, type IntentResult } from "./intent-result";
-import { IntentAnalysisError } from "./errors";
+import { IntentAnalysisError, isAnthropicInvalidRequest } from "./errors";
 import type { IntentImage } from "./media-input";
 import type { IntentInputSnapshot } from "./intent-input";
+import { anthropicOutputFormat } from "./anthropic-schema";
 
 const MAX_OUTPUT_TOKENS = 2048;
 
@@ -84,21 +85,29 @@ export function createIntentAnalyser(
   model: string = configuredIntentModel(),
 ): IntentAnalyser {
   return async (snapshot, images = []) => {
-    const message = await client.messages.create({
-      model,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      system: snapshot.analysisPhase === "enriched"
-        ? ENRICHED_INTENT_SYSTEM_PROMPT
-        : INTENT_SYSTEM_PROMPT,
-      output_config: { format: { type: "json_schema", schema: INTENT_RESULT_JSON_SCHEMA } },
-      messages: [{ role: "user", content: images.length ? [
-        { type: "text", text: buildIntentUserMessage(snapshot) },
-        ...images.flatMap((image): Anthropic.ContentBlockParam[] => [
-          { type: "text", text: `Captured image assetId: ${image.assetId}` },
-          { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
-        ]),
-      ] : buildIntentUserMessage(snapshot) }],
-    });
+    let message: Anthropic.Message;
+    try {
+      message = await client.messages.create({
+        model,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        system: snapshot.analysisPhase === "enriched"
+          ? ENRICHED_INTENT_SYSTEM_PROMPT
+          : INTENT_SYSTEM_PROMPT,
+        output_config: { format: anthropicOutputFormat(INTENT_RESULT_JSON_SCHEMA) },
+        messages: [{ role: "user", content: images.length ? [
+          { type: "text", text: buildIntentUserMessage(snapshot) },
+          ...images.flatMap((image): Anthropic.ContentBlockParam[] => [
+            { type: "text", text: `Captured image assetId: ${image.assetId}` },
+            { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
+          ]),
+        ] : buildIntentUserMessage(snapshot) }],
+      });
+    } catch (error) {
+      if (isAnthropicInvalidRequest(error)) {
+        throw new IntentAnalysisError("Anthropic rejected the intent request");
+      }
+      throw error;
+    }
 
     if (message.stop_reason === "refusal") {
       throw new IntentAnalysisError("Anthropic declined the intent request");

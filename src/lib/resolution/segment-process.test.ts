@@ -12,6 +12,7 @@ import { MetadataError } from "./metadata";
 import type { SegmentMaterial } from "./segment-material";
 import { processNextSegmentResolutionJob } from "./segment-process";
 import { SegmentResolutionResultSchemaError } from "./segment-result";
+import { SegmentResolutionAnalysisError } from "./segment-protocol";
 
 const capture: CaptureRecord = {
   id: "capture-11", channel: "whatsapp", captureKind: "link", rawText: "A saved clip",
@@ -152,7 +153,7 @@ describe("segment resolution processing", () => {
       startSeconds: null, endSeconds: null, sectionStart: null, sectionEnd: null, excerpt: null });
   });
 
-  it("AC4 stores no successful result when model validation rejects fabricated locators", async () => {
+  it("later-0013 AC4 stores no successful result when model validation rejects fabricated locators", async () => {
     const previous = structuredClone(source);
     const outcome = await processNextSegmentResolutionJob({ store,
       fetchMaterial: async () => structuredClone(timedMaterial),
@@ -161,6 +162,23 @@ describe("segment resolution processing", () => {
     expect(store.records[0]).toMatchObject({ status: "failed", result: null,
       errorCode: "result_schema_invalid" });
     expect(source).toStrictEqual(previous);
+  });
+
+  it.each([
+    ["HTTP 400 invalid request", new SegmentResolutionAnalysisError("private invalid request"), "provider_response_invalid"],
+    ["authentication failure", Object.assign(new Error("private auth detail"), { status: 401 }), "provider_unavailable"],
+    ["rate limit", Object.assign(new Error("private rate detail"), { status: 429 }), "provider_unavailable"],
+    ["network failure", new Error("private network detail"), "provider_unavailable"],
+    ["server failure", Object.assign(new Error("private server detail"), { status: 503 }), "provider_unavailable"],
+  ])("later-0013 AC5 records %s with only the safe allowlisted code", async (_label, error, code) => {
+    const outcome = await processNextSegmentResolutionJob({
+      store,
+      fetchMaterial: async () => structuredClone(timedMaterial),
+      analyse: async () => { throw error; },
+    });
+    expect(outcome).toMatchObject({ status: "failed", errorCode: code });
+    expect(store.records[0]).toMatchObject({ status: "failed", result: null, errorCode: code });
+    expect(JSON.stringify(store.records[0])).not.toContain("private");
   });
 
   it.each(["unsafe_url", "unsafe_redirect", "metadata_too_large"] as const)(

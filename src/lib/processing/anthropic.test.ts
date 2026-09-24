@@ -7,6 +7,8 @@ const { configuredIntentModel, createIntentAnalyser, createAnthropicClient } = a
 const { buildIntentInputSnapshot } = await import("./intent-input");
 const { IntentAnalysisError } = await import("./errors");
 const { IntentResultSchemaError } = await import("./intent-result");
+const { INTENT_RESULT_JSON_SCHEMA } = await import("./prompt");
+const { expectAnthropicCompatibleSchema } = await import("./anthropic-schema.test-helpers");
 type CaptureRecord = import("../jobs/types").CaptureRecord;
 type IntentMessagesClient = import("./anthropic").IntentMessagesClient;
 
@@ -80,7 +82,7 @@ describe("createIntentAnalyser", () => {
     ["a Haiku model", "claude-haiku-4-5", "claude-haiku-4-5"],
     ["a Sonnet model", "claude-sonnet-5", "claude-sonnet-5-20260101"],
   ])(
-    "AC6 calls %s exactly as configured and records the model the API reports",
+    "later-0013 AC6 calls %s exactly as configured and records the model the API reports",
     async (_label, configured, reported) => {
       process.env.ANTHROPIC_INTENT_MODEL = configured;
       const { client, bodies } = clientReturning(
@@ -94,7 +96,7 @@ describe("createIntentAnalyser", () => {
       expect(bodies).toHaveLength(1);
       expect(bodies[0].model).toBe(configured);
       expect(analysis.modelId).toBe(reported);
-      expect(analysis.result.classification.value).toBe("atomic");
+      expect(analysis.result).toStrictEqual(validResult);
     },
   );
 
@@ -102,27 +104,34 @@ describe("createIntentAnalyser", () => {
     expect(() => configuredIntentModel()).toThrow(/ANTHROPIC_INTENT_MODEL is required/u);
   });
 
-  it("AC1 constrains the response to the v0 schema and sends only the capture snapshot", async () => {
+  it("later-0013 AC1 sends an Anthropic-compatible intent schema while retaining the strict local contract", async () => {
     const { client, bodies } = clientReturning(
       messageReturning(JSON.stringify(validResult), "claude-haiku-4-5"),
     );
 
     await createIntentAnalyser(client, "claude-haiku-4-5")(buildIntentInputSnapshot(capture));
 
-    expect(bodies[0].output_config?.format?.type).toBe("json_schema");
-    expect(bodies[0].output_config?.format?.schema.required).toStrictEqual([
-      "contentType",
-      "interest",
-      "classification",
-      "underlyingSource",
-      "resolutionRequired",
-      "evidence",
-    ]);
+    const schema = bodies[0].output_config?.format?.schema;
+    expectAnthropicCompatibleSchema(schema);
+    expect(schema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["contentType", "interest", "classification", "underlyingSource", "resolutionRequired", "evidence"],
+      properties: {
+        contentType: { enum: [...INTENT_RESULT_JSON_SCHEMA.properties.contentType.enum] },
+        interest: { additionalProperties: false, required: ["summary", "confidence"] },
+        classification: { additionalProperties: false, required: ["value", "confidence"] },
+        underlyingSource: { additionalProperties: false, required: ["hints", "confidence"] },
+        evidence: { minItems: 1, items: { additionalProperties: false, required: ["field", "observation", "weight"] } },
+      },
+    });
+    expect(INTENT_RESULT_JSON_SCHEMA.properties.interest.properties.summary).toHaveProperty("minLength", 1);
+    expect(INTENT_RESULT_JSON_SCHEMA.properties.interest.properties.confidence).toMatchObject({ minimum: 0, maximum: 1 });
     expect(JSON.stringify(bodies[0].messages)).toContain("capture-3");
   });
 
-  it("AC3 surfaces a schema-invalid model response as a schema error, not a result", async () => {
-    const invalid = { ...validResult, classification: { value: "definitely", confidence: 2 } };
+  it("later-0013 AC4 rejects an empty intent summary after transport removes minLength", async () => {
+    const invalid = { ...validResult, interest: { ...validResult.interest, summary: "" } };
     const { client } = clientReturning(
       messageReturning(JSON.stringify(invalid), "claude-haiku-4-5"),
     );
@@ -153,6 +162,28 @@ describe("createIntentAnalyser", () => {
       createIntentAnalyser(client, "claude-haiku-4-5")(buildIntentInputSnapshot(capture)),
     ).rejects.toThrow(/service unavailable/u);
   });
+
+  it("later-0013 AC5 converts only Anthropic HTTP 400 into a safe invalid-response error", async () => {
+    const privateMessage = "request quoted private capture text";
+    const client: IntentMessagesClient = {
+      messages: { create: async () => { throw Object.assign(new Error(privateMessage), { status: 400 }); } },
+    };
+    await expect(createIntentAnalyser(client, "configured")(buildIntentInputSnapshot(capture)))
+      .rejects.toStrictEqual(expect.objectContaining({
+        name: "IntentAnalysisError",
+        message: "Anthropic rejected the intent request",
+      }));
+  });
+
+  it.each([401, 429, 503, undefined])(
+    "later-0013 AC5 leaves status %s as a provider availability failure",
+    async (status) => {
+      const failure = Object.assign(new Error("upstream unavailable"), status === undefined ? {} : { status });
+      const client: IntentMessagesClient = { messages: { create: async () => { throw failure; } } };
+      await expect(createIntentAnalyser(client, "configured")(buildIntentInputSnapshot(capture)))
+        .rejects.toBe(failure);
+    },
+  );
 
   it("AC3 treats a refusal as a failed run rather than an empty success", async () => {
     const refusal = {

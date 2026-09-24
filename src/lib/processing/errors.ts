@@ -9,3 +9,11 @@ export class IntentAnalysisError extends Error {
     this.name = "IntentAnalysisError";
   }
 }
+
+/** Anthropic uses HTTP 400 when a request, including its output schema, is invalid. */
+export function isAnthropicInvalidRequest(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "status" in error
+    && error.status === 400;
+}

@@ -10,6 +10,7 @@ const {
 } = await import("./anthropic");
 const { SourceResolutionAnalysisError } = await import("./protocol");
 const { SourceResolutionResultSchemaError } = await import("./result");
+const { expectAnthropicCompatibleSchema } = await import("../processing/anthropic-schema.test-helpers");
 type SourceResolutionMessagesClient = import("./anthropic").SourceResolutionMessagesClient;
 type SourceResolutionInputSnapshot = import("./input").SourceResolutionInputSnapshot;
 type SourceEvidence = import("./result").SourceEvidence;
@@ -61,7 +62,7 @@ function clientReturning(value: Anthropic.Message) {
 afterEach(() => { delete process.env.ANTHROPIC_RESOLUTION_MODEL; });
 
 describe("Anthropic source resolution", () => {
-  it("AC2 uses the separately configured model, reports the provider model and sends the immutable evidence boundary", async () => {
+  it("later-0013 AC2/AC6 sends a compatible closed nullable source schema and preserves valid output provenance", async () => {
     process.env.ANTHROPIC_RESOLUTION_MODEL = "claude-resolution-configured";
     const { client, bodies } = clientReturning(message(JSON.stringify(validResult)));
 
@@ -69,9 +70,47 @@ describe("Anthropic source resolution", () => {
 
     expect(bodies).toHaveLength(1);
     expect(bodies[0].model).toBe("claude-resolution-configured");
-    expect(bodies[0].output_config?.format?.schema).toStrictEqual(SOURCE_RESULT_JSON_SCHEMA);
+    const schema = bodies[0].output_config?.format?.schema;
+    expectAnthropicCompatibleSchema(schema);
+    expect(schema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["status", "sourceType", "title", "creator", "canonicalUrl", "durationSeconds", "transcriptUrl", "confidence", "evidence"],
+      properties: {
+        status: { enum: ["resolved", "unresolved"] },
+        sourceType: { anyOf: [{ type: "string", enum: expect.any(Array) }, { type: "null" }] },
+        durationSeconds: { type: ["integer", "null"] },
+        transcriptUrl: { type: ["string", "null"] },
+      },
+    });
+    expect(SOURCE_RESULT_JSON_SCHEMA.properties.durationSeconds).toHaveProperty("minimum", 1);
     expect(JSON.stringify(bodies[0].messages)).toContain("metadata.0.canonicalUrl");
     expect(result.modelId).toBe("claude-resolution-reported");
+    expect(result.result).toStrictEqual(validResult);
+  });
+
+  it("later-0013 AC4 rejects a non-positive duration after transport removes minimum", async () => {
+    const invalid = { ...validResult, durationSeconds: 0 };
+    const { client } = clientReturning(message(JSON.stringify(invalid)));
+    await expect(createSourceResolutionAnalyser(client, "configured")(snapshot, evidence))
+      .rejects.toBeInstanceOf(SourceResolutionResultSchemaError);
+  });
+
+  it("later-0013 AC5 sanitizes Anthropic HTTP 400 and leaves outage classes unchanged", async () => {
+    const throwingClient = (failure: Error): SourceResolutionMessagesClient => ({
+      messages: { create: async () => { throw failure; } },
+    });
+    const invalidRequest = Object.assign(new Error("private provider detail"), { status: 400 });
+    await expect(createSourceResolutionAnalyser(throwingClient(invalidRequest), "configured")(snapshot, evidence))
+      .rejects.toStrictEqual(expect.objectContaining({
+        name: "SourceResolutionAnalysisError",
+        message: "Anthropic rejected the source request",
+      }));
+    for (const status of [401, 429, 503]) {
+      const failure = Object.assign(new Error("unavailable"), { status });
+      await expect(createSourceResolutionAnalyser(throwingClient(failure), "configured")(snapshot, evidence))
+        .rejects.toBe(failure);
+    }
   });
 
   it("AC2 rejects a model identity that is absent from its cited immutable snapshot", async () => {
