@@ -1,7 +1,7 @@
 ---
 id: "later-0013"
 title: "Send Anthropic-compatible structured-output schemas"
-status: "in_review"
+status: "done"
 priority: 3
 project: "later"
 owner: "codex-01a0d0e0-d8ac-7222-be12-4c2c529f371a"
