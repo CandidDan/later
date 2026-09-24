@@ -1,14 +1,14 @@
 ---
 id: "later-0013"
 title: "Send Anthropic-compatible structured-output schemas"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "codex-01a0d0e0-d8ac-7222-be12-4c2c529f371a"
 created: "2026-09-24"
 started: "2026-09-24T00:47:54Z"
-branch: ""
-pr: ""
+branch: "flow/later-0013-anthropic-compatible-schemas"
+pr: "https://github.com/CandidDan/later/pull/18"
 issue: ""
 blocked_reason: ""
 serves: ["G1"]
