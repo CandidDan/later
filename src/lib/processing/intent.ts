@@ -1,5 +1,10 @@
-import { IntentAnalysisError } from "./errors";
-import { IntentResultSchemaError, overallConfidence, type IntentResult } from "./intent-result";
+import { overallConfidence, type IntentResult } from "./intent-result";
+import {
+  describeIntentFailure,
+  emitFailureDiagnostic,
+  failureErrorCode,
+  type FailureDiagnosticSink,
+} from "./failure-diagnostics";
 import { PIPELINE_VERSION, PROMPT_VERSION, MEDIA_PIPELINE_VERSION, MEDIA_PROMPT_VERSION } from "./prompt";
 import { buildIntentInputSnapshot } from "./intent-input";
 import { buildEnrichedIntentInput, type ReadPrivateImage } from "./media-input";
@@ -22,19 +27,8 @@ export interface ProcessIntentJobDependencies {
   store: CaptureJobStore;
   analyse: IntentAnalyser;
   readImage?: ReadPrivateImage;
-}
-
-/**
- * The recorded failure reason is an allowlisted code, never provider-controlled text.
- * Provider errors and rejected model output can both quote the capture back at us, and a
- * `last_error` column is the least protected place that text could end up.
- */
-function classifyFailure(error: unknown): string {
-  return error instanceof IntentResultSchemaError
-      ? "result_schema_invalid"
-      : error instanceof IntentAnalysisError
-        ? "provider_response_invalid"
-        : "provider_unavailable";
+  /** Where failure diagnostics go. Defaults to the structured log sink. */
+  emitDiagnostic?: FailureDiagnosticSink;
 }
 
 /** The validated result as plain JSON, which also proves it is storable without loss. */
@@ -53,6 +47,7 @@ export async function processNextIntentJob({
   store,
   analyse,
   readImage,
+  emitDiagnostic,
 }: ProcessIntentJobDependencies): Promise<IntentProcessingOutcome> {
   const job = await store.claimNextJob("intent_analysis");
 
@@ -81,7 +76,15 @@ export async function processNextIntentJob({
       analysis = await analyse(inputSnapshot);
     }
   } catch (error) {
-    const code = classifyFailure(error);
+    // One description of the failure serves both readers: the durable, allowlisted code the
+    // attempt is stored under, and the richer bounded category operations reads in the log.
+    const diagnostic = describeIntentFailure(error, {
+      operation: job.intentPhase === "enriched" ? "intent_analysis_enriched" : "intent_analysis",
+      jobId: job.id,
+      captureId: capture.id,
+    });
+    emitFailureDiagnostic(diagnostic, emitDiagnostic);
+    const code = failureErrorCode(diagnostic.category);
 
     await store.finishAttempt(job, {
       captureId: capture.id,
