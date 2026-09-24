@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   classifyStranded, buildResetEdit, minutesSince, readTasks, DEFAULT_THRESHOLD_MINUTES,
+  recoveryBranchCandidates, isTaskPrTitle,
 } from "./flow-recover.mjs";
 
 const TH = 75;
@@ -174,4 +175,131 @@ test("readTasks parses id/status/started and skips the template", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ── recoveryBranchCandidates: the store's branch first, the convention second ──
+//
+// The bug these cover: discovery used ONLY the `flow/<id>-…` glob, which is not what workers
+// actually produce. Canonical's own store records `branch: "claude/next-tasks-ahnx30"`, and the
+// protocol explicitly tells a cloud session to stay on the branch its harness assigned.
+
+test("a declared branch is tried first, with the convention kept as a fallback", () => {
+  assert.deepEqual(
+    recoveryBranchCandidates("CAN-51", "claude/ecstatic-goodall-120itl"),
+    ["claude/ecstatic-goodall-120itl", "flow/CAN-51-*"],
+  );
+});
+
+test("no declared branch falls back to the convention alone", () => {
+  assert.deepEqual(recoveryBranchCandidates("CAN-51"), ["flow/CAN-51-*"]);
+  assert.deepEqual(recoveryBranchCandidates("CAN-51", ""), ["flow/CAN-51-*"]);
+  assert.deepEqual(recoveryBranchCandidates("CAN-51", "   "), ["flow/CAN-51-*"]);
+  assert.deepEqual(recoveryBranchCandidates("CAN-51", null), ["flow/CAN-51-*"]);
+});
+
+test("a declared branch identical to the convention is not emitted twice", () => {
+  assert.deepEqual(recoveryBranchCandidates("CAN-51", "flow/CAN-51-*"), ["flow/CAN-51-*"]);
+});
+
+// Each candidate is passed to `git ls-remote --heads origin "$pattern"` in the sweep, so a value
+// that is not ref-shaped must never reach it. An empty pattern would match EVERY head and hand
+// recovery an unrelated branch; a leading dash would be read as an option.
+test("a declared branch that is not ref-shaped is dropped rather than passed to git", () => {
+  for (const hostile of ["--upload-pack=touch /tmp/x", "-o", "a b", "refs;rm -rf /", "x$(id)"]) {
+    assert.deepEqual(
+      recoveryBranchCandidates("CAN-51", hostile),
+      ["flow/CAN-51-*"],
+      `${hostile} must not reach git ls-remote`,
+    );
+  }
+});
+
+// ── isTaskPrTitle: the branch-independent second source ──
+
+test("isTaskPrTitle matches only a LEADING [id], per the Flow PR convention", () => {
+  assert.equal(isTaskPrTitle("[CAN-51] Recover stranded tasks", "CAN-51"), true);
+  assert.equal(isTaskPrTitle("  [CAN-51] leading space is fine", "CAN-51"), true);
+  assert.equal(isTaskPrTitle("[CAN-52] a different task", "CAN-51"), false);
+  assert.equal(isTaskPrTitle("chore: touches CAN-51 mid-sentence", "CAN-51"), false);
+  assert.equal(isTaskPrTitle("", "CAN-51"), false);
+  assert.equal(isTaskPrTitle(undefined, "CAN-51"), false);
+  assert.equal(isTaskPrTitle("[CAN-51] x", ""), false);
+});
+
+// ── the regression this whole change exists to stop ──
+//
+// A task on a `claude/…` branch with a live open PR. Discovery by convention alone found no
+// branch, so the shell reported hasOpenPr=false, and the classifier — correctly, on those
+// facts — said reset-to-ready. The claim was cleared out from under a PR that was open.
+
+test("a live PR found by title keeps the claim, even when the branch glob misses", () => {
+  const facts = { branchExists: false, aheadOfBase: false, ageMinutes: 9999 };
+  assert.equal(
+    classifyStranded(inProgress, { ...facts, hasOpenPr: false }, TH),
+    "reset-to-ready",
+    "the old behaviour, on the old (wrong) facts",
+  );
+  assert.equal(
+    classifyStranded(inProgress, { ...facts, hasOpenPr: true }, TH),
+    "ok",
+    "the title match supplies hasOpenPr, and a task with an open PR is never disturbed",
+  );
+});
+
+// ── readTasks surfaces `branch`, which is what the sweep now reads ──
+
+test("readTasks exposes the branch field so the sweep can prefer it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "flow-recover-branch-"));
+  try {
+    writeFileSync(
+      join(dir, "0051-x.md"),
+      '---\nid: "CAN-51"\nstatus: "in_progress"\nstarted: "2026-06-18T09:00:00Z"\n' +
+        'branch: "claude/next-tasks-ahnx30"\n---\nbody\n',
+    );
+    writeFileSync(
+      join(dir, "0052-y.md"),
+      '---\nid: "CAN-52"\nstatus: "in_progress"\nstarted: "2026-06-18T09:00:00Z"\n---\nbody\n',
+    );
+    const tasks = readTasks(dir);
+    assert.equal(tasks.find((t) => t.id === "CAN-51").branch, "claude/next-tasks-ahnx30");
+    assert.equal(tasks.find((t) => t.id === "CAN-52").branch, "", "absent branch reads as empty");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── prStateKnown: a destructive sweep must never act on an unknown ──
+//
+// `gh pr list` failing used to fall back to `[]`, which is indistinguishable from "this task has
+// no PR". On a task whose branch also could not be found that gives hasOpenPr=false, and past the
+// threshold that is exactly what produces reset-to-ready — so a GitHub 5xx, a rate limit or an
+// expired token was enough to clear a live claim. The two facts are now separate.
+
+test("an unknown PR state is never swept, however old the claim", () => {
+  const stranded = { branchExists: false, aheadOfBase: false, hasOpenPr: false, ageMinutes: 99999 };
+  assert.equal(
+    classifyStranded(inProgress, { ...stranded, prStateKnown: true }, TH),
+    "reset-to-ready",
+    "a KNOWN absence of a PR is still evidence, and still recovers",
+  );
+  assert.equal(
+    classifyStranded(inProgress, { ...stranded, prStateKnown: false }, TH),
+    "ok",
+    "an UNKNOWN PR state must leave the claim alone — the next sweep asks again",
+  );
+});
+
+test("prStateKnown also holds back the non-destructive reopen-pr path", () => {
+  // Less dangerous than a reset, but a PR opened against a branch whose real PR state we could
+  // not read risks a duplicate. Waiting one sweep costs nothing.
+  const pushed = { branchExists: true, aheadOfBase: true, hasOpenPr: false, ageMinutes: 90 };
+  assert.equal(classifyStranded(inProgress, { ...pushed, prStateKnown: true }, TH), "reopen-pr");
+  assert.equal(classifyStranded(inProgress, { ...pushed, prStateKnown: false }, TH), "ok");
+});
+
+test("prStateKnown defaults to true, so an un-updated caller is unaffected", () => {
+  assert.equal(
+    classifyStranded(inProgress, { branchExists: false, aheadOfBase: false, ageMinutes: 9999 }, TH),
+    "reset-to-ready",
+  );
 });

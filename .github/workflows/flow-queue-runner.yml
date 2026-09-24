@@ -35,7 +35,7 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
-    uses: CandidDan/flow-protocol/.github/workflows/_flow-queue-runner.yml@v1.2.0
+    uses: CandidDan/flow/.github/workflows/_flow-queue-runner.yml@v2
     with:
       task_id: ${{ inputs.task_id }}
     secrets:

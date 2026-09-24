@@ -60,11 +60,19 @@ export function idFromBranch(branch) {
 // not the base branch, it is ahead of base (has commits to propose), and no open PR exists
 // for it already. Every "no" path returns null so the workflow no-ops rather than opening a
 // malformed or duplicate PR.
-export function decideOpenPr({ branch, baseBranch = "main", hasOpenPr, aheadOfBase, taskTitle }) {
+//
+// `id` is an optional OVERRIDE for callers that already know which task the branch belongs to.
+// Push-time (`_flow-open-pr.yml`) never passes it — there the branch name is the only evidence
+// available, and widening that path would open PRs for any branch pushed to the repo. Recovery
+// (`_flow-recover.yml`) does pass it: it starts from the task file, so it knows the id even when
+// the branch is a platform-assigned `claude/…` that `idFromBranch` cannot parse. Without this,
+// fixing recovery's branch DISCOVERY would still have dead-ended here — the reopen-pr path would
+// find the branch, call this, get null from `idFromBranch`, and silently open nothing.
+export function decideOpenPr({ branch, baseBranch = "main", hasOpenPr, aheadOfBase, taskTitle, id: idOverride }) {
   if (!branch || branch === baseBranch) return null;   // never a PR for the base branch
   if (hasOpenPr) return null;                           // idempotent — re-pushes don't dup
   if (!aheadOfBase) return null;                        // nothing to propose
-  const id = idFromBranch(branch);
+  const id = idOverride || idFromBranch(branch);
   if (!id) return null;                                 // unparseable -> no malformed PR
   const title = taskTitle ? `[${id}] ${taskTitle}` : `[${id}]`;
   return { id, title, head: branch, base: baseBranch };
@@ -103,10 +111,12 @@ if (__isMain) {
   const hasOpenPr = Number(flags["has-open-pr"] || 0) > 0;
 
   const flowDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const id = idFromBranch(branch);
+  // `--id` lets a caller that already knows the task (recovery, which starts from the task file)
+  // name it explicitly, rather than requiring the branch to be parseable. Omitted at push time.
+  const id = flags.id || idFromBranch(branch);
   const taskTitle = id ? readTaskTitle(join(flowDir, "tasks"), id) : "";
 
-  const decision = decideOpenPr({ branch, baseBranch, hasOpenPr, aheadOfBase, taskTitle });
+  const decision = decideOpenPr({ branch, baseBranch, hasOpenPr, aheadOfBase, taskTitle, id });
   if (decision) process.stdout.write(JSON.stringify(decision) + "\n");
   process.exit(0);
 }

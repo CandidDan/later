@@ -20,7 +20,9 @@ name: flow-review
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize]
+    # ready_for_review is flow-0039: the reusable skips its jobs while the PR is a draft, so this
+    # is the event that actually starts the three Definition-of-Done reviewers.
+    types: [opened, reopened, ready_for_review, synchronize]
     branches: [main]
 
 jobs:
@@ -33,6 +35,6 @@ jobs:
       pull-requests: write
       issues: read
       id-token: write
-    uses: CandidDan/flow-protocol/.github/workflows/_flow-review.yml@v1.2.0
+    uses: CandidDan/flow/.github/workflows/_flow-review.yml@v2
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

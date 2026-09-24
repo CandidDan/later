@@ -12,7 +12,7 @@ on:
 
 jobs:
   flow-gates:
-    uses: CandidDan/flow-protocol/.github/workflows/_flow-gates.yml@v1.2.0
+    uses: CandidDan/flow/.github/workflows/_flow-gates.yml@v2
     # Node 22 is the default. Non-Node stack? Pass setup_node_version: "" and provision the
     # toolchain inside the .flow/config.yml commands:
     # with:

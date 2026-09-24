@@ -15,7 +15,9 @@
 //
 //   node .flow/bin/flow-recover.mjs classify --status in_progress \
 //        --branch-exists 1 --ahead 1 --has-open-pr 0 --age 90 --threshold 75   -> "reopen-pr"
-//   node .flow/bin/flow-recover.mjs list-in-progress    # prints "<id>\t<started>" per task
+//   node .flow/bin/flow-recover.mjs list-in-progress    # prints "<id>\t<started>\t<branch>" per task
+//   node .flow/bin/flow-recover.mjs branch-candidates CAN-51 claude/foo-x   # ls-remote patterns
+//   gh pr list --state open --json title | node .flow/bin/flow-recover.mjs count-task-prs CAN-51
 //   node .flow/bin/flow-recover.mjs reset CAN-51        # prints the board-edits JSON to reset it
 //
 // Zero dependencies (Node >= 18).
@@ -23,6 +25,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { idFromTitle } from "./parse-task-id.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -55,12 +58,60 @@ export const DEFAULT_THRESHOLD_MINUTES = 75;
 // Conservative by construction: only `in_progress` is ever swept, an open PR is never
 // disturbed, and nothing happens before the staleness threshold.
 export function classifyStranded(task, state, thresholdMinutes = DEFAULT_THRESHOLD_MINUTES) {
-  const { branchExists = false, hasOpenPr = false, aheadOfBase = false, ageMinutes = 0 } = state || {};
+  const {
+    branchExists = false, hasOpenPr = false, aheadOfBase = false, ageMinutes = 0,
+    prStateKnown = true,
+  } = state || {};
   if (!task || task.status !== "in_progress") return "ok"; // only in_progress is swept
   if (hasOpenPr) return "ok";                              // progressing — never disturbed
+  // "We could not find a PR" and "we could not ASK about PRs" are different facts, and only the
+  // first is evidence. `gh pr list` failing — a 5xx, a rate limit, an expired token — used to
+  // reduce to the same `0` as a genuine absence, and with the branch glob also missing that gave
+  // hasOpenPr=false on a task whose PR was open and fine. Past the threshold the sweep then
+  // cleared a live claim because GitHub had a bad minute. A destructive action must never be
+  // taken on an unknown, so an unknown is not a quiet default here: the caller states it.
+  if (!prStateKnown) return "ok";
   if (ageMinutes < thresholdMinutes) return "ok";         // no premature rescue
   if (branchExists && aheadOfBase) return "reopen-pr";    // pushed work, PR just never opened
   return "reset-to-ready";                                // nothing to recover -> re-claimable
+}
+
+// ── Finding the work: the task's own fields first, the branch convention second ──────────
+//
+// Recovery used to discover a stranded task's branch ONLY by the `flow/<id>-…` convention
+// glob. That convention is not what workers actually produce: a cloud session is forced onto
+// a platform-assigned branch (`claude/ecstatic-goodall-…`), and canonical's own store records
+// exactly that — `flow-0001` carries `branch: "claude/next-tasks-ahnx30"`. So the glob matched
+// nothing for essentially every real task, and the sweep saw `branchExists=false, ahead=0`.
+//
+// That is not a missed rescue, it is an active hazard. With no branch found the shell also had
+// nothing to ask `gh pr list --head` about, so it reported `hasOpenPr=false` — and a task with
+// a live PR and a full branch of work classified `reset-to-ready`, clearing the claim out from
+// under it. The fix is the one parse-task-id.mjs already exists for, and that touches-guard
+// already uses for the identical reason: read the task's recorded `branch`, and fall back to
+// the `[<id>] …` PR title. Same two sources, same precedence, one shared parser.
+
+// The ls-remote patterns to try for a task's branch, in precedence order: the branch the store
+// recorded at claim time (authoritative — the worker wrote it), then the `flow/<id>-…`
+// convention (still correct for workers that do follow it). Deduped, and empty/blank declared
+// values are dropped so the caller never runs `git ls-remote --heads origin ""` — which matches
+// EVERY head and would hand recovery an unrelated branch.
+export function recoveryBranchCandidates(id, declaredBranch = "") {
+  const declared = String(declaredBranch || "").trim();
+  const convention = `flow/${id}-*`;
+  // A declared branch must look like a ref, not a glob or an option: it reaches `git ls-remote`
+  // as an argument. Anything else falls through to the convention rather than being passed on.
+  const usable = declared && !declared.startsWith("-") && /^[A-Za-z0-9._\/-]+$/.test(declared);
+  return usable && declared !== convention ? [declared, convention] : [convention];
+}
+
+// Does this open PR's title belong to this task? The Flow PR convention is `[<id>] <title>`,
+// which is the same leading-bracket form parse-task-id resolves — so an id mentioned in the
+// middle of a title deliberately does NOT count. This is the second, branch-independent way to
+// answer "is this task actually progressing?", and it is what stops a live PR from being read
+// as an abandoned claim when the branch cannot be found.
+export function isTaskPrTitle(title, id) {
+  return !!id && idFromTitle(title) === id;
 }
 
 // The board-edit that resets a stranded task so it can be claimed again. Mirrors the
@@ -142,19 +193,51 @@ if (__isMain) {
         hasOpenPr: Number(f["has-open-pr"] || 0) > 0,
         aheadOfBase: Number(f.ahead || 0) > 0,
         ageMinutes: Number(f.age || 0),
+        // Defaults to known, so a caller that never learned to pass it behaves exactly as before.
+        prStateKnown: f["pr-state-known"] === undefined || Number(f["pr-state-known"]) > 0,
       },
       f.threshold ? Number(f.threshold) : DEFAULT_THRESHOLD_MINUTES,
     );
     process.stdout.write(decision + "\n");
   } else if (cmd === "list-in-progress") {
+    // Three tab-separated fields. `branch` is the third and may be empty — the shell reads it
+    // with a trailing `read -r id started branch`, so an absent value stays an empty string
+    // rather than shifting the columns.
     for (const t of readTasks(tasksDir)) {
-      if (t.status === "in_progress") process.stdout.write(`${t.id}\t${t.started}\n`);
+      if (t.status === "in_progress") {
+        process.stdout.write(`${t.id}\t${t.started}\t${t.branch}\n`);
+      }
     }
+  } else if (cmd === "branch-candidates") {
+    const [id, declared] = rest;
+    if (id) for (const p of recoveryBranchCandidates(id, declared)) process.stdout.write(p + "\n");
+  } else if (cmd === "count-task-prs") {
+    // Reads `gh pr list --json title` output on stdin and prints how many of those PRs belong
+    // to this task. Deliberately NOT a jq expression in the workflow: the `[<id>] …` rule is
+    // already implemented here, and a second copy in shell is the drift hazard this repo keeps
+    // warning about.
+    //
+    // Unparseable input prints 0 so the sweep cannot crash — but 0 here is NOT a safe default and
+    // must not be read as one. A count of 0 feeds `hasOpenPr=false`, which past the threshold is
+    // what produces `reset-to-ready`; so "I could not parse the answer" would otherwise become
+    // "there is no PR" and clear a live claim. Whether the question was answerable AT ALL is a
+    // separate fact the caller must establish and pass as `prStateKnown` — see classifyStranded.
+    const id = rest[0];
+    let raw = "";
+    try { raw = readFileSync(0, "utf8"); } catch { raw = ""; }
+    let n = 0;
+    try {
+      const prs = JSON.parse(raw || "[]");
+      if (Array.isArray(prs)) n = prs.filter((p) => isTaskPrTitle(p && p.title, id)).length;
+    } catch { n = 0; }
+    process.stdout.write(String(n) + "\n");
   } else if (cmd === "reset") {
     const id = rest[0];
     if (id) process.stdout.write(JSON.stringify({ updates: [buildResetEdit(id)] }) + "\n");
   } else {
-    process.stderr.write("usage: flow-recover.mjs <classify|list-in-progress|reset> …\n");
+    process.stderr.write(
+      "usage: flow-recover.mjs <classify|list-in-progress|branch-candidates|count-task-prs|reset> …\n",
+    );
   }
   process.exit(0);
 }

@@ -28,7 +28,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: CandidDan/flow-protocol/.github/workflows/_flow-recover.yml@v1.2.0
+    uses: CandidDan/flow/.github/workflows/_flow-recover.yml@v2
     with:
       threshold_minutes: ${{ inputs.threshold_minutes }}
     secrets:
