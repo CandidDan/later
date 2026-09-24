@@ -80,11 +80,24 @@ ready  →  in_progress  →  in_review  →  done
   whether the task is stranded, and a date-only value it can only read as that day's midnight
   makes an hours-old claim look like a many-hours-old one — the sweep resets a task you are
   actively working. Time-of-day is what stops that.
-- `in_review` — a PR is open. Set **automatically by the `flow-status` workflow** when the PR
-  opens (you only open PRs after the gate passes, so PR-open implies gates-green). You never
-  write this transition.
+- `in_review` — the PR is **marked ready for review**. Set **automatically by the `flow-status`
+  workflow** on the `ready_for_review` event. You never write this transition, but you do trigger
+  it: `gh pr ready` is your hand-off (step 8 of the loop). A PR merely *existing* no longer means
+  this, because `flow-open-pr` opens one as a draft on your first push — while it is a draft the
+  task correctly stays `in_progress`, and `flow-status` records `branch` and `pr` on it anyway. A
+  PR that someone opens directly as non-draft still transitions on `opened`, as before.
 - `done` — set automatically by `flow-done` when the PR **merges**. Never by hand.
-- `blocked` — you hit something undecidable. Set `blocked_reason`, stop, surface it.
+- `blocked` — you hit something undecidable. Set `blocked_reason`, stop, surface it. Also fill
+  **`blocked_by`**: the list of things the block is waiting on, each entry a task id in this repo
+  (`"PROJ-0007"`) or a PR url. `blocked_reason` is the sentence a person reads; `blocked_by` is the
+  same fact in a shape a machine can act on, and it never replaces the sentence. This matters
+  because `blocked` is the only status with no automatic way out — every other transition is owned
+  by a workflow, while a blocked task sits there until someone *remembers* that the PR it waited on
+  merged. If the block genuinely isn't mechanical (you are waiting on a phone call), say so in
+  `blocked_reason` using the words "not machine-checkable" and flow-doctor stops asking. Clear
+  `blocked_by` when the block clears: flow-doctor reports a populated `blocked_by` on a live
+  non-blocked task as stale data. On a `done` task it stays, as the record of what the task waited
+  on.
 
 You hand-write exactly **two** transitions: the claim (it must stay an atomic first-push-wins
 commit — see Concurrency) and `blocked` (a judgment call). Every PR-event transition is owned
@@ -118,7 +131,8 @@ surface it rather than forcing a merge.
 **The store is `main`-only — branches must never modify `.flow/tasks/`.** This is the invariant
 that keeps the two planes from corrupting each other. A branch is cut *after* the claim, so
 it carries a frozen snapshot of the task file (at `in_progress`); meanwhile its real state on
-`main` advances to `in_review` and later `done`. If the branch also committed `.flow/` changes,
+`main` gains the `branch` and `pr` fields when the draft PR opens, then advances to `in_review`
+when you mark it ready and later `done`. If the branch also committed `.flow/` changes,
 merging it would clobber `main`'s newer state with that stale snapshot. So: **all state
 transitions are commits to `main`; the feature branch contains code only.** CI enforces this —
 a PR whose diff touches `.flow/tasks/` fails the gate (see `flow-gates.yml`), so the rule isn't
@@ -150,10 +164,13 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
    branch first and this title second, so on a non-`flow/` branch it is the only thing standing
    between your PR and a silently skipped transition. Link the task file path in the description,
    paste the acceptance-criteria checklist with each item ticked + the test that proves it.
-8. **Hand off.** The `flow-status` workflow flips the task to `in_review` and records
-   `branch` + `pr` when the PR opens — you don't write that transition. The qa, code-review and
-   security checks run on the PR and post their verdicts there. Regenerate the board. Stop. The
-   human validates.
+8. **Hand off — `gh pr ready`.** `flow-open-pr` opens your PR as a **draft** on your first push,
+   so it already exists by the time you get here; `flow-status` recorded `branch` + `pr` then, and
+   left the task `in_progress`. Marking it ready is the hand-off: it flips the task to `in_review`
+   and starts the qa, code-review and security checks, which do not run on a draft. You don't write
+   that transition, and you don't open the PR — you finish it. If you opened the PR yourself with
+   `gh pr create` (no draft), that step already happened. Regenerate the board. Stop. The human
+   validates.
 9. **Kickback** (if the human comments) arrives as a new `notes` entry on the task or a PR
    comment. Address it on the same branch, re-run gates, re-request review.
 
@@ -289,10 +306,11 @@ buys — not a vendor-neutral reviewer.
   Note that `touches-guard` ignores all of `.flow/**` and the store-guard checks only
   `.flow/tasks/`, so a stray `.flow/config.yml` edit will **not** be caught by CI. That makes
   declaring it in `touches` your discipline, not the gate's.
-- **Never hand-write a PR-event transition.** `flow-status` owns `in_review` (PR open) and the
-  return to `ready` (PR closed unmerged); `flow-done` owns `done` (PR merged) — both read the
-  task id from the `flow/<id>-…` branch name, falling back to the `[<id>]` PR-title prefix.
-  You write only the claim and `blocked`.
+- **Never hand-write a PR-event transition.** `flow-status` owns `in_review` (the PR marked ready
+  for review) and the return to `ready` (PR closed unmerged); `flow-done` owns `done` (PR merged) —
+  both read the task id from the `flow/<id>-…` branch name, falling back to the `[<id>]` PR-title
+  prefix. You write only the claim and `blocked`. Your `gh pr ready` triggers the `in_review`
+  transition; it does not write it.
 - **The task id must appear in the PR title.** It is the one identifier you always control —
   the branch name you may not. A PR with neither a `flow/<id>-…` branch nor an `[<id>]` title
   is invisible to the automation: no `in_review`, no `done`, no scope check. It will look like

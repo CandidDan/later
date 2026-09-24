@@ -26,6 +26,7 @@ on:
         description: "Canonical ref to adopt from (tag/branch). Default v2."
         required: false
         type: string
+        default: v2
 
 concurrency:
   group: flow-sync
