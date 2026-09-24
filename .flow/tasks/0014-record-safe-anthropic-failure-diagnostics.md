@@ -14,7 +14,21 @@ blocked_reason: ""
 serves: ["maintenance"]
 touches: ["src/lib/processing/**"]
 labels: ["observability", "anthropic", "intent", "production"]
-notes: []
+notes:
+  - date: "2026-09-24"
+    by: "claude-worker-later-0014"
+    text: >
+      Implementation and gate complete on branch flow/later-0014-safe-anthropic-failure-diagnostics
+      (pushed). New src/lib/processing/failure-diagnostics.ts derives an allowlisted
+      intent_provider_failure event (category, retryable, numeric status, validated req_ id,
+      operation, jobId, captureId); intent.ts emits exactly one per failed analyse() attempt via an
+      injectable sink defaulting to console.error(JSON.stringify(event)). Stored error codes are
+      now derived from the category through failureErrorCode(), which reproduces the previous
+      classifyFailure() mapping exactly, so the three durable codes and the SQL attempts>=3 retry
+      schedule are unchanged. Gate green locally - build, lint (0 errors, 3 pre-existing warnings in
+      .flow/bin), 441 tests pass, coverage 80.47% vs floor 15. Note pnpm build must run before
+      pnpm test or src/lib/supabase/server.test.ts fails on a missing .next/static (pre-existing).
+      Next action - open the PR titled "[later-0014] Record safe Anthropic failure diagnostics".
 ---
 
 ## Context
