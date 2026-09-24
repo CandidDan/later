@@ -1,12 +1,12 @@
 ---
 id: "later-0014"
 title: "Record safe Anthropic failure diagnostics"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "claude-worker-later-0014"
 created: "2026-09-24"
-started: ""
+started: "2026-09-24T07:14:23Z"
 branch: ""
 pr: ""
 issue: ""
