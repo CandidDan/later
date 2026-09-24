@@ -1,11 +1,11 @@
 // Tests for flow-doctor — the store validator validates itself.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runDoctor, compareVersions, findUncommittedTasks, parseVisionGoals, readinessFindings } from "./flow-doctor.mjs";
+import { runDoctor, compareVersions, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry } from "./flow-doctor.mjs";
 
 // The vision every fixture gets unless it asks for none: two live goals, one non-goal, one
 // retired goal. Written in the shape flow-doctor's line regex reads, deliberately mixing the
@@ -75,7 +75,7 @@ started: "${f.started ?? ""}"
 branch: "${f.branch ?? ""}"
 pr: "${f.pr ?? ""}"
 blocked_reason: "${f.blocked_reason ?? ""}"
-serves: ${f.serves ?? '["G1"]'}
+${f.blocked_by === undefined ? "" : `blocked_by: ${f.blocked_by}\n`}serves: ${f.serves ?? '["G1"]'}
 touches: ${f.touches ?? '["src/**"]'}
 ---
 ${f.body ?? READY_BODY}`;
@@ -635,10 +635,68 @@ test("serves naming an unknown id, or a non-goal, is a PROBLEM in each case", ()
 });
 
 test("serves naming a retired goal → WARNING, not a problem", () => {
-  const d = fixture({ "0001-a.md": task("P-0001", { serves: '["G9"]' }) });
+  // `status` is explicit rather than leaning on the fixture default. The retired-goal warning is
+  // now status-dependent (see below), so a test that let the default supply the status would
+  // silently change meaning the day that default moved — the failure mode where a test keeps
+  // passing while no longer proving what its name claims.
+  const d = fixture({ "0001-a.md": task("P-0001", { status: "ready", serves: '["G9"]' }) });
   const r = runDoctor({ flowDir: d });
   assert.deepEqual(r.problems, []);
   assert.ok(r.warnings.some((w) => w.includes("P-0001") && w.includes("Retired")));
+  cleanup(d);
+});
+
+test("a DONE task serving a retired goal is silent — the warning has no remedy it could take", () => {
+  // Finished work cannot be dropped, and `serves` records the goal the task was WRITTEN to
+  // advance, so it cannot honestly be re-anchored either. Warning about it asks the reader to
+  // falsify history, and at volume it buries the live tasks that can still act on the advice.
+  const d = fixture({ "0001-a.md": task("P-0001", { status: "done", serves: '["G9"]' }) });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.ok(!r.warnings.some((w) => w.includes("P-0001") && w.includes("Retired")),
+    "a done task serving a retired goal should not warn");
+  cleanup(d);
+});
+
+test("every non-done status still warns on a retired goal", () => {
+  // The exemption is `done` and only `done`. Each of these is still live, and at least one of the
+  // two remedies — dropping the task — remains a real call for the reader, so the line earns its
+  // place. Table-driven so adding a status to the lifecycle surfaces here rather than silently
+  // inheriting the exemption.
+  for (const status of ["ready", "in_progress", "in_review", "blocked"]) {
+    const d = fixture({
+      "0001-a.md": task("P-0001", {
+        status,
+        serves: '["G9"]',
+        // in_progress/in_review are only well-formed with a claim on them; without these the
+        // store would fail for an unrelated reason and mask what this test is asking.
+        owner: status === "ready" || status === "blocked" ? "" : "session_x",
+        started: status === "ready" || status === "blocked" ? "" : "2026-09-14T02:10:04Z",
+        blocked_reason: status === "blocked" ? "waiting on something" : "",
+      }),
+    });
+    const r = runDoctor({ flowDir: d });
+    assert.ok(r.warnings.some((w) => w.includes("P-0001") && w.includes("Retired")),
+      `status "${status}" should still warn on a retired goal`);
+    cleanup(d);
+  }
+});
+
+test("the done exemption does not leak to the sibling serves branches", () => {
+  // An aged anchor is forgivable; a broken or self-contradicting one is not. An id VISION.md never
+  // declared, or one it declares a NON-GOAL, still reports on finished work — those say the record
+  // is wrong, not merely old. (On a non-ready task they report as warnings, which is the existing
+  // severity rule and deliberately left alone.)
+  const d = fixture({
+    "0001-a.md": task("P-0001", { status: "done", serves: '["G404"]' }),
+    "0002-b.md": task("P-0002", { status: "done", serves: '["NG1"]' }),
+  });
+  const r = runDoctor({ flowDir: d });
+  const all = [...r.problems, ...r.warnings];
+  assert.ok(all.some((m) => m.includes("P-0001") && m.includes("does not declare")),
+    "a done task naming an undeclared goal id must still report");
+  assert.ok(all.some((m) => m.includes("P-0002") && m.includes("NON-GOAL")),
+    "a done task naming a declared non-goal must still report");
   cleanup(d);
 });
 
@@ -737,5 +795,188 @@ test("CLI: warnings alone (new subsystem, no vision) still exit 0", () => {
   const { code, out } = runCli(d);
   assert.equal(code, 0, out);
   assert.match(out, /WARN.*subsystem/);
+  cleanup(d);
+});
+
+// ── blocked_by: the machine-readable half of blocked_reason (flow-0040) ──
+// The line the whole check is drawn on: the ONLY finding a store written before this field can
+// trip is a warning. Every PROBLEM below needs a populated `blocked_by` to fire, and a task
+// that predates the field has none — so adoption cannot turn an already-adopted repo red.
+
+// `yaml` is a real YAML parser, and this is the one assertion that wants one — but NOTHING else
+// under `project-template/.flow/bin/` imports a non-`node:` module, deliberately: this tree is
+// copied into repos that may not be JavaScript projects at all, and canonical's own config.yml
+// names the rule ("every dependency added here is a dependency imposed downstream"). So the
+// parser is loaded OPTIONALLY. Canonical has it, so the strict parse runs on every gate run here
+// — which is where `_TEMPLATE.md` is authored and where a break would be introduced. A consuming
+// repo without it still gets the flow-doctor-parser half below, which is the reader that
+// actually matters there.
+const yamlParse = await import("yaml").then((m) => m.parse, () => null);
+
+test("_TEMPLATE.md ships blocked_by as an empty list, and still parses", () => {
+  const text = readFileSync(join(import.meta.dirname, "..", "tasks", "_TEMPLATE.md"), "utf8");
+
+  if (yamlParse) {
+    const parsed = yamlParse(text.slice(3, text.indexOf("\n---", 3)));
+    assert.ok(Object.hasOwn(parsed, "blocked_by"), "the published template must declare the field");
+    assert.deepEqual(parsed.blocked_by, [], "it ships empty — absent means 'not declared'");
+    assert.equal(parsed.status, "ready", "the rest of the frontmatter must survive the addition");
+  }
+
+  // The other reader, and the one every consuming repo runs: flow-doctor's own frontmatter scan.
+  // Proving both agree beats trusting that a YAML-valid file is also parseListField-valid.
+  const d = fixture({ "0001-a.md": text.replace('id: "PROJ-0000"', 'id: "P-0001"') });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems.filter((x) => x.includes("blocked_by")), [],
+    `the shipped template must be clean under the check it ships with, got ${JSON.stringify(r.problems)}`);
+  cleanup(d);
+});
+
+test("blocked with a blocked_by naming a task id → reported as nothing at all", () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", { status: "blocked", blocked_reason: "waiting on P-0002", blocked_by: '["P-0002"]' }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.warnings.filter((w) => w.includes("blocked_by")), [],
+    `a fully declared block is the good case, got ${JSON.stringify(r.warnings)}`);
+  cleanup(d);
+});
+
+test("blocked with a blocked_by naming a PR url → also clean", () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", { status: "blocked", blocked_reason: "waiting on #51",
+      blocked_by: '["https://github.com/o/r/pull/51"]' }),
+  });
+  assert.deepEqual(runDoctor({ flowDir: d }).problems, []);
+  cleanup(d);
+});
+
+test("blocked with an EMPTY blocked_by → WARNING that names the way out", () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", { status: "blocked", blocked_reason: "waiting on something", blocked_by: "[]" }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, [], "criterion 6: a repo full of pre-field blocked tasks must not go red");
+  const w = r.warnings.filter((x) => x.includes("P-0001") && x.includes("blocked_by"));
+  assert.equal(w.length, 1, `expected one nudge, got ${JSON.stringify(r.warnings)}`);
+  assert.match(w[0], /task id or PR url/, "the message has to say how to make the block machine-checkable");
+  assert.match(w[0], /not machine-checkable/, "…and name the opt-out for a block that genuinely isn't");
+  cleanup(d);
+});
+
+test('blocked_reason saying "not machine-checkable" silences the nudge', () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", { status: "blocked", blocked_by: "[]",
+      blocked_reason: "Waiting on the client's lawyer to call back - not machine-checkable." }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.warnings.filter((w) => w.includes("blocked_by")), [],
+    "a declared-unmechanical block is answered, not nagged");
+  cleanup(d);
+});
+
+test("ready with a populated blocked_by → PROBLEM: a dependency that outlived its block", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { status: "ready", blocked_by: '["P-0002"]' }) });
+  const r = runDoctor({ flowDir: d });
+  const p = r.problems.filter((x) => x.includes("P-0001") && x.includes("blocked_by"));
+  assert.equal(p.length, 1, `expected the stale-dependency problem, got ${JSON.stringify(r.problems)}`);
+  assert.match(p[0], /stale data/);
+  assert.match(p[0], /P-0002/, "name the dependency, so the reader knows what to delete");
+  cleanup(d);
+});
+
+test("in_progress and in_review are live too — a leftover blocked_by is stale there as well", () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", { status: "in_progress", owner: "s", started: "2026-09-01T10:00:00Z",
+      blocked_by: '["P-0009"]' }),
+    "0002-b.md": task("P-0002", { status: "in_review", branch: "flow/x", pr: "https://github.com/o/r/pull/2",
+      touches: '["api/**"]', blocked_by: '["P-0009"]' }),
+  }, { dirs: ["src", "api"] });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(r.problems.some((x) => x.includes("P-0001") && x.includes("stale data")));
+  assert.ok(r.problems.some((x) => x.includes("P-0002") && x.includes("stale data")));
+  cleanup(d);
+});
+
+test("done keeps its blocked_by — there it is history, not drift", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { status: "done", blocked_by: '["P-0002"]' }) });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, [], "clearing a done task's record of what it waited on destroys the record");
+  cleanup(d);
+});
+
+test("a malformed blocked_by entry → PROBLEM naming the entry", () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", { status: "blocked", blocked_reason: "waiting",
+      blocked_by: '["P-0002", "the PR Dan opened last week"]' }),
+  });
+  const r = runDoctor({ flowDir: d });
+  const p = r.problems.filter((x) => x.includes("malformed"));
+  assert.equal(p.length, 1, `only the bad entry is malformed, got ${JSON.stringify(r.problems)}`);
+  assert.match(p[0], /the PR Dan opened last week/);
+  assert.match(p[0], /task id .* or a PR url/);
+  cleanup(d);
+});
+
+test("blocked_by in the multi-line list form is read, not silently seen as empty", () => {
+  // parseListField's older sibling bug: a naive same-line scan reads the block form as empty,
+  // which would silence the stale-dependency PROBLEM entirely.
+  const body = `---
+id: "P-0001"
+title: "x"
+status: "ready"
+priority: 3
+blocked_reason: ""
+blocked_by:
+  - "P-0002"
+  - "https://github.com/o/r/pull/7"
+serves: ["G1"]
+touches: ["src/**"]
+---
+${READY_BODY}`;
+  const d = fixture({ "0001-a.md": body });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(r.problems.some((x) => x.includes("P-0002") && x.includes("stale data")),
+    `the block form must parse, got ${JSON.stringify(r.problems)}`);
+  cleanup(d);
+});
+
+test("isBlockedByEntry: the shape contract, stated once", () => {
+  for (const ok of ["P-0002", "flow-0040", "write_2-17", "https://github.com/o/r/pull/51", " P-0002 "])
+    assert.equal(isBlockedByEntry(ok), true, ok);
+  for (const bad of ["", "P-", "0002", "-0002", "P 0002", "github.com/o/r/pull/51", "ftp://x/y", "P-0002 and P-0003"])
+    assert.equal(isBlockedByEntry(bad), false, JSON.stringify(bad));
+  assert.equal(isBlockedByEntry(undefined), false);
+});
+
+test("blockedByFindings: an absent blocked_by is 'not declared', never an error", () => {
+  // Criterion 6 at unit level: the pre-field shape of every task in every adopted repo.
+  for (const status of ["ready", "in_progress", "in_review", "done", "blocked"]) {
+    const f = blockedByFindings({ id: "P-1", status, blocked_reason: "r" });
+    assert.deepEqual(f.problems, [], status);
+    if (status !== "blocked") assert.deepEqual(f.warnings, [], status);
+  }
+});
+
+test("a store that predates blocked_by entirely gets the same verdict as before — CLI exit 0", () => {
+  const d = cliFixture({
+    "0001-a.md": task("P-0001"),
+    "0002-b.md": task("P-0002", { status: "blocked", blocked_reason: "waiting on a decision", touches: '["api/**"]' }),
+    "0003-c.md": task("P-0003", { status: "done", touches: '["docs/**"]' }),
+  }, { dirs: ["src", "api", "docs"] });
+  const { code, out } = runCli(d);
+  assert.equal(code, 0, out);
+  assert.doesNotMatch(out, /FAIL/, "adopting the field must not fail a repo that has never used it");
+  assert.match(out, /WARN.*P-0002.*blocked_by/, "it may nudge — a nudge is exit 0");
+  cleanup(d);
+});
+
+test("CLI: a stale blocked_by exits 1 — the PROBLEM half is really a PROBLEM", () => {
+  const d = cliFixture({ "0001-a.md": task("P-0001", { blocked_by: '["P-0002"]' }) });
+  const { code, out } = runCli(d);
+  assert.equal(code, 1, out);
+  assert.match(out, /FAIL.*P-0001/);
   cleanup(d);
 });

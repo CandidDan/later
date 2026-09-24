@@ -23,6 +23,6 @@ jobs:
       contents: read
       issues: write
       id-token: write
-    uses: CandidDan/flow-protocol/.github/workflows/_flow-compass.yml@v1.2.0
+    uses: CandidDan/flow/.github/workflows/_flow-compass.yml@v2
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

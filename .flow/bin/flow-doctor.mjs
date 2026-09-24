@@ -8,13 +8,15 @@
 //
 // PROBLEMS (exit 1): malformed frontmatter · missing required fields · illegal status ·
 //   duplicate ids · in_review without pr/branch · blocked without blocked_reason ·
+//   a populated `blocked_by` on a live non-blocked task, or a malformed `blocked_by` entry ·
 //   in_progress without owner/started · two in_progress tasks with overlapping touches (the
 //   atomic-claim rule was bypassed) · a declared, CALIBRATED source_root that's missing/uncovered,
 //   or a top-level source tree no calibrated source_root covers (the gate-coverage floor — see
 //   below) · a task file present on disk but not committed (the uncommitted-task guard — see
 //   below) · a ready task whose body doesn't meet the readiness bar, or whose `serves` doesn't
 //   resolve against VISION.md (see below).
-// WARNINGS (exit 0): ready task with owner set · ready task with empty touches (concurrency
+// WARNINGS (exit 0): ready task with owner set · blocked task with an empty `blocked_by` (a
+//   nudge, never a failure — see below) · ready task with empty touches (concurrency
 //   relies on it) · live tasks with overlapping touches (they can't run in parallel — sequence
 //   them; don't call them parallel-safe) · board snapshot ids/statuses drifted from the files ·
 //   no source_roots declared yet (adoption nudge) · a source_root still holding the shipped
@@ -205,6 +207,65 @@ function parseListField(head, key) {
     out.push(m[1].split("#")[0].trim().replace(/^["'](.*)["']$/, "$1"));
   }
   return out.filter(Boolean);
+}
+
+// ── blocked_by (flow-0040) ──
+// `blocked` is the only status with no automated way out: `flow-status` owns `in_review`,
+// `flow-done` owns `done`, `flow-recover` heals a stranded `in_progress`, and a blocked task
+// sits there until a human notices the thing it waited on has landed. Almost every real block
+// is a dependency the machine can already see — a PR merging, another task reaching `done` —
+// but it was recorded only in `blocked_reason`, which is prose written for a person. `blocked_by`
+// is the machine-readable half of that sentence: a list, each entry a task id in this repo or a
+// PR url. It never replaces `blocked_reason`; a person still needs the sentence.
+//
+// An entry is a task id (`<slug>-<digits>`, the shape `_TEMPLATE.md` mandates) or an http(s)
+// url. Nothing here checks that a referenced id EXISTS in the store — a dangling reference is a
+// real defect, but resolving it is the job of the sweep that consumes this field, and a store
+// validator that guesses at cross-repo ids would fail closed on data it can't see.
+const TASK_ID_RE = /^[A-Za-z][A-Za-z0-9_]*-\d+$/;
+const BLOCKED_BY_URL_RE = /^https?:\/\/\S+$/;
+export function isBlockedByEntry(entry) {
+  const v = String(entry ?? "").trim();
+  return TASK_ID_RE.test(v) || BLOCKED_BY_URL_RE.test(v);
+}
+
+// The documented opt-out for a block that genuinely isn't mechanical (waiting on a phone call,
+// a legal sign-off, a human decision). A SENTINEL, not prose parsing: the words are fixed and
+// documented in `_TEMPLATE.md` and `PROTOCOL.md`, and they read as part of an ordinary English
+// sentence, so the escape hatch costs a writer nothing and still has an exact shape. The whole
+// point of this field is that `blocked_reason`'s shape is not a contract — so the check reads
+// one literal token out of it and nothing else.
+const NOT_MACHINE_CHECKABLE = /not machine-checkable/i;
+export function blockedByFindings(task) {
+  const problems = [], warnings = [];
+  const id = task.id;
+  const entries = (task.blockedByList ?? []).map((e) => String(e).trim()).filter(Boolean);
+
+  // WARNING, deliberately — and the only one of these three a store written before this field
+  // can trip. Criterion 6 of flow-0040: adopting the field must not turn an already-adopted
+  // repo red, and every blocked task in every such repo predates it. A nudge that names the fix
+  // is the most this can be without punishing people for history.
+  if (task.status === "blocked" && entries.length === 0 && !NOT_MACHINE_CHECKABLE.test(task.blocked_reason ?? ""))
+    warnings.push(`${id}: blocked with an empty blocked_by — nothing but a human can tell when this clears; ` +
+      "list the task id or PR url it waits on in `blocked_by`, or write \"not machine-checkable\" " +
+      "in `blocked_reason` to say the block genuinely isn't mechanical");
+
+  // PROBLEM. Unreachable for a store written before this field (absent is not populated), so it
+  // cannot redden an existing repo, and a dependency that outlived its block is data that lies:
+  // it says "waiting on X" about a task nobody is waiting on. `done` is exempt — there the field
+  // is the historical record of what the task waited on, and clearing it would destroy that.
+  if (entries.length && task.status !== "blocked" && task.status !== "done")
+    problems.push(`${id}: ${task.status} but blocked_by is populated (${entries.join(", ")}) — ` +
+      "a dependency that outlived its block is stale data; clear blocked_by when the block clears");
+
+  // PROBLEM, for the same reason: only data written after this change can be malformed. An
+  // entry nothing can parse is this field failing at the one job it has.
+  for (const entry of entries)
+    if (!isBlockedByEntry(entry))
+      problems.push(`${id}: blocked_by entry "${entry}" is malformed — ` +
+        "each entry must be a task id (PROJ-0007) or a PR url (https://…)");
+
+  return { problems, warnings };
 }
 
 // ── readiness bar (flow-0010) ──
@@ -417,6 +478,7 @@ function parseTask(text) {
            owner: get("owner"), started: get("started"), branch: get("branch"), pr: get("pr"),
            blocked_reason: get("blocked_reason"), touches: get("touches"),
            touchesList: parseListField(head, "touches"),
+           blockedByList: parseListField(head, "blocked_by"),
            servesList: parseListField(head, "serves"), body };
 }
 
@@ -443,6 +505,11 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
       problems.push(`${t.id}: in_review but ${!t.pr ? "pr" : "branch"} is empty — hand-off incomplete or flow-status didn't fire`);
     if (t.status === "blocked" && !t.blocked_reason)
       problems.push(`${t.id}: blocked with no blocked_reason — undecidable AND unexplained`);
+    {
+      const b = blockedByFindings(t);
+      problems.push(...b.problems);
+      warnings.push(...b.warnings);
+    }
     if (t.status === "in_progress" && (!t.owner || !t.started))
       problems.push(`${t.id}: in_progress but ${!t.owner ? "owner" : "started"} is empty — claim was not completed properly`);
     if (t.status === "ready" && t.owner)
@@ -572,8 +639,24 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
             (ready ? problems : warnings).push(`${t.id}: serves "${entry}", which VISION.md declares a NON-GOAL — ` +
               "that is drift with a paper trail; either the task is wrong or the vision has moved (branch + PR)");
           } else if (goal.retired) {
-            warnings.push(`${t.id}: serves "${entry}", a goal under VISION.md's ## Retired — ` +
-              "re-anchor it to a live goal, or drop the task with the goal it served");
+            // `done` is exempt — and ONLY `done`. This warning offers two remedies and a finished
+            // task can take neither. It cannot be dropped: the completed record is the point. And
+            // it cannot be re-anchored either, not as a matter of taste but by rule — `serves`
+            // records the goal a task was WRITTEN to advance, so back-filling a live id onto
+            // finished work falsifies the history rather than correcting it (task-writer says the
+            // same: don't retrofit `serves` onto in_progress/in_review/done/blocked).
+            //
+            // `blocked`, `in_progress` and `in_review` keep warning, because each is still live
+            // and at least one remedy — dropping it — remains a real call for the reader.
+            //
+            // Without this, retiring several goals at once buries the signal: canonical retired
+            // G1-G5 in a single vision rewrite, and every task predating it warned forever. 28 of
+            // the 36 lines named settled history, and the one `ready` task that genuinely needed
+            // re-anchoring sat 30th in the list. A check nobody can act on is a check nobody reads.
+            if (t.status !== "done") {
+              warnings.push(`${t.id}: serves "${entry}", a goal under VISION.md's ## Retired — ` +
+                "re-anchor it to a live goal, or drop the task with the goal it served");
+            }
           }
         }
       }

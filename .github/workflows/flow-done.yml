@@ -12,4 +12,4 @@ jobs:
   flow-done:
     permissions:
       contents: write
-    uses: CandidDan/flow-protocol/.github/workflows/_flow-done.yml@v1.2.0
+    uses: CandidDan/flow/.github/workflows/_flow-done.yml@v2
