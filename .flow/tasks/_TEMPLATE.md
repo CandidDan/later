@@ -14,6 +14,17 @@ branch: ""                # flow/<id>-<slug>, recorded by flow-status when the P
 pr: ""                    # PR url, recorded by flow-status when the PR opens
 issue: ""                 # origin GitHub issue url, if this task was triaged from the inbox
 blocked_reason: ""        # required iff status is blocked
+blocked_by: []            # the machine-readable half of `blocked_reason`, never a replacement
+                          # for it — a person still needs the sentence. Each entry is either a
+                          # task id in this repo ("PROJ-0007") or a PR url, so something other
+                          # than a human can tell when the block has cleared.
+                          # A `blocked` task should carry at least one entry; if the block
+                          # genuinely isn't machine-checkable (waiting on a phone call), say so
+                          # in `blocked_reason` using the words "not machine-checkable" and
+                          # flow-doctor stops asking.
+                          # Clear it when the block clears: flow-doctor reports a populated
+                          # `blocked_by` on a live non-blocked task as stale data. On a `done`
+                          # task it is history, and is left alone.
 serves: []                # the VISION.md goal ids this task advances, e.g. ["G1", "G3"].
                           # Ids come from the repo's own VISION.md — never invented here.
                           # `maintenance` is a reserved id (it is never declared in VISION.md
