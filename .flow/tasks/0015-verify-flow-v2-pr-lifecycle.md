@@ -1,12 +1,12 @@
 ---
 id: "later-0015"
 title: "Verify the Flow v2 pull-request lifecycle"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "codex-flow-v2-proof-20260925"
 created: "2026-09-25"
-started: ""
+started: "2026-09-25T09:35:27Z"
 branch: ""
 pr: ""
 issue: ""
