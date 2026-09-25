@@ -50,6 +50,30 @@ security:
     - "secret handling"
     - "private captured content"
 
+# The review gate runs as PR checks. Security review is conditional on the real trust
+# boundaries below: external entry points, auth/session handling, privileged data access,
+# webhook verification, private captures, database policy, environment contracts and deps.
+review:
+  model: "sonnet"
+  security_model: "opus"
+  security_paths:
+    - ".env.example"
+    - "src/app/api/**"
+    - "src/app/research/**"
+    - "src/lib/assets/**"
+    - "src/lib/capture/**"
+    - "src/lib/email/**"
+    - "src/lib/jobs/**"
+    - "src/lib/operations/**"
+    - "src/lib/processing/**"
+    - "src/lib/research/**"
+    - "src/lib/resolution/**"
+    - "src/lib/supabase/**"
+    - "src/lib/twilio/**"
+    - "supabase/**"
+    - "package.json"
+    - "pnpm-lock.yaml"
+
 # Branch + PR conventions (kept here so agents and CI agree).
 git:
   base_branch: "main"
