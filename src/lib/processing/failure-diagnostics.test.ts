@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  APIConnectionError,
+  APIConnectionTimeoutError,
+  APIUserAbortError,
+} from "@anthropic-ai/sdk";
 
 import {
   describeIntentFailure,
@@ -58,6 +63,15 @@ describe("describeIntentFailure", () => {
 
     expect(diagnostic).toMatchObject({ category, retryable: true, operation: "intent_analysis" });
     expect(diagnostic).not.toHaveProperty("status");
+  });
+
+  it.each([
+    ["an actual SDK connection timeout", new APIConnectionTimeoutError(), "timeout"],
+    ["an actual SDK user abort", new APIUserAbortError(), "timeout"],
+    ["an actual SDK connection error", new APIConnectionError({}), "network"],
+  ])("AC1 categorises %s even though the SDK exposes the generic Error name", (_label, error, category) => {
+    expect(error.name).toBe("Error");
+    expect(describeIntentFailure(error, context)).toMatchObject({ category, retryable: true });
   });
 
   it("AC1 carries the operation of an enriched attempt and both internal ids", () => {

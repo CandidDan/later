@@ -1,3 +1,9 @@
+import {
+  APIConnectionError,
+  APIConnectionTimeoutError,
+  APIUserAbortError,
+} from "@anthropic-ai/sdk";
+
 import { IntentAnalysisError } from "./errors";
 import { IntentResultSchemaError } from "./intent-result";
 
@@ -182,6 +188,14 @@ function categorise(error: unknown): AnthropicFailureCategory {
   // Our own failures are already safe categories: the provider answered, the answer was unusable.
   if (error instanceof IntentResultSchemaError) return "result_schema_invalid";
   if (error instanceof IntentAnalysisError) return "response_invalid";
+
+  // Anthropic's transport exceptions currently inherit Error's generic `name`, so matching
+  // their exported classes is the only reliable way to distinguish a timeout from a network
+  // failure. Keep this before the broader connection class because timeout derives from it.
+  if (error instanceof APIConnectionTimeoutError || error instanceof APIUserAbortError) {
+    return "timeout";
+  }
+  if (error instanceof APIConnectionError) return "network";
 
   const status = safeStatus(error);
 
