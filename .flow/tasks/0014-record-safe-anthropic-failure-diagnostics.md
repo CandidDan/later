@@ -1,7 +1,7 @@
 ---
 id: "later-0014"
 title: "Record safe Anthropic failure diagnostics"
-status: "in_review"
+status: "done"
 priority: 3
 project: "later"
 owner: "claude-worker-later-0014"
