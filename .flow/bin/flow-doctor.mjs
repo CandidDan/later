@@ -14,7 +14,8 @@
 //   or a top-level source tree no calibrated source_root covers (the gate-coverage floor — see
 //   below) · a task file present on disk but not committed (the uncommitted-task guard — see
 //   below) · a ready task whose body doesn't meet the readiness bar, or whose `serves` doesn't
-//   resolve against VISION.md (see below).
+//   resolve against VISION.md (see below) · an intent file with malformed frontmatter, a missing
+//   required field, or a duplicate id (see "intent store" below).
 // WARNINGS (exit 0): ready task with owner set · blocked task with an empty `blocked_by` (a
 //   nudge, never a failure — see below) · ready task with empty touches (concurrency
 //   relies on it) · live tasks with overlapping touches (they can't run in parallel — sequence
@@ -24,7 +25,10 @@
 //   infra behind canonical (only when FLOW_CANONICAL_VERSION is set — see "version drift"
 //   below) · a task touching a top-level directory that doesn't exist yet (new-subsystem tell) ·
 //   no VISION.md (vision layer inactive) · a retired goal, or an unresolvable `serves` on a
-//   non-ready task.
+//   non-ready task · no `.flow/intents/` (intent layer inactive) · an intent whose `evidence` is
+//   declared but isn't a list of paths, whose `status` is outside the three allowed values,
+//   whose `serves` names an id VISION.md doesn't declare, or whose `supersedes` names an id no
+//   intent declares (all of them warnings — see "intent store" below).
 // NOTES (exit 0): a check that was skipped because its precondition wasn't met (e.g. not run
 //   inside a git work tree, so the uncommitted-task guard can't read `git status`).
 //
@@ -63,6 +67,15 @@
 // regex over `### G<n> — ` / `### NG<n> — ` headings, never a Markdown parser. `maintenance` is a
 // reserved id that always resolves and is never declared. Resolution is mechanical only — whether
 // the work *genuinely* advances the goal is flow-compass's job, advisory and out of the gate.
+//
+// INTENT STORE (flow-0063). VISION.md's G11 — work traces to a stated intent — needs somewhere
+// for intents to live and something that can see them. `.flow/intents/*.md` is the store,
+// `_TEMPLATE.md` excluded, and this checks its SHAPE only: frontmatter parses, `id`/`title`/
+// `status`/`created`/`source` present, ids unique. `approved_by`/`approved_at` are deliberately
+// unvalidated (CI stamps them from the merge — ADR-0007) and a malformed `evidence` is a warning,
+// so adopting the layer cannot turn a repo red. No `.flow/intents/` → one warning, same graceful
+// posture as a missing VISION.md. The reasoning, and what was deliberately left unchecked, is in
+// `docs/adr/0007-intent-layer.md`.
 //
 // GATE-COVERAGE FLOOR. config.yml declares `source_roots:` — each `{ path, check }` naming a
 // tree and the command that parses/lints it. The gate only validates trees a command reaches,
@@ -119,39 +132,20 @@ const SOURCE_EXT = new Set([
   ".cs", ".php", ".ex", ".exs", ".swift", ".scala", ".dart",
 ]);
 
-// The sentinel `project-template/.flow/config.yml` ships in `source_roots[].path` / `.check` —
-// documented, load-bearing behaviour (`INIT.md` rule 1: never invent a config value) that marks
-// a repo as not-yet-calibrated rather than drifted. Trailing slashes on `path` are stripped
-// before comparing, so `"REPLACE-ME/"` and `"REPLACE-ME"` both match.
-const PLACEHOLDER = "REPLACE-ME";
-function isPlaceholder(v) {
-  return String(v ?? "").replace(/\/+$/, "") === PLACEHOLDER;
-}
-
-// Parse the `source_roots:` block from config.yml without a YAML dep. Tolerant line scan of:
-//   source_roots:
-//     - path: "app/"
-//       check: "npm run lint"
-function parseSourceRoots(configPath) {
-  if (!existsSync(configPath)) return { exists: false, declared: false, roots: [] };
-  const lines = readFileSync(configPath, "utf8").split("\n");
-  const start = lines.findIndex((l) => /^source_roots:/.test(l));
-  if (start === -1) return { exists: true, declared: false, roots: [] };
-  const roots = [];
-  let cur = null;
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^\S/.test(line)) break;                     // dedent to a new top-level key → block done
-    const trimmed = line.trim();
-    if (trimmed === "" || trimmed.startsWith("#")) continue;
-    const unq = (v) => v.split("#")[0].trim().replace(/^["'](.*)["']$/, "$1");
-    let m;
-    if ((m = trimmed.match(/^-\s*path:\s*(.+)$/))) { cur = { path: unq(m[1]), check: "" }; roots.push(cur); }
-    else if ((m = trimmed.match(/^path:\s*(.+)$/)))  { cur = { path: unq(m[1]), check: "" }; roots.push(cur); }
-    else if ((m = trimmed.match(/^check:\s*(.+)$/)) && cur) { cur.check = unq(m[1]); }
-  }
-  return { declared: true, roots };
-}
+// The `source_roots:` parser and the REPLACE-ME sentinel used to live here, privately. They now
+// live in `source-roots.mjs` (flow-0077), because the gate matrix reads the same block and two
+// parsers of one block drift — with the drifted copy being whichever one nobody is testing. The
+// rules this file applies to what the parser returns are unaltered.
+//
+// WHY THE IMPORT IS OPTIONAL rather than a plain static `import`. `.flow/bin` is copied into a
+// consuming repo by `flow-sync`, and the partial-sync state — flow-doctor.mjs present,
+// source-roots.mjs not yet — is real enough that `_flow-gates.yml` has a step whose whole job is
+// to name it. A static import turns that state into `ERR_MODULE_NOT_FOUND` before flow-doctor
+// checks anything, so a repo mid-sync would lose the store validation too, with a stack trace in
+// place of a diagnosis. Loaded this way it is one NOTE and every other check still runs — the
+// same posture flow-doctor already takes for a check whose precondition is not met. There is
+// still exactly one parser: absent the module there is no fallback scan, only a skip.
+const sourceRootsMod = await import("./source-roots.mjs").then((m) => m, () => null);
 
 // Does any directory at or beneath `dir` (bounded depth, ignoring junk) hold a source file?
 function containsSource(dir, depth = 0) {
@@ -379,6 +373,191 @@ export function parseVisionGoals(text) {
   return { goals, malformed };
 }
 
+// ── intent store (flow-0063) ──
+// VISION.md's G11 says work traces to a stated intent: something a human asked for, written down
+// before it was scoped. `.flow/intents/` is where those live. The store sits on the CODE plane,
+// not the task plane — `plane-guard`'s STORE_PREFIX is `.flow/tasks/`, deliberately not `.flow/`
+// — so an intent arrives by branch and PR, which is what lets the merge itself BE the approval
+// event rather than a field somebody typed.
+//
+// THIS CHECK HAS NO TEETH BEYOND SHAPE, and that is ADR-0004's teeth budget being spent
+// deliberately rather than forgotten. Whether an intent is a *good* intent is judgment, so
+// nothing here reads a word of the prose. What it checks is mechanical and unarguable: the
+// frontmatter parses, the required fields are present, and no two intents claim one id.
+//
+//   · `approved_by` / `approved_at` are UNVALIDATED. CI stamps them from the merge (ADR-0007,
+//     slice 4). A checker that demanded them today would fail every intent that is still waiting
+//     to be approved — which is every intent, at the one moment anyone looks at it.
+//   · `evidence` is an append-only list of repo paths to evidence records written after the work
+//     ships. Malformed → WARNING, never a PROBLEM: the same budget applies, and nothing in this
+//     slice reads the value.
+//   · No `.flow/intents/` at all → exactly one warning and nothing else, matching the posture
+//     flow-doctor already takes toward a missing VISION.md, so an adopting repo stays green.
+//   · `_TEMPLATE.md` is excluded, exactly as it is in `.flow/tasks/` — the published shape is
+//     not an instance of itself, and validating it would fail every repo on the empty fields it
+//     ships on purpose.
+//
+// WHAT flow-0073 ADDED, AND WHY EVERY ONE OF IT IS A WARNING. The template grew `serves`,
+// `supersedes`, a stated `status` vocabulary and the `[assumption]` marker, so the checker has
+// three more mechanical questions it can answer. It is still slice 1, so it still spends no
+// teeth: the whole intent layer is warn-only until slice 2, when tasks start depending on
+// intents and a dangling reference stops being cosmetic.
+//
+//   · `serves` resolves against VISION.md exactly as a task's does, reserved `maintenance`
+//     included — same ids, one store of goals. Unresolvable → WARNING (a ready task gets a
+//     PROBLEM for the same thing; an intent is not a unit of work and nothing is scheduled off
+//     it yet). No VISION.md, or a VISION.md nothing parses out of, and the check is INACTIVE:
+//     not one per-intent line, because the repo-level warning already said the layer is off and
+//     repeating it per file is how an adoption nudge turns into noise.
+//     A `serves` naming a NON-GOAL or a RETIRED goal is deliberately not reported here. Both are
+//     declared ids, so they are not the "does not declare" case, and the task-side warnings that
+//     do cover them exist to prompt a re-anchor or a drop — neither of which is a move anyone
+//     can make on an intent, whose body is never revised.
+//   · `status` outside `proposed | approved | superseded` → WARNING naming the value. Presence is
+//     still a PROBLEM (it is in INTENT_REQUIRED); this is only about the vocabulary. Nothing acts
+//     on the value yet, so a typo must not redden the gate — but a typo that nothing ever
+//     mentions is how `aproved` ends up in the store for a year.
+//   · `supersedes` naming an id no intent in the store declares → WARNING naming both. This is
+//     the one rule that reads across files rather than within one, so ids are collected from
+//     every intent before any of them is checked.
+//   · `[assumption]` lines are NEVER reported, at any status, and there is deliberately no code
+//     below that looks for one. An intent can be approved with assumptions still standing in it
+//     — that is what marking them is for. A checker that nagged about them would teach authors
+//     to stop marking, which costs the marker its entire value.
+export const INTENT_REQUIRED = ["id", "title", "status", "created", "source"];
+
+// The `status` vocabulary, in the order the template lists it. Exported so the template's own
+// guidance can be asserted against the checker's set rather than against a second hand-typed
+// copy of it.
+export const INTENT_STATUSES = ["proposed", "approved", "superseded"];
+
+// A YAML scalar that is not a string, written bare. `evidence` holds repo paths, so these are the
+// values that mean someone typed the wrong kind of thing rather than a path.
+const NON_STRING_SCALAR = /^(-?\d+(?:\.\d+)?|true|false|null|~)$/i;
+
+// Is one frontmatter list entry a plain string? Rejects a flow collection (`[…]`, `{…}`), a
+// mapping (`path: x`), an empty entry, and a bare non-string scalar. Quotes are stripped first,
+// so `"3"` is a string and `3` is not.
+function isScalarStringEntry(raw) {
+  const v = String(raw).trim();
+  if (v === "") return false;
+  const quoted = v.match(/^"([^"]*)"$/) ?? v.match(/^'([^']*)'$/);
+  if (quoted) return quoted[1] !== "";
+  return !/^[[{]/.test(v) && !/:(\s|$)/.test(v) && !NON_STRING_SCALAR.test(v);
+}
+
+// Classify `evidence:` without a YAML dependency (nothing under this tree may take one — it is
+// copied into repos that are not JavaScript projects). Three verdicts:
+//   "absent"      the key is not declared at all
+//   "list"        an empty list, or a list whose every entry is a string — inline or block form
+//   "not-a-list"  anything else
+// Absent and empty collapse to "nothing to report" at the call site on purpose: the template
+// ships `evidence: []`, an intent written before the field existed has neither, and both are
+// the same fact — no evidence has been gathered yet.
+export function evidenceShape(head) {
+  const lines = String(head).split("\n");
+  const i = lines.findIndex((l) => /^\s*evidence:/.test(l));
+  if (i === -1) return "absent";
+  const inline = lines[i].replace(/^\s*evidence:\s*/, "").split("#")[0].trim();
+  if (inline.startsWith("[")) {
+    if (!inline.endsWith("]")) return "not-a-list";
+    const inner = inline.slice(1, -1).trim();
+    return inner === "" || inner.split(",").every(isScalarStringEntry) ? "list" : "not-a-list";
+  }
+  if (inline !== "") return "not-a-list";              // a scalar: `evidence: "docs/x.md"`
+  const entries = [];
+  for (let j = i + 1; j < lines.length; j++) {
+    const t = lines[j].trim();
+    if (t === "" || t.startsWith("#")) continue;
+    const m = t.match(/^-\s*(.*)$/);
+    if (!m) break;                                     // dedent to the next key → list done
+    entries.push(m[1].split("#")[0]);
+  }
+  // `evidence:` with nothing beneath it is YAML null, which is the empty case, not a broken one.
+  return entries.length === 0 || entries.every(isScalarStringEntry) ? "list" : "not-a-list";
+}
+
+function parseIntent(text) {
+  const fm = splitFrontmatter(text);
+  if (!fm) return null;
+  const get = scalarReader(fm.head);
+  const out = {
+    evidence: evidenceShape(fm.head),
+    supersedes: get("supersedes"),
+    servesList: parseListField(fm.head, "serves"),
+  };
+  for (const k of INTENT_REQUIRED) out[k] = get(k);
+  return out;
+}
+
+// Validate `<flowDir>/intents/`. Exported so the shape contract can be asserted directly, and
+// because a consuming repo's own tests are the only place some of this is reachable.
+//
+// `goals` is the VISION.md goal map (`parseVisionGoals().goals`) when the vision layer is active
+// and usable, and null otherwise — no VISION.md, or one nothing parses out of. Null switches the
+// `serves` check OFF rather than failing every entry: the caller has already emitted exactly one
+// repo-level finding about the vision layer, and restating it per intent would bury it.
+export function intentFindings(intentsDir, { goals = null } = {}) {
+  const problems = [], warnings = [];
+  if (!existsSync(intentsDir)) {
+    warnings.push("no .flow/intents/ — the intent layer is inactive, so nothing records who asked " +
+      "for the work or why (VISION.md G11); create the store and write intents with the " +
+      "intent-writer skill");
+    return { problems, warnings, count: 0 };
+  }
+  // Read every intent before checking any of them: `supersedes` resolves against the ids the
+  // whole store declares, so a forward reference to an intent later in the sort order must not
+  // read as dangling.
+  const parsed = [];
+  for (const name of readdirSync(intentsDir).sort()) {
+    if (!name.endsWith(".md") || name === "_TEMPLATE.md") continue;
+    const rel = `.flow/intents/${name}`;
+    const intent = parseIntent(readFileSync(join(intentsDir, name), "utf8"));
+    if (!intent) { problems.push(`${rel}: malformed frontmatter`); continue; }
+    parsed.push({ rel, intent });
+  }
+  const declared = new Set(parsed.map(({ intent }) => intent.id).filter(Boolean));
+  const seen = new Map();
+  for (const { rel, intent } of parsed) {
+    const missing = INTENT_REQUIRED.filter((k) => !intent[k]);
+    if (missing.length) problems.push(`${rel}: missing required field(s): ${missing.join(", ")}`);
+    if (intent.id) {
+      const first = seen.get(intent.id);
+      if (first) problems.push(`duplicate intent id ${intent.id} — declared in both ${first} and ${rel}`);
+      else seen.set(intent.id, rel);
+    }
+    if (intent.evidence === "not-a-list") {
+      warnings.push(`${rel}: evidence is declared but is not a list of paths — it is an append-only ` +
+        "list of repo paths to evidence records, so a scalar or a mapping there will not be read; " +
+        "a warning, not a failure, while nothing consumes it");
+    }
+    // Vocabulary only — an absent `status` is already a PROBLEM above, and this says nothing
+    // about whether the value is the RIGHT one, which is the merge event's business (slice 4).
+    if (intent.status && !INTENT_STATUSES.includes(intent.status)) {
+      warnings.push(`${rel}: status "${intent.status}" is not one of ` +
+        `${INTENT_STATUSES.join(" | ")} — nothing reads the value yet, so this is a warning, but ` +
+        "a status outside the vocabulary will not be read when something does");
+    }
+    const supersedes = (intent.supersedes ?? "").trim();
+    if (supersedes && !declared.has(supersedes)) {
+      warnings.push(`${rel}: supersedes "${supersedes}", which no intent in .flow/intents/ declares — ` +
+        "a replacement has to name the intent it replaces by its id, or the record of the changed " +
+        "mind points at nothing");
+    }
+    if (goals) {
+      for (const raw of intent.servesList ?? []) {
+        const entry = raw.trim();
+        if (!entry || entry.toLowerCase() === MAINTENANCE_SERVES) continue;
+        if (!goals.has(entry.toUpperCase())) {
+          warnings.push(`${rel}: serves "${entry}", which VISION.md does not declare — ` +
+            "goal ids are append-only and never renumbered, so this resolves to nothing");
+        }
+      }
+    }
+  }
+  return { problems, warnings, count: parsed.length };
+}
+
 // The non-wildcard leading path of a glob, trimmed to whole segments — what we compare for overlap.
 //   "a/b/**" -> "a/b" · "a/b/c.ts" -> "a/b/c.ts" · "a/**/x" -> "a"
 function staticPrefix(glob) {
@@ -460,20 +639,36 @@ function realGitPorcelain(flowDir) {
   }
 }
 
-function parseTask(text) {
-  if (!text.startsWith("---")) return null;
+// Split a Markdown file into its frontmatter head and the body after it, or null when there is
+// no closing `---` — which is what every caller reports as malformed frontmatter. Shared by the
+// task reader and the intent reader so the two stores can never disagree about what "parses"
+// means; a file either has frontmatter under both or under neither.
+function splitFrontmatter(text) {
+  if (!String(text).startsWith("---")) return null;
   const end = text.indexOf("\n---", 3);
   if (end === -1) return null;
-  const head = text.slice(3, end);
   // Everything after the closing `---` line. "" when the file is frontmatter only — the
   // readiness bar reports that rather than throwing on a body that isn't there.
   const rest = text.slice(end + 1);
   const nl = rest.indexOf("\n");
-  const body = nl === -1 ? "" : rest.slice(nl + 1);
-  const get = (k) => {
+  return { head: text.slice(3, end), body: nl === -1 ? "" : rest.slice(nl + 1) };
+}
+
+// Reader for a scalar frontmatter field: drops a trailing `# comment` and one layer of double
+// quotes. Returns undefined when the key is absent, which is how "missing" is distinguished
+// from "declared empty" everywhere above.
+function scalarReader(head) {
+  return (k) => {
     const m = head.match(new RegExp(`^${k}:\\s*(.*)$`, "m"));
     return m ? m[1].split("#")[0].trim().replace(/^"(.*)"$/, "$1") : undefined;
   };
+}
+
+function parseTask(text) {
+  const fm = splitFrontmatter(text);
+  if (!fm) return null;
+  const { head, body } = fm;
+  const get = scalarReader(head);
   return { id: get("id"), title: get("title"), status: get("status"), priority: get("priority"),
            owner: get("owner"), started: get("started"), branch: get("branch"), pr: get("pr"),
            blocked_reason: get("blocked_reason"), touches: get("touches"),
@@ -573,16 +768,21 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
   // undeclared top-level source tree may exist. Graceful adoption: a repo that hasn't declared
   // source_roots yet only gets a warning (so dropping this check into an existing project
   // doesn't fail its gate before it's calibrated).
-  const { exists: configExists, declared, roots } = parseSourceRoots(join(flowDir, "config.yml"));
-  if (configExists && !declared) {
+  const { exists: configExists, declared, roots } = sourceRootsMod
+    ? sourceRootsMod.parseSourceRoots(join(flowDir, "config.yml"))
+    : { exists: false, declared: false, roots: [] };
+  if (!sourceRootsMod) {
+    notes.push("gate-coverage floor skipped — source-roots.mjs is not present beside flow-doctor.mjs; " +
+      "run flow-sync to pick up the rest of .flow/bin/");
+  } else if (configExists && !declared) {
     warnings.push("no source_roots declared in config.yml — gate coverage is unverified; " +
       "declare each source tree + the check that parses it (see config.yml note).");
   } else if (declared) {
     for (const r of roots) {
       if (!r.path) { problems.push("source_root with no path in config.yml"); continue; }
-      if (isPlaceholder(r.path) || isPlaceholder(r.check)) {
+      if (sourceRootsMod.isPlaceholder(r.path) || sourceRootsMod.isPlaceholder(r.check)) {
         warnings.push(`source_root "${r.path}" is uncalibrated — it still holds the shipped ` +
-          `"${PLACEHOLDER}" placeholder; calibrate it (INIT.md step 2, or \`flow-init\`) before ` +
+          `"${sourceRootsMod.PLACEHOLDER}" placeholder; calibrate it (INIT.md step 2, or \`flow-init\`) before ` +
           "relying on the gate-coverage floor.");
         continue;
       }
@@ -590,7 +790,7 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
       if (!existsSync(join(repoRoot, r.path))) problems.push(`source_root "${r.path}" does not exist on disk — stale declaration`);
     }
     for (const dir of topLevelSourceDirs(repoRoot)) {
-      if (!roots.some((r) => r.path && !isPlaceholder(r.path) && rootCovers(r.path, dir))) {
+      if (!roots.some((r) => r.path && !sourceRootsMod.isPlaceholder(r.path) && rootCovers(r.path, dir))) {
         problems.push(`source tree "${dir}/" is not covered by any source_root — declare it (with a check) ` +
           `or it's never parsed before production. If it shouldn't be gated, add it to ROOT_IGNORE.`);
       }
@@ -603,6 +803,10 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
   // the check can't retroactively fail history (flow-doctor fails store-wide, not per-PR: one
   // unanchored task would otherwise redden every open PR in the repo, including PRs whose
   // authors can't fix it, because the store is main-only).
+  // Non-null only once the vision layer is both present and usable, which is exactly when a
+  // `serves` on an intent can be resolved. Handed to intentFindings below so the two stores read
+  // one goal map — a second parse could drift from this one and disagree about the same file.
+  let visionGoals = null;
   const visionPath = join(repoRoot, "VISION.md");
   if (!existsSync(visionPath)) {
     warnings.push("no VISION.md at the repo root — the vision layer is inactive and `serves` is unchecked; " +
@@ -620,6 +824,7 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
         '"### G<n> — <title>" (and "### NG<n> — <title>" for non-goals). Until one parses, ' +
         "every serves check is vacuous, which is worse than no check at all.");
     } else {
+      visionGoals = goals;
       for (const t of tasks) {
         const ready = t.status === "ready";
         const entries = (t.servesList ?? []).map((e) => e.trim()).filter(Boolean);
@@ -661,6 +866,13 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
         }
       }
     }
+  }
+
+  // Intent store: shape only, and an absent store is one warning — see the intent-store block above.
+  {
+    const f = intentFindings(join(flowDir, "intents"), { goals: visionGoals });
+    problems.push(...f.problems);
+    warnings.push(...f.warnings);
   }
 
   // Version drift: Flow infra is authored in canonical and repos adopt it, so a repo can fall

@@ -112,6 +112,98 @@ export function verifyOutcome({
   };
 }
 
+// ── the failure notice ── the pure renderer `_flow-queue-runner.yml`'s "Explain what happens to
+// the claim" step writes to `$GITHUB_STEP_SUMMARY`.
+//
+// It lives here because it needs exactly the facts the verify step already derived from
+// `origin`, and that step used to discard them: they were shell locals, the step carried no
+// `id:`, and nothing reached `$GITHUB_OUTPUT`. So the notice printed a two-branch hypothetical
+// ("which way it goes depends on what this run managed to push") from a job that knew which way
+// it went, and opened with the flat claim "No PR was opened" — which `if: failure()` never
+// established, and which a worker that pushes, opens its PR and *then* exits non-zero makes
+// false. One decision, one description, one place.
+//
+// Returns { outcome, markdown }:
+//   "pr-open"      an open PR exists -> name it, and never claim that no PR was opened. Takes
+//                  precedence over every branch fact, including the contradictory
+//                  {no branch, open PR}: a cloud worker can be forced onto a non-`flow/` branch,
+//                  which is why the step falls back to matching the `[<id>]` title prefix at all.
+//   "branch-ahead" branch on origin with commits -> name it and the count; flow-recover reopens
+//                  the PR from it.
+//   "branch-stale" branch on origin but not ahead of main -> nothing on it to recover.
+//   "nothing"      no branch reached origin -> the task resets to `ready` past the staleness
+//                  threshold.
+//
+// What no outcome may drop, because it is the part that was always right: this job does not
+// release the claim, and flow-recover owns that decision. Releasing it from the failure path
+// would race a worker that is still finishing.
+export function renderClaimNotice({
+  taskId = "",
+  branch = "",
+  branchExists = false,
+  ahead = 0,
+  hasOpenPr = false,
+} = {}) {
+  const id = String(taskId);
+  const commits = Math.max(0, Number(ahead) || 0);
+  // `branchExists` with no name is not a state the workflow can produce, but the renderer is
+  // total by design — an unnamed branch still gets described rather than rendered as "`undefined`".
+  const branchLabel = branch ? `\`${branch}\`` : `the \`flow/${id}-*\` branch on \`origin\``;
+
+  let outcome;
+  let body;
+  if (hasOpenPr) {
+    outcome = "pr-open";
+    const where = branch
+      ? `from ${branchLabel}`
+      : `titled \`[${id}] …\` (on a branch outside the \`flow/${id}-*\` convention)`;
+    body = [
+      `**A pull request is open** for \`${id}\`, ${where} — this run did open a PR, and the work`,
+      `is on it. The failure above is the job's exit status, not the state of the work: review`,
+      `the PR as usual, and read the worker's log for what it hit after opening it.`,
+    ];
+  } else if (branchExists && commits > 0) {
+    outcome = "branch-ahead";
+    body = [
+      `**No PR is open, but the work is on \`origin\`**: branch ${branchLabel},`,
+      `${commits} commit${commits === 1 ? "" : "s"} ahead of \`main\`. **flow-recover** reopens the`,
+      `PR from that branch on its next sweep, so the work survives this run.`,
+    ];
+  } else if (branchExists) {
+    outcome = "branch-stale";
+    body = [
+      `**No PR is open, and the branch carries nothing**: ${branchLabel} is on \`origin\` but is`,
+      `not ahead of \`main\`, so there are no commits for flow-recover to reopen a PR from.`,
+      `\`${id}\` resets to \`ready\` once its claim passes the staleness threshold, and the next`,
+      `queue-runner starts it over from zero.`,
+    ];
+  } else {
+    outcome = "nothing";
+    body = [
+      `**No PR is open and no branch reached \`origin\`** — this run produced nothing recoverable.`,
+      `\`${id}\` resets to \`ready\` once its claim passes the staleness threshold, and the next`,
+      `queue-runner starts it over from zero.`,
+    ];
+  }
+
+  const markdown = [
+    `### Worker run failed for \`${id}\``,
+    "",
+    ...body,
+    "",
+    `Either way the claim on \`${id}\` is **not released by this job**, and must not be:`,
+    `releasing it from the failure path would race a worker that is still finishing.`,
+    `**flow-recover** resolves it on the next sweep, on its own schedule, from the evidence on`,
+    `the remote.`,
+    "",
+    `If this is the same task capping repeatedly, the cap is the symptom to look past, not the`,
+    `thing to raise: the outcome above is what this run actually left behind, so compare it with`,
+    `what the previous runs left — then consider splitting the task.`,
+  ].join("\n");
+
+  return { outcome, markdown };
+}
+
 // Thin file read: the status + blocked_reason of the task whose frontmatter id matches — the
 // same store walk flow-open-pr's readTaskTitle does. Returns { found:false } when no task file
 // matches (or the directory is unreadable): the caller treats that as "outcome 3 cannot hold",
@@ -183,12 +275,38 @@ export function verifyArgsFromFlags(flags, tasksDir) {
   };
 }
 
+// Flags -> renderClaimNotice inputs. The `--branch`/`--ahead` values come from the verify
+// step's outputs, so the same flag names carry the same meaning in both modes.
+export function explainArgsFromFlags(flags) {
+  return {
+    taskId: String(flags["task-id"] || ""),
+    branch: String(flags.branch || ""),
+    branchExists: Number(flags["branch-exists"] || 0) > 0,
+    ahead: Number(flags.ahead || 0) || 0,
+    hasOpenPr: Number(flags["has-open-pr"] || 0) > 0,
+  };
+}
+
+// One CLI body, shared by this file's own entry point and canonical's adapter, so a mode added
+// to one cannot be missing from the other. `--mode explain` renders the failure notice to
+// stdout and exits 0 — it describes an outcome, it never judges one; the default mode returns
+// the verdict and the exit code the queue-runner job reads.
+export function runCli(argv, tasksDir, io = {}) {
+  const flags = parseFlags(argv);
+  if (flags.mode === "explain") {
+    const { log = console.log, exit = process.exit } = io;
+    log(renderClaimNotice(explainArgsFromFlags(flags)).markdown);
+    exit(0);
+    return;
+  }
+  reportAndExit(runVerify(verifyArgsFromFlags(flags, tasksDir)), io);
+}
+
 // ── CLI ── In an adopting repo this file is copied to `.flow/bin/`, so resolving the store
 // relative to this file's own location lands on that repo's real `.flow/tasks/`. In canonical
 // this default would land on the template's fixture store — which is why canonical runs its
 // adapter, never this file directly.
 if (__isMain) {
-  const flags = parseFlags(process.argv.slice(2));
   const tasksDir = join(resolve(dirname(fileURLToPath(import.meta.url)), ".."), "tasks");
-  reportAndExit(runVerify(verifyArgsFromFlags(flags, tasksDir)));
+  runCli(process.argv.slice(2), tasksDir);
 }
