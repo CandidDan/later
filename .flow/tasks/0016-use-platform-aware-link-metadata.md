@@ -1,16 +1,16 @@
 ---
 id: "later-0016"
 title: "Use platform-aware metadata retrieval for captured links"
-status: "in_progress"
+status: "blocked"
 priority: 3
 project: "later"
 owner: "claude-worker-20260929T071907Z"
 created: "2026-09-29"
 started: "2026-09-29T07:19:07Z"
-branch: ""
+branch: "flow/later-0016-platform-aware-link-metadata"
 pr: ""
 issue: ""
-blocked_reason: ""
+blocked_reason: "Implementation is complete and green on branch flow/later-0016-platform-aware-link-metadata (build, lint, test 484 passed, coverage 81.49% vs floor 15), but this worker cannot perform the step-7 hand-off. gh pr create is refused with 'GitHub Actions is not permitted to create or approve pull requests', and flow-open-pr never fires because GitHub suppresses workflow triggers for pushes authenticated with the Actions GITHUB_TOKEN -- flow-queue-runner.yml deliberately passes only CLAUDE_CODE_OAUTH_TOKEN, not FLOW_PAT, so every push from a queue-runner worker is invisible to flow-open-pr. Not machine-checkable: clearing this needs a human to open the PR (gh pr create --head flow/later-0016-platform-aware-link-metadata --title '[later-0016] Use platform-aware metadata retrieval for captured links'), after which flow-status takes over normally. No product decision is outstanding and no code work remains."
 blocked_by: []
 serves: ["G1"]
 touches: ["src/lib/resolution/**"]
@@ -18,6 +18,7 @@ labels: ["resolution", "metadata", "youtube", "instagram", "security"]
 notes:
   - "Production evidence on 2026-09-28/29: one WhatsApp YouTube capture and one WhatsApp Instagram Reel capture both completed initial Haiku intent analysis, then exhausted three source-resolution attempts with metadata_unavailable. The Instagram capture is e04277c1-2d9d-4df3-aa13-64ec3b861d44; its private URL/content must not be copied into code, fixtures, logs or task notes."
   - "2026-09-29 worker: implementation pushed on branch flow/later-0016-platform-aware-link-metadata (commit 'feat(resolution): route recognised platforms to explicit metadata surfaces'). Done: new src/lib/resolution/platform.ts with platformMetadataRoute + fetchPlatformAwareMetadata (YouTube -> fixed https://www.youtube.com/oembed, Instagram -> permanent metadata_unsupported_platform, everything else -> unchanged fetchPublicMetadata); metadata.ts gained the METADATA_ERROR_CODES allow-list, an optional numeric status on MetadataError so a 4xx can be re-coded permanent, and an exported boundedMetadataText; process.ts default fetcher switched to fetchPlatformAwareMetadata. Lint clean. NOT done yet: the per-criterion tests (platform.test.ts) and the gate run. Note pnpm test needs pnpm build first -- src/lib/supabase/server.test.ts scans .next/static and fails on a clean tree; that failure is pre-existing and not a regression. Next action: write src/lib/resolution/platform.test.ts covering AC1-AC7, run build/lint/test/coverage, then open the PR titled [later-0016]."
+  - "2026-09-29 worker (final): all seven acceptance criteria implemented with named proving tests; branch flow/later-0016-platform-aware-link-metadata is pushed and rebased onto main at 84e2f86. Diff is confined to src/lib/resolution/** (index.ts, metadata.ts, platform.ts, platform.test.ts, process.ts, process.test.ts) and touches no .flow/tasks file. Shipped: platform.ts routes YouTube to the fixed https://www.youtube.com/oembed endpoint (16 KiB ceiling, title + author_name only, canonical URL from Later's own derivation, embed HTML ignored) and routes the whole instagram.com host to a permanent metadata_unsupported_platform notice with query/fragment stripped and no request made; every other URL keeps the unchanged generic SSRF-safe path. metadata.ts gained the closed METADATA_ERROR_CODES allow-list, an optional numeric MetadataError.status (never persisted) so a 404/401/403 becomes permanent metadata_unsupported while 408/425/429/5xx, timeout and DNS stay retryable metadata_unavailable, and the shared exported boundedMetadataText reducer. Gate run locally: pnpm build pass, pnpm lint 0 errors (3 pre-existing warnings in .flow/bin/*.mjs), pnpm test 484 passed / 3 skipped, pnpm test:coverage 81.49% statements with platform.ts at 98.11%. Note pnpm test needs pnpm build first, because src/lib/supabase/server.test.ts scans .next/static. Only looks done: nothing -- the code is finished; the PR simply does not exist yet, see blocked_reason. A full PR description with the ticked criteria checklist and the proving test named for each is ready at /tmp/pr.md on the (now discarded) runner, so it will need rewriting from the criteria list when the PR is opened. Exact next action: a human (or any session holding FLOW_PAT) runs gh pr create for that branch with title '[later-0016] Use platform-aware metadata retrieval for captured links', then gh pr ready; no rebase or code change is needed first."
   - "A sanitized diagnostic against an unrelated public YouTube video returned a 1,415,582-byte watch page, above Later's 128 KiB metadata limit, while YouTube's oEmbed endpoint returned a 792-byte JSON response containing title and author. The safety limit is doing its job; the resolver is using the wrong retrieval surface."
 ---
 
