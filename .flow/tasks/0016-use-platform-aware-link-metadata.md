@@ -1,12 +1,12 @@
 ---
 id: "later-0016"
 title: "Use platform-aware metadata retrieval for captured links"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "claude-worker-20260929T071907Z"
 created: "2026-09-29"
-started: ""
+started: "2026-09-29T07:19:07Z"
 branch: ""
 pr: ""
 issue: ""
