@@ -11,8 +11,14 @@ import type { CaptureContext, RevealedRun } from "../../lib/research/types";
 import { browserSupabaseClient } from "../../lib/supabase/browser";
 
 import {
+  MAGIC_LINK_FAILURE_MESSAGE,
+  requestResearchMagicLink,
+  restoreResearchAccessToken,
+} from "./auth";
+import {
   EmptyPanel,
   ErrorPanel,
+  MagicLinkSentPanel,
   RecallPanel,
   RevealPanel,
   SignInPanel,
@@ -60,12 +66,11 @@ export default function ResearchConsole() {
   const [state, dispatch] = useReducer(researchConsoleReducer, INITIAL_CONSOLE_STATE);
   const [token, setToken] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [linkSent, setLinkSent] = useState(false);
 
   useEffect(() => {
-    browserSupabaseClient()
-      .auth.getSession()
-      .then(({ data }) => {
-        const active = data.session?.access_token ?? null;
+    restoreResearchAccessToken(browserSupabaseClient().auth)
+      .then((active) => {
         setToken(active);
 
         if (!active) {
@@ -109,21 +114,30 @@ export default function ResearchConsole() {
     }
   }, [token, state.phase, load]);
 
-  const signIn = useCallback((form: FormData) => {
+  const signIn = useCallback(async (form: FormData) => {
     setPending(true);
-    browserSupabaseClient()
-      .auth.signInWithPassword({ email: text(form, "email"), password: text(form, "password") })
-      .then(({ data, error }) => {
-        if (error || !data.session) {
-          dispatch({ type: "signed_out", message: "Sign-in failed." });
-          return;
-        }
+    setLinkSent(false);
 
-        setToken(data.session.access_token);
-        dispatch({ type: "loading" });
-      })
-      .catch(() => dispatch({ type: "failed", message: UNAVAILABLE }))
-      .finally(() => setPending(false));
+    let accepted = false;
+
+    try {
+      accepted = await requestResearchMagicLink(
+        browserSupabaseClient().auth,
+        text(form, "email"),
+        window.location.origin,
+      );
+    } catch {
+      accepted = false;
+    }
+
+    if (accepted) {
+      dispatch({ type: "signed_out", message: null });
+      setLinkSent(true);
+    } else {
+      dispatch({ type: "signed_out", message: MAGIC_LINK_FAILURE_MESSAGE });
+    }
+
+    setPending(false);
   }, []);
 
   const submitRecall = useCallback(
@@ -205,7 +219,12 @@ export default function ResearchConsole() {
 
   return renderConsole(state, {
     pending,
+    linkSent,
     signIn,
+    restartSignIn: () => {
+      setLinkSent(false);
+      dispatch({ type: "signed_out", message: null });
+    },
     submitRecall,
     submitRating,
     retry: () => dispatch({ type: "loading" }),
@@ -216,7 +235,9 @@ function renderConsole(
   state: ConsoleState,
   actions: {
     pending: boolean;
+    linkSent: boolean;
     signIn(form: FormData): void;
+    restartSignIn(): void;
     submitRecall(capture: CaptureContext): (form: FormData) => void;
     submitRating(form: FormData): void;
     retry(): void;
@@ -224,7 +245,11 @@ function renderConsole(
 ) {
   switch (state.phase) {
     case "signed_out":
-      return <SignInPanel message={state.message} pending={actions.pending} onSubmit={actions.signIn} />;
+      return actions.linkSent ? (
+        <MagicLinkSentPanel onStartOver={actions.restartSignIn} />
+      ) : (
+        <SignInPanel message={state.message} pending={actions.pending} onSubmit={actions.signIn} />
+      );
 
     case "recall":
     case "recorded":

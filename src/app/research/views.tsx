@@ -204,7 +204,7 @@ export function SignInPanel({
   onSubmit(form: FormData): void;
 }) {
   return (
-    <section className={panel} data-phase="signed_out">
+    <section className={panel} data-phase="signed_out" aria-busy={pending}>
       <form className="flex flex-col gap-4" action={onSubmit} aria-label="Sign in">
         <label className="flex flex-col gap-2 text-base">
           Email
@@ -216,21 +216,29 @@ export function SignInPanel({
             required
           />
         </label>
-        <label className="flex flex-col gap-2 text-base">
-          Password
-          <input
-            className="min-h-12 rounded-md border border-zinc-200 p-3 dark:border-zinc-800"
-            type="password"
-            name="password"
-            autoComplete="current-password"
-            required
-          />
-        </label>
         {message ? <p className="text-base text-red-600">{message}</p> : null}
+        <p className="text-sm text-zinc-500" aria-live="polite">
+          {pending ? "Requesting a secure sign-in link…" : "We'll email you a secure sign-in link."}
+        </p>
         <button className={action} type="submit" disabled={pending}>
-          Sign in
+          {pending ? "Sending link…" : "Email me a sign-in link"}
         </button>
       </form>
+    </section>
+  );
+}
+
+export function MagicLinkSentPanel({ onStartOver }: { onStartOver(): void }) {
+  return (
+    <section className={panel} data-phase="magic_link_sent" role="status" aria-live="polite">
+      <h2 className="text-lg font-medium">Check your email</h2>
+      <p className="mt-2 text-base text-zinc-600 dark:text-zinc-400">
+        If that address can use the research console, a sign-in link will arrive shortly. Open it
+        in this browser to continue.
+      </p>
+      <button className={`${action} mt-4`} type="button" onClick={onStartOver}>
+        Use a different email
+      </button>
     </section>
   );
 }

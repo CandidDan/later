@@ -53,10 +53,18 @@ ready.
 ## 2. Create and migrate the production Supabase project
 
 1. Create the production Supabase project in the dashboard. In Auth, create the single experiment
-   user and record its UUID in the secret manager. Use that UUID for `TWILIO_CAPTURE_USER_ID`,
-   `EMAIL_CAPTURE_USER_ID` and `RESEARCH_USER_ID` unless the approved experiment plan separates
-   those identities.
-2. Link the checkout interactively with `supabase link --project-ref "$SUPABASE_PROJECT_REF"`.
+   user and record its UUID in the secret manager. The evaluator must already exist in Supabase
+   Auth, and its UUID must equal `RESEARCH_USER_ID`: the research console requests an email magic
+   link with automatic user creation disabled and does not create an account. Use that UUID for
+   `TWILIO_CAPTURE_USER_ID`, `EMAIL_CAPTURE_USER_ID` and `RESEARCH_USER_ID` unless the approved
+   experiment plan separates those identities.
+2. In Supabase Auth → URL Configuration, set the production **Site URL** to
+   `https://notfor.now` and add `https://notfor.now/research` to the allowed **Redirect URLs**.
+   The console builds its callback from the current browser origin, so add the exact
+   `<deployment-origin>/research` URL for every preview or local deployment that should be able to
+   sign in; never use a production callback for a preview deployment. Keep the Magic Link email
+   template's `{{ .ConfirmationURL }}` variable intact.
+3. Link the checkout interactively with `supabase link --project-ref "$SUPABASE_PROJECT_REF"`.
    Authenticate through the CLI's secure interactive flow; never provide a database password as an
    argument. Review the target project, then apply the entire versioned chain with `supabase db push`:
 
@@ -69,14 +77,14 @@ ready.
    - `20260915010000_source_resolution.sql`
    - `20260915150000_segment_resolution.sql`
 
-3. Confirm in the dashboard that the `capture-assets` bucket remains private, RLS is enabled, and
+4. Confirm in the dashboard that the `capture-assets` bucket remains private, RLS is enabled, and
    the extensions `pg_cron`, `pg_net`, `pgcrypto` and Vault are installed. Do not weaken policies for
    smoke testing.
-4. In the Supabase Vault interface in the dashboard, create `later_jobs_process_url` with the exact value
+5. In the Supabase Vault interface in the dashboard, create `later_jobs_process_url` with the exact value
    `https://notfor.now/api/jobs/process`, and `later_jobs_process_secret` with the same secret later
    entered as Vercel's `JOBS_PROCESS_SECRET`. Use the Vault UI, not SQL. Restrict the `vault` and
    `net` schemas to trusted database operators.
-5. The migration creates the named `later-intent-processing` cron job. Keep it paused until the
+6. The migration creates the named `later-intent-processing` cron job. Keep it paused until the
    deployment and channel setup are complete:
 
 ```sql
