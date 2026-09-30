@@ -64,7 +64,78 @@ const __isMain = (() => {
 // ---------------------------------------------------------------------------------------
 
 export const DEFAULT_CANONICAL_REPO = "CandidDan/flow";
-export const DEFAULT_CANONICAL_REF = "v1";
+
+// ── the default canonical ref: DERIVED from a VERSION stamp, never typed ───────────────
+//
+// WHY THERE IS NO `DEFAULT_CANONICAL_REF = "v1"` HERE ANY MORE (flow-0058). A literal is a second
+// source of truth for which release this is, and it loses. The 2.0.0 re-cut moved root `VERSION`,
+// `project-template/.flow/VERSION` and — once flow-0056 landed — all ten published callers, and
+// left this one constant at `v1`. So every repo `flow-init` would have created was BORN pinned to
+// the previous major while its own `.flow/VERSION` said 2.0.0, and nothing reported it, because a
+// pin at a tag that still resolves is indistinguishable from a correct one.
+//
+// The default is now computed from the same file `buildPlan` stamps `.flow/VERSION` from, so the
+// pins and the stamp agree by construction rather than by someone remembering. A repo adopted from
+// a 3.0.0 canonical is born on `@v3` with no edit here — the property the constant could not have,
+// and the reason this is a derivation rather than `"v2"` with a test next to it.
+//
+// It is still never a GUESS: if no stamp answers, the ref becomes a named validation failure
+// (see validateInputs) rather than a value flow-init invented.
+
+/** `"2.0.0\n"` → `"v2"`. Anything without a numeric major → `null`, never a guess. */
+export function refFromVersion(text) {
+  const m = /^(\d+)(?:\.|$)/.exec(String(text ?? "").trim());
+  return m ? `v${m[1]}` : null;
+}
+
+// This module's own directory, through realpath. Reached via a symlink, the raw path's parents
+// belong to the LINK rather than to the checkout, and every lookup below would quietly read
+// another tree's VERSION while still exiting 0 — the same trap __isMain above exists for.
+const MODULE_DIR = (() => {
+  try { return __realpathSync(dirname(__fileURLToPath(import.meta.url))); }
+  catch { return dirname(fileURLToPath(import.meta.url)); }
+})();
+
+// Where "the canonical this adoption comes from" keeps its version stamp, in priority order.
+// Absolute paths; `resolveDefaultRef` tries them in turn and takes the first that parses.
+//
+//   1. `<--from>/VERSION` — the authority whenever it exists, because it is the very file
+//      `buildPlan` copies into the new repo's `.flow/VERSION`. Deriving the ref from anything
+//      else while copying the stamp from this one is how the two halves end up disagreeing,
+//      which is the whole defect.
+//   2. `<canonical root>/VERSION` — for a run with no `--from`, i.e. the clone path, where the
+//      ref has to be known BEFORE there is a checkout to read. This file ships as
+//      `project-template/.flow/bin/flow-init.mjs`, so three levels up is canonical's root. It is
+//      confirmed by the same `project-template/` test `buildPlan` uses to accept a checkout, not
+//      by the path shape alone — a directory that merely happens to sit three levels up must not
+//      get to answer.
+//   3. `<repo>/.flow/VERSION` — for the copy that travels into an adopting repo, where `.flow/`
+//      is this file's parent. That stamp records the canonical the repo adopted, which is the
+//      right answer in that context too.
+export function versionStamps({ from = "", moduleDir = MODULE_DIR } = {}, exists = existsSync) {
+  const out = [];
+  if (from) out.push(join(resolve(from), "VERSION"));
+  const canonicalRoot = resolve(moduleDir, "..", "..", "..");
+  if (exists(join(canonicalRoot, "project-template"))) out.push(join(canonicalRoot, "VERSION"));
+  out.push(join(resolve(moduleDir, ".."), "VERSION"));
+  return out;
+}
+
+// The ref a run with neither `--canonical-ref` nor `canonical.ref` adopts from, plus the stamp it
+// came from so the run can say so out loud — a default that arrives silently is indistinguishable
+// from a value someone chose, the same rule security.focus already follows. `{ ref: "", stamp: "" }`
+// when nothing answers.
+export function resolveDefaultRef(opts = {}, {
+  exists = existsSync, read = (p) => readFileSync(p, "utf8"),
+} = {}) {
+  for (const stamp of versionStamps(opts, exists)) {
+    if (!exists(stamp)) continue;
+    let ref = null;
+    try { ref = refFromVersion(read(stamp)); } catch { continue; }
+    if (ref) return { ref, stamp };
+  }
+  return { ref: "", stamp: "" };
+}
 
 // The five commands, in the order they run. Named here so a missing one is reported by name.
 export const COMMAND_KEYS = ["install", "build", "lint", "test", "coverage"];
@@ -149,7 +220,7 @@ export function parseSourceRootFlag(raw) {
 // Merge a JSON config file (shaped like .flow/config.yml) with flags; flags win. Returns the
 // input record plus any read/parse errors — never throws, so every problem is reported in one
 // pass rather than one exit per run.
-export function loadInputs(argv, readFile = (p) => readFileSync(p, "utf8")) {
+export function loadInputs(argv, readFile = (p) => readFileSync(p, "utf8"), stampIo = {}) {
   const { flags, errors } = parseArgs(argv);
   let file = {};
   if (flags.config) {
@@ -171,6 +242,14 @@ export function loadInputs(argv, readFile = (p) => readFileSync(p, "utf8")) {
 
   const rawCoverage = pick(flags.coverageMin, file.coverage_min);
 
+  // The ref is the one input with a default, and the default is DERIVED — see refFromVersion
+  // above. Precedence is unchanged (`--canonical-ref` → `canonical.ref` → default); only the
+  // last step stopped being a literal. The lookup is skipped entirely when the caller named a
+  // ref, so an explicit run never depends on a stamp being present.
+  const namedRef = pick(flags.canonicalRef, file.canonical?.ref) || "";
+  const derived = namedRef ? { ref: "", stamp: "" }
+    : resolveDefaultRef({ from: flags.from ?? "" }, stampIo);
+
   return {
     inputs: {
       project: {
@@ -185,7 +264,11 @@ export function loadInputs(argv, readFile = (p) => readFileSync(p, "utf8")) {
       security: { focus, defaulted: focus.length === 0 },
       canonical: {
         repo: pick(flags.canonicalRepo, file.canonical?.repo) ?? DEFAULT_CANONICAL_REPO,
-        ref: pick(flags.canonicalRef, file.canonical?.ref) ?? DEFAULT_CANONICAL_REF,
+        ref: namedRef || derived.ref,
+        // The stamp `ref` was derived from; empty when the caller named it. Carried so the run
+        // and `--help` both report the same value from the same place — a `--help` advertising a
+        // default the code no longer uses is how a stale pin gets re-introduced by hand.
+        derivedFrom: derived.stamp,
       },
       from: flags.from ?? "",
       target: flags.target ?? ".",
@@ -259,7 +342,12 @@ export function validateInputs(inputs, { targetDir, exists = existsSync } = {}) 
 
   if (!OWNER_REPO.test(String(inputs.canonical.repo || "")))
     errors.push(`canonical.repo must be "owner/repo" (got ${JSON.stringify(inputs.canonical.repo)})`);
-  if (!REF.test(String(inputs.canonical.ref || "")))
+  if (!String(inputs.canonical.ref ?? "").trim())
+    errors.push("canonical.ref is required and could not be derived — no VERSION stamp answered for " +
+      "the canonical being adopted (tried <--from>/VERSION, canonical's root VERSION, and the " +
+      ".flow/VERSION beside this tool). Pass --canonical-ref: flow-init invents no value, and a " +
+      "guessed ref would pin a new repo at a release nobody chose");
+  else if (!REF.test(String(inputs.canonical.ref)))
     errors.push(`canonical.ref ${JSON.stringify(inputs.canonical.ref)} is not a plain git ref — refs are interpolated into workflow YAML and a git command line, so only [A-Za-z0-9._/-] is accepted`);
 
   return errors;
@@ -490,7 +578,16 @@ export function resolveCanonical({ from, repo, ref }, run = spawnSync) {
 
 // ── run ────────────────────────────────────────────────────────────────────────────────
 
-const USAGE = `flow-init — the mechanical half of Flow adoption (INIT.md steps 1-4)
+// The help text is a FUNCTION of the resolved default, not a constant beside it. flow-0056 found
+// `_flow-sync.yml`'s dispatch-input description still advertising "Default v1." after the code had
+// moved, on the grounds that a description a human copies a ref out of is how a stale pin gets
+// re-introduced by hand. `--help` is the same trap with a larger audience, so the advertised
+// default and the value a real run uses come from one place — `inputs.canonical`.
+export function renderUsage({ ref = "", stamp = "" } = {}) {
+  const shown = ref || "none — no VERSION stamp answered, so --canonical-ref is required";
+  const where = ref && stamp ? `, derived from ${stamp}` : "";
+  const jsonRef = ref ? JSON.stringify(ref) : '"<a tag or branch>"';
+  return `flow-init — the mechanical half of Flow adoption (INIT.md steps 1-4)
 
   node flow-init.mjs --config init.json [--target DIR] [--dry-run] [--force]
 
@@ -501,7 +598,10 @@ Inputs (flags override --config; the JSON is shaped like .flow/config.yml):
   --coverage-min N                  measured floor, never a round guess    REQUIRED
   --source-root "src/=npm run lint" repeatable; must exist in the target   REQUIRED
   --security-focus TEXT             repeatable; defaults to the generic three
-  --canonical-repo / --canonical-ref  where the reusables come from (default ${DEFAULT_CANONICAL_REPO}@${DEFAULT_CANONICAL_REF})
+  --canonical-repo / --canonical-ref  where the reusables come from
+      default: ${DEFAULT_CANONICAL_REPO}@${shown}${where}
+      The ref default is the major of the canonical's own VERSION stamp, never a literal, so an
+      adopted repo's pins and its .flow/VERSION cannot disagree about which release it is on.
   --from DIR                        use a canonical checkout on disk instead of cloning
   --target DIR                      the repo to initialise (default: cwd)
   --dry-run                         print the plan, write nothing
@@ -517,16 +617,20 @@ The --config file, for the same inputs as JSON (flags win where both are given):
     "coverage_min": 81.5,
     "source_roots": [{ "path": "src/", "check": "npm run lint" }],
     "security": { "focus": ["row-level security policies"] },
-    "canonical": { "repo": "CandidDan/flow", "ref": "v1" }
+    "canonical": { "repo": "${DEFAULT_CANONICAL_REPO}", "ref": ${jsonRef} }
   }
 
 Exits 0 (written / dry run / already identical), 1 (bad input), 3 (differences, no --force).`;
+}
 
 export function runInit(argv, {
   log = console.log, logErr = console.error, cwd = process.cwd(), fetchCanonical = resolveCanonical,
 } = {}) {
   const { inputs, errors: argErrors } = loadInputs(argv);
-  if (inputs.help) { log(USAGE); return 0; }
+  if (inputs.help) {
+    log(renderUsage({ ref: inputs.canonical.ref, stamp: inputs.canonical.derivedFrom }));
+    return 0;
+  }
 
   const targetDir = resolve(cwd, inputs.target || ".");
   const errors = [...argErrors, ...validateInputs(inputs, { targetDir })];
@@ -552,6 +656,8 @@ export function runInit(argv, {
   log(`flow-init: ${inputs.dryRun ? "plan (dry run)" : "initialising"} ${targetDir}`);
   log(`  canonical  ${inputs.canonical.repo}@${inputs.canonical.ref}  (${plan.root})`);
   log(`  stamp      .flow/VERSION -> ${plan.stamp}`);
+  if (inputs.canonical.derivedFrom)
+    log(`  note       --canonical-ref not supplied — derived @${inputs.canonical.ref} from ${inputs.canonical.derivedFrom}`);
   log(`  callers    ${plan.callers.length} pinned @${inputs.canonical.ref}: ${plan.callers.join(", ")}`);
   if (inputs.security.defaulted)
     log("  note       security.focus not supplied — wrote the generic defaults; tailor them in .flow/config.yml");
