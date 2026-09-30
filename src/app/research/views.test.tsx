@@ -3,7 +3,15 @@ import { describe, expect, it } from "vitest";
 
 import type { CaptureContext, RevealedRun } from "../../lib/research/types";
 
-import { CapturePanel, EmptyPanel, ErrorPanel, RecallPanel, RevealPanel } from "./views";
+import {
+  CapturePanel,
+  EmptyPanel,
+  ErrorPanel,
+  MagicLinkSentPanel,
+  RecallPanel,
+  RevealPanel,
+  SignInPanel,
+} from "./views";
 
 const capture: CaptureContext = {
   captureId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
@@ -48,6 +56,50 @@ function visibleText(markup: string): string {
 }
 
 describe("research console views", () => {
+  it("later-0017 AC1 requests an email without rendering or retaining a password field", () => {
+    const markup = renderToStaticMarkup(
+      <SignInPanel message={null} pending={false} onSubmit={noop} />,
+    );
+
+    expect(markup).toContain('type="email"');
+    expect(markup).toContain('name="email"');
+    expect(markup).not.toMatch(/password|current-password/iu);
+    expect(occurrences(markup, /<input/gu)).toBe(1);
+  });
+
+  it("later-0017 AC3 exposes accessible pending and non-enumerating sent states", () => {
+    const pending = renderToStaticMarkup(
+      <SignInPanel message={null} pending onSubmit={noop} />,
+    );
+    const sent = renderToStaticMarkup(<MagicLinkSentPanel onStartOver={noop} />);
+
+    expect(pending).toContain('aria-busy="true"');
+    expect(pending).toContain("Sending link…");
+    expect(pending).toContain('disabled=""');
+    expect(sent).toContain('role="status"');
+    expect(sent).toContain('aria-live="polite"');
+    expect(sent).toContain("Check your email");
+    expect(visibleText(sent)).toContain(
+      "If that address can use the research console, a sign-in link will arrive shortly.",
+    );
+    expect(visibleText(sent)).not.toMatch(/authorized|access token|account exists|signed in/iu);
+  });
+
+  it("later-0017 AC4 keeps the email form usable after a generic failure", () => {
+    const markup = renderToStaticMarkup(
+      <SignInPanel
+        message="We couldn't send a sign-in link. Please try again."
+        pending={false}
+        onSubmit={noop}
+      />,
+    );
+
+    expect(markup).toContain("We couldn&#x27;t send a sign-in link. Please try again.");
+    expect(markup).toContain('type="email"');
+    expect(markup).not.toContain('disabled=""');
+    expect(markup).not.toMatch(/user not found|provider|supabase|account exists/iu);
+  });
+
   it("AC2 the recall screen shows the capture and the recall questions only", () => {
     const markup = renderToStaticMarkup(
       <RecallPanel capture={capture} pending={false} onSubmit={noop} />,
