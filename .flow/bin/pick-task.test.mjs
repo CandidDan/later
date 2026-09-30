@@ -116,3 +116,41 @@ test("readTasks parses a dir, skips _TEMPLATE.md, and pickTask selects across th
   assert.equal(pickTask(tasks), "CAN-2");        // P1 wins
   rmSync(dir, { recursive: true, force: true });
 });
+
+// ── flow-0069: the changelog was the queue's bottleneck ────────────────────────────────
+//
+// `touches` overlap is a CLAIM guard, not documentation — and `CHANGELOG.md` is append-only, so
+// every task that changed anything declared it. A path in every task's `touches` makes almost
+// every task ineligible the moment any one is claimed: measured on canonical on 2026-09-23, 12 of
+// 23 open tasks listed it, 9 of them among the 13 `ready` ones. Nothing was ever in real conflict.
+//
+// The two cases below are the before and the after, on the same pair of tasks, differing only in
+// how each declares its changelog entry. They are the proving test for the convention that the
+// rest of flow-0069 builds on — the assembler exists to make this shape livable, not the reverse.
+
+test("two tasks declaring per-task changelog fragments do NOT block each other", () => {
+  const id = pickTask([
+    T("flow-0101", { priority: 1, status: "in_progress", touches: [".flow/bin/a.mjs", "changes/flow-0101.md"] }),
+    T("flow-0102", { priority: 1, status: "ready", touches: [".flow/bin/b.mjs", "changes/flow-0102.md"] }),
+  ]);
+  assert.equal(id, "flow-0102",
+    "fragments are distinct files; the ready task must stay claimable while the other runs");
+});
+
+test("the same two tasks sharing CHANGELOG.md block each other — the jam this convention removes", () => {
+  const id = pickTask([
+    T("flow-0101", { priority: 1, status: "in_progress", touches: [".flow/bin/a.mjs", "CHANGELOG.md"] }),
+    T("flow-0102", { priority: 1, status: "ready", touches: [".flow/bin/b.mjs", "CHANGELOG.md"] }),
+  ]);
+  assert.equal(id, null,
+    "one shared append-only file is enough to make the whole queue ineligible — that is the bug");
+});
+
+test("a fragment path does not collide with a neighbouring fragment by prefix", () => {
+  // The overlap test is a path-PREFIX test at a segment boundary. `changes/flow-1.md` must not be
+  // read as a prefix of `changes/flow-10.md`, or ids would start blocking each other by accident.
+  assert.equal(globsOverlap("changes/flow-1.md", "changes/flow-10.md"), false);
+  assert.equal(globsOverlap("changes/flow-0101.md", "changes/flow-0102.md"), false);
+  assert.ok(globsOverlap("changes/flow-0101.md", "changes/flow-0101.md"));
+  assert.ok(touchesOverlap(["CHANGELOG.md"], ["CHANGELOG.md"]));
+});
