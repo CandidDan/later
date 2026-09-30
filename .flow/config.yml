@@ -74,6 +74,11 @@ review:
     - "package.json"
     - "pnpm-lock.yaml"
 
+  # How much PR diff the qa, code-review and security checks read (Flow 2.2.0+). A diff over
+  # the limit fails all three checks, so this is set above the largest PRs this repo opens.
+  # Raising it only costs anything on PRs that are actually that big. Ceiling: 2000000.
+  max_diff_bytes: 900000
+
 # Branch + PR conventions (kept here so agents and CI agree).
 git:
   base_branch: "main"
