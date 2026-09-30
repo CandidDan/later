@@ -1,12 +1,12 @@
 ---
 id: "later-0017"
 title: "Use magic-link authentication for the research console"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "01a05aa4-6d8d-7920-8c9e-1f2140442ba4"
 created: "2026-09-30"
-started: ""
+started: "2026-09-30T02:59:24Z"
 branch: ""
 pr: ""
 issue: ""
