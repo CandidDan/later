@@ -2,9 +2,27 @@ name: flow-queue-runner
 
 # Thin caller — the queue-runner logic lives in canonical (CandidDan/flow) as a reusable
 # workflow, adopted here by reference. This caller owns the schedule and the workflow_dispatch
-# input (forwarded with `with: task_id`), and passes CLAUDE_CODE_OAUTH_TOKEN by name — the only
-# secret the reusable declares — rather than `secrets: inherit`, which would also hand this job
-# FLOW_PAT it never uses. See docs/flow-reusable-workflows.md in the flow repo.
+# input (forwarded with `with: task_id`). See docs/flow-reusable-workflows.md in the flow repo.
+#
+# SECRETS — both are forwarded BY NAME, never `secrets: inherit`. The reusable declares exactly
+# these two and nothing else, so naming them forwards everything it can use and nothing it cannot;
+# `inherit` would hand an agent-driven job every other secret this repo happens to hold.
+#
+#   CLAUDE_CODE_OAUTH_TOKEN — the worker itself (claude-code-action). Without it there is no agent
+#     and the run does nothing useful.
+#   FLOW_PAT — OPTIONAL, and what the worker uses to touch this repo: the credential
+#     actions/checkout persists for the worker's own `git push`, and GH_TOKEN for its `gh` calls.
+#     Unset, both fall back to GITHUB_TOKEN and behaviour is exactly as it was before flow-0093 —
+#     the run still works, with two holes. (1) GitHub refuses ANY GITHUB_TOKEN push that adds or
+#     changes a file under .github/workflows/, server-side, whatever `permissions:` says — so a
+#     worker on a task whose `touches` names a workflow file cannot push at all. (2) A PR or issue
+#     created by GITHUB_TOKEN triggers no downstream workflows, so flow-gates and the three review
+#     checks never run on it: the gate silently bypassed rather than failed.
+#
+# Set FLOW_PAT to a fine-grained PAT scoped to this repository only, with a short expiry and the
+# four permissions listed under "The one permission list" in docs/flow-reusable-workflows.md
+# (Contents, Pull requests, Issues, Workflows — each Read and write). A PAT issued before
+# flow-0093 almost certainly lacks Workflows and Issues.
 #
 # DISABLED BY DEFAULT — the reusable job is gated on repo variable FLOW_AI=true and needs the
 # CLAUDE_CODE_OAUTH_TOKEN secret. Start with a sparse cron and drive it manually until trusted.
@@ -38,5 +56,8 @@ jobs:
     uses: CandidDan/flow/.github/workflows/_flow-queue-runner.yml@v2
     with:
       task_id: ${{ inputs.task_id }}
+    # Named, not `inherit` — see the SECRETS note in this file's header for what each one buys
+    # and what the worker cannot do without FLOW_PAT.
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      FLOW_PAT: ${{ secrets.FLOW_PAT }}

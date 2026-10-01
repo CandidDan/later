@@ -24,6 +24,15 @@
 // to bypass it. What was missing was never the failure — it was the *number*. If the warning
 // proves too easy to ignore, the escalation is a scheduled report, not a stricter release gate.
 //
+// AND ONE WAY THE NOTES CAN GO MISSING. A changelog fragment (`changes/<task-id>.md`, see that
+// directory's README) holds the entry a task would otherwise have appended to `CHANGELOG.md`;
+// cutting a release folds every fragment in and deletes it. A release tag pointing at a tree that
+// still has fragments in it is therefore a release cut *without its notes* — the change ships, the
+// changelog does not mention it, and nothing else in the release path would ever say so. That is a
+// PROBLEM, not a warning: unlike alias rot it is not a deliberate human step, it is a forgotten
+// one, and the repair is to run the assembler and retag. Consuming repos keep no `changes/`
+// directory, so a tree without one reports nothing.
+//
 // SPLIT, the way the other helpers are split:
 //   · `checkRelease(facts)` is pure — no IO, no clock, no `git`. Every branch is a plain object.
 //   · the git reads are a thin injected layer (`makeGitRunner`, `collectFacts`), so the whole
@@ -61,6 +70,26 @@ export const RELEASE_TAG = /^v\d+\.\d+\.\d+$/;
 // problem, not something to coerce into a comparison.
 export const SEMVER = /^\d+\.\d+\.\d+$/;
 
+// ── changelog fragments ── the vocabulary, defined once here because two callers need to agree
+// on it: this guard, which reports fragments left in a tagged tree, and canonical's assembler
+// (`.flow/bin/changelog-fragments.mjs`), which folds them in. A second definition of "what a
+// fragment is called" is the one thing guaranteed to drift, and it would drift towards the guard
+// not recognising the files the assembler writes.
+export const FRAGMENT_DIR = "changes";
+
+// A fragment is named for its task: `flow-0069.md`. Deliberately NOT `*.md` — `README.md`
+// documents the convention and lives in the same directory permanently, so a looser pattern would
+// have the assembler delete the documentation and the guard fail every release for ever.
+export const FRAGMENT_NAME = /^[a-z][a-z0-9]*-\d+\.md$/i;
+
+// Ascending task id: the order fragments are folded into the changelog, and the order they are
+// listed in a problem. Numeric on the id's digits, so `flow-9999` precedes `flow-10000` — a plain
+// lexical sort gets that pair backwards, and the ids are the only thing making the order stable.
+export function compareFragmentNames(a, b) {
+  const n = (x) => { const m = String(x).match(/(\d+)/); return m ? parseInt(m[1], 10) : Infinity; };
+  return n(a) - n(b) || String(a).localeCompare(String(b));
+}
+
 // Canonical's two stamps. Repo-relative, because every read goes through `git show <ref>:<path>`.
 export const ROOT_VERSION_PATH = "VERSION";
 export const TEMPLATE_VERSION_PATH = "project-template/.flow/VERSION";
@@ -86,6 +115,8 @@ export function checkRelease(facts = {}) {
     mainRef = "main",
     aliasRef = null,
     aliasBehind = 0,
+    fragments = [],
+    fragmentDir = FRAGMENT_DIR,
   } = facts;
 
   const problems = [];
@@ -163,6 +194,25 @@ export function checkRelease(facts = {}) {
     );
   }
 
+  // ── 6. release notes never assembled ── fragments still sitting in the tree the tag points at.
+  // Scoped to a real release tag for the same reason check 3 is: `main` is EXPECTED to carry
+  // pending fragments between releases — that is what the directory is for — and failing on that
+  // would turn every push into a red release path with nothing wrong.
+  const pending = (Array.isArray(fragments) ? fragments : [])
+    .filter((f) => typeof f === "string" && f !== "")
+    .slice()
+    .sort(compareFragmentNames);
+  if (RELEASE_TAG.test(tag) && pending.length) {
+    problems.push(
+      `${tag} tags a tree that still contains ${pending.length} unassembled changelog ` +
+      `fragment(s) — ${pending.join(", ")}. Those are the release notes for changes this tag ` +
+      `ships, so publishing it would ship them with no mention in \`CHANGELOG.md\` and nothing ` +
+      `to say so afterwards. Run \`node .flow/bin/changelog-fragments.mjs --assemble\` on a ` +
+      `release branch, merge it, and cut the tag at that commit. The guard never assembles ` +
+      `anything itself — see \`${fragmentDir}/README.md\`.`,
+    );
+  }
+
   return { problems, warnings };
 }
 
@@ -223,6 +273,22 @@ export function versionAtRef(git, ref, path) {
   return { commit, version: readFileAtRef(git, commit, path) };
 }
 
+// The changelog fragments present in a ref's tree, as repo-relative paths, ascending by task id.
+// `git ls-tree <ref>:<dir>` fails when the directory is absent, which `attempt` turns into null —
+// so a consuming repo, or canonical before this convention existed, reports [] rather than
+// crashing the guard. That is the whole "no `changes/` directory is not a problem" branch.
+export function fragmentsAtRef(git, ref, dir = FRAGMENT_DIR) {
+  if (!ref) return [];
+  const out = attempt(git, ["ls-tree", "--name-only", `${ref}:${dir}`]);
+  if (!out) return [];
+  return out
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((name) => FRAGMENT_NAME.test(name))
+    .sort(compareFragmentNames)
+    .map((name) => `${dir}/${name}`);
+}
+
 // Every `vX.Y.Z` tag in the repo, aliases excluded.
 export function listReleaseTags(git) {
   const out = attempt(git, ["tag", "--list", "v*"]);
@@ -255,6 +321,7 @@ export function collectFacts({
   aliasRef = null,
   rootPath = ROOT_VERSION_PATH,
   templatePath = TEMPLATE_VERSION_PATH,
+  fragmentDir = FRAGMENT_DIR,
 } = {}) {
   const rootVersion = readFileAtRef(git, mainRef, rootPath);
   const templateVersion = readFileAtRef(git, mainRef, templatePath);
@@ -290,6 +357,10 @@ export function collectFacts({
     mainRef: mainLabel,
     aliasRef: alias,
     aliasBehind: distance(alias),
+    // Read at the tag's COMMIT, not at the tag object — an annotated tag has no tree of its own,
+    // and `ls-tree` on one lists nothing, which would report every release as clean.
+    fragments: fragmentsAtRef(git, subjectRead.commit, fragmentDir),
+    fragmentDir,
   };
 }
 
