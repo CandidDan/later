@@ -38,6 +38,7 @@ import { execFileSync } from "node:child_process";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseTaskId } from "./parse-task-id.mjs";
+import { resolveRepoRoot } from "./source-roots.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -239,7 +240,22 @@ export function runGuard({ tasksDir, env = process.env, log = console.log, err =
 }
 
 // ── CLI ── one call, so the CLI shell holds no decision logic of its own.
+//
+// The repo-root contract (flow-0094, ADR-0008) — see `resolveRepoRoot`'s header in
+// source-roots.mjs. This guard is the one where the default is most dangerous: run from
+// canonical's checkout it would read canonical's own `project-template/.flow/tasks/` fixture
+// store, find no task file for the caller's id, print `decision=skipped reason=no-task-file`
+// and exit 0. That satisfies the gate's decision-line assertion, so scope enforcement would be
+// off while every signal the gate has says it ran. It also `chdir`s, because the `git diff` that
+// produces the changed-file list runs in the process's cwd.
 if (__isMain) {
-  const flowDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  process.exit(runGuard({ tasksDir: join(flowDir, "tasks"), env: process.env }));
+  const { repoRoot, error, explicit } = resolveRepoRoot({
+    fallback: () => resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."),
+  });
+  if (error) {
+    console.error(error);
+    process.exit(1);
+  }
+  if (explicit) process.chdir(repoRoot);
+  process.exit(runGuard({ tasksDir: join(repoRoot, ".flow", "tasks"), env: process.env }));
 }

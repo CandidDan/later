@@ -21,6 +21,16 @@ the canonical procedure and produces a correctly-shaped file in `.flow/tasks/` (
 `_TEMPLATE.md`, `status: ready`, next sequential id, `touches` declared) committed to `main`. The
 worker never creates tasks; it only executes `ready` ones.
 
+**Changelog entries, where the repo keeps a `changes/` directory.** A task's changelog entry goes
+in `changes/<task-id>.md` — one file per task, holding exactly what would otherwise have gone
+under `## Unreleased` — and a task never edits `CHANGELOG.md` directly. This is a concurrency rule
+wearing a changelog's clothes: a shared append-only changelog ends up in every task's `touches`,
+and `touches` overlap is what makes a task ineligible to claim, so one file every task only
+*appends* to serialises the whole queue behind whichever task is in progress. Declare
+`changes/<task-id>.md` in `touches`, never `CHANGELOG.md`; the directory's own README documents the
+format, and cutting a release is what folds the fragments in. A repo with no `changes/` directory
+has nothing to do here and keeps whatever changelog habit it already has.
+
 ## Response style — always TL;DR
 
 End every response to the human with a one-line **TL;DR** synopsis of what the turn covered —
