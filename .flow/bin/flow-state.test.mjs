@@ -7,9 +7,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  parseTask, idNum, branchMatchesTask, resolveState, pickPrForTask, reconcile,
+  parseTask, scalarValue, idNum, branchMatchesTask, resolveState, pickPrForTask, reconcile,
   readPrs, readTasksFromOrigin, runStateCli,
 } from "./flow-state.mjs";
+import { blockedByFindings } from "./flow-doctor.mjs";
+import { askId } from "./asks.mjs";
 
 const task = (o) => ({ id: "CAN-1", title: "", status: "ready", owner: "", branch: "", pr: "", blocked_reason: "", issue: "", ...o });
 
@@ -27,6 +29,65 @@ test("parseTask reads the lifecycle fields it needs", () => {
 test("parseTask returns null without frontmatter", () => {
   assert.equal(parseTask("no frontmatter here"), null);
   assert.equal(parseTask(""), null);
+});
+
+// ── flow-0096: a `#` inside a quoted scalar is data, not a comment ──
+// The bug these pin down truncated prose silently: a `blocked_reason` naming the PR it waits on
+// lost everything from the `#` onward, including the `not machine-checkable` opt-out at the end
+// of the sentence, so the reason a human reads and the sentinel a machine reads both vanished.
+
+test("flow-0096: a hash inside a double-quoted value is kept whole (criterion 1)", () => {
+  const text = `---\nid: "CAN-7"\nstatus: "blocked"\nblocked_reason: "waits on PR #127, not machine-checkable"\n---\nbody`;
+  assert.equal(parseTask(text).blocked_reason, "waits on PR #127, not machine-checkable");
+});
+
+test("flow-0096: a trailing comment after an unquoted inline array is still stripped (criterion 2)", () => {
+  assert.equal(scalarValue('["G10"]    # a comment'), '["G10"]');
+  assert.equal(scalarValue("[]   # none yet"), "[]");
+});
+
+test("flow-0096: an unquoted scalar still drops its trailing comment (criterion 3)", () => {
+  assert.equal(scalarValue("2  # note"), "2");
+  const text = `---\nid: "CAN-8"\npriority: 2  # note\n---\nbody`;
+  assert.equal(parseTask(text).priority, 2);
+});
+
+test("flow-0096: a quoted value that is only a hash survives, as before (criterion 4)", () => {
+  const text = `---\nid: "CAN-9"\nissue: "#157"\n---\nbody`;
+  assert.equal(parseTask(text).issue, "#157");
+  assert.equal(scalarValue('"#157"'), "#157");
+  assert.equal(scalarValue("#157"), "#157");   // unquoted, hash-leading: no whitespace to strip on
+});
+
+test("flow-0096: a quoted reason carrying a hash keeps the opt-out flow-doctor reads (criterion 5)", () => {
+  // Composed deliberately: the reason is read by the parser this task fixes, then handed to
+  // flow-doctor's own finding logic. Before the fix the string reaching this call was
+  // `"waits on PR` — sentinel gone — and the warning fired on a task that had opted out.
+  // (flow-doctor's OWN scalar reader has the same defect and is outside this task's `touches`;
+  // see the PR description.)
+  const text = `---\nid: "CAN-10"\nstatus: "blocked"\nblocked_reason: "waits on a call about PR #127, not machine-checkable"\nblocked_by: []\n---\nbody`;
+  const parsed = parseTask(text);
+  const { problems, warnings } = blockedByFindings({
+    id: parsed.id, status: parsed.status, blocked_reason: parsed.blocked_reason, blockedByList: [],
+  });
+  assert.deepEqual(warnings, [], "the 'not machine-checkable' opt-out must survive the parse");
+  assert.deepEqual(problems, []);
+});
+
+test("flow-0096: a real comment after a quoted value is dropped, the quoted hash is not", () => {
+  const text = `---\nid: "CAN-11"\ntitle: "fix #42 in the parser"   # tracked in #157\n---\nbody`;
+  assert.equal(parseTask(text).title, "fix #42 in the parser");
+});
+
+test("flow-0096: single quotes behave like double quotes", () => {
+  assert.equal(scalarValue("'waits on PR #127'   # comment"), "waits on PR #127");
+});
+
+test("flow-0096: an unterminated quote stays lenient rather than throwing", () => {
+  assert.equal(scalarValue('"oops'), '"oops');
+  assert.equal(scalarValue('"oops  # trailing'), '"oops');
+  assert.equal(scalarValue(""), "");
+  assert.equal(scalarValue(undefined), "");
 });
 
 test("idNum extracts the numeric suffix", () => {
@@ -155,7 +216,11 @@ function repoWithOrigin(tasks) {
 
 const fm = (id, fields = {}) =>
   `---\nid: "${id}"\ntitle: "${fields.title ?? id}"\nstatus: "${fields.status ?? "ready"}"\npriority: 2\n` +
-  `owner: "${fields.owner ?? ""}"\nbranch: ""\npr: ""\nblocked_reason: ""\nissue: ""\n---\nbody\n`;
+  `owner: "${fields.owner ?? ""}"\nbranch: ""\npr: ""\nblocked_reason: ""\nissue: ""\n` +
+  // Omitted entirely unless a test asks for it — "no asks key at all" is the shape of every task
+  // written before flow-0119, and it is the case the resolver must report as `[]`.
+  (fields.asks === undefined ? "" : `asks:\n${fields.asks.map((a) => `  - ${JSON.stringify(a)}`).join("\n")}\n`) +
+  `---\nbody\n`;
 
 // A writable sink with the one method runStateCli uses, so the render paths are assertable.
 const sink = () => { const c = []; return { write: (s) => c.push(s), text: () => c.join("") }; };
@@ -279,4 +344,79 @@ test("runStateCli --fetch is tolerated when there is no reachable remote", () =>
     assert.equal(runStateCli({ repoRoot: dir, argv: ["--json", "--no-pr", "--fetch"], out }), 0);
     assert.deepEqual(JSON.parse(out.text()).tasks.map((t) => t.id), ["CAN-1"]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── asks (flow-0119) ──
+// `flow-state --json` is the machine-readable report the human's surfaces read — inflight and the
+// PR-comment workflow. Reporting `asks` here is what makes the field reachable by anything other
+// than a session that happens to open the task file.
+
+test("criterion 5: --json reports every ask parsed, with id, kind, text and recommend", () => {
+  const dir = repoWithOrigin({ "a.md": fm("CAN-1", { asks: [
+    "decision: v2 or v3 in the schema id? Recommend: v3, the id should say the shape",
+    "follow-up: the retry path needs its own task",
+    "fyi: the fixture store moved",
+  ] }) });
+  try {
+    const out = sink();
+    assert.equal(runStateCli({ repoRoot: dir, argv: ["--json", "--no-pr"], out }), 0);
+    const [row] = JSON.parse(out.text()).tasks;
+    assert.equal(row.asks.length, 3);
+    for (const a of row.asks) assert.deepEqual(Object.keys(a).sort(), ["id", "kind", "recommend", "text"]);
+    assert.deepEqual(row.asks.map((a) => a.kind), ["decision", "follow-up", "fyi"]);
+    assert.equal(row.asks[0].text, "v2 or v3 in the schema id?");
+    assert.equal(row.asks[0].recommend, "v3, the id should say the shape");
+    assert.equal(row.asks[1].recommend, null, "a kind that recommends nothing reports null, not absent");
+    // The id is the shared one — the same string hashed the same way inflight will hash it.
+    assert.equal(row.asks[0].id, askId("decision: v2 or v3 in the schema id?"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("criterion 4: a task with no asks field reports asks: [] — never undefined", () => {
+  const dir = repoWithOrigin({ "a.md": fm("CAN-1"), "b.md": fm("CAN-2", { status: "in_progress", owner: "s" }) });
+  try {
+    assert.doesNotMatch(fm("CAN-1"), /^asks:/m, "the fixture must omit the field, or this proves nothing");
+    const out = sink();
+    runStateCli({ repoRoot: dir, argv: ["--json", "--no-pr"], out });
+    for (const row of JSON.parse(out.text()).tasks)
+      assert.deepEqual(row.asks, [], "a consumer must never have to test for the field's absence");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("parseTask reads asks, and resolveState carries them onto the row", () => {
+  const t = parseTask(fm("CAN-3", { asks: ["fyi: the store moved"] }));
+  assert.equal(t.asks.length, 1);
+  assert.equal(t.asks[0].kind, "fyi");
+  // Every resolution branch must carry them, not just the one the fixture happens to take.
+  for (const pr of [null, { number: 1, state: "MERGED", url: "u" }, { number: 2, state: "OPEN", url: "u" }])
+    assert.deepEqual(resolveState(t, pr).asks, t.asks);
+  assert.deepEqual(resolveState(parseTask(fm("CAN-4")), null).asks, []);
+});
+
+test("a malformed ask is reported as no ask, because the resolver grades nothing", () => {
+  // flow-doctor fails this on `main`; flow-state is read-only and must not invent a row shape
+  // for an entry it could not parse. Dropping it here is safe only because the gate is elsewhere.
+  const dir = repoWithOrigin({ "a.md": fm("CAN-1", { asks: ["todo: x", "fyi: fine"] }) });
+  try {
+    const out = sink();
+    runStateCli({ repoRoot: dir, argv: ["--json", "--no-pr"], out });
+    assert.deepEqual(JSON.parse(out.text()).tasks[0].asks.map((a) => a.text), ["fine"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Code review on #175: the frontmatter readers split on the first `#`, so an ask quoting a PR or
+// issue number was truncated, failed to parse and vanished from --json (block list) or from both
+// --json and flow-doctor (inline list). A `#` inside quotes is text; only ` #` outside is a comment.
+test("an ask carrying `#` survives intact, block and inline list alike, and a trailing comment is still dropped", () => {
+  const block = `---\nid: "CAN-7"\ntitle: "t"\nstatus: "ready"\npriority: 2\nowner: ""\nbranch: ""\npr: ""\n` +
+    `blocked_reason: "waits for PR #172" # why\nissue: ""\n` +
+    `asks:\n  - "fyi: see PR #127 for context, needs rebase"  # a comment\n---\nbody\n`;
+  const t = parseTask(block);
+  assert.deepEqual(t.asks.map((a) => a.text), ["see PR #127 for context, needs rebase"]);
+  assert.equal(t.blocked_reason, "waits for PR #172", "a scalar keeps its # too");
+
+  const inline = block.replace(/asks:\n.*\n/, `asks: ["fyi: see #127, it's fine", "follow-up: split #9 out"] # c\n`);
+  const u = parseTask(inline);
+  assert.deepEqual(u.asks.map((a) => [a.kind, a.text]),
+    [["fyi", "see #127, it's fine"], ["follow-up", "split #9 out"]]);
 });
