@@ -1,12 +1,12 @@
 ---
 id: "later-0018"
 title: "Provide trusted capture cards and private attachment previews"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "01a10964-e642-7432-8904-88b7130aa8ab"
 created: "2026-10-05"
-started: ""
+started: "2026-10-05T00:10:17Z"
 branch: ""
 pr: ""
 issue: ""
