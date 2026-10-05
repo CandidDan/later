@@ -1,7 +1,7 @@
 ---
 id: "later-0018"
 title: "Provide trusted capture cards and private attachment previews"
-status: "in_progress"
+status: "blocked"
 priority: 3
 project: "later"
 owner: "01a10964-e642-7432-8904-88b7130aa8ab"
@@ -10,12 +10,12 @@ started: "2026-10-05T00:10:17Z"
 branch: "flow/later-0018-capture-cards"
 pr: "https://github.com/CandidDan/later/pull/31"
 issue: ""
-blocked_reason: ""
+blocked_reason: "Scope amendment required: launch-readiness AC3 enumerates every API route and requires matching PRODUCTION_ENDPOINTS entries in src/lib/operations/launch-readiness.mjs plus README.md documentation. Both are outside later-0018 touches; adding the required card/asset routes therefore fails the mandatory test gate. Not machine-checkable: orchestrator must widen touches on main before a fresh worker resumes."
 blocked_by: []
 serves: ["G2", "G3"]
 touches: ["src/lib/revisit/**", "src/app/api/revisit/cards/**", "src/app/api/revisit/assets/**"]
 labels: ["revisit", "capture"]
-notes: ["Approved direction: make daily saves recognisable, then provide a small return surface; keep research separate."]
+notes: ["Approved direction: make daily saves recognisable, then provide a small return surface; keep research separate.", "Handoff 2026-10-05: partial implementation committed as 75764b5 on flow/later-0018-capture-cards; automatic Flow draft PR https://github.com/CandidDan/later/pull/31 exists and MUST remain draft. Added bounded card projection, deterministic latest successful run/ID tie selection, persisted evidence validation, private raster/download handlers, caller-scoped Supabase store and reusable accessible component. This is NOT complete: endpoint/store/auth isolation proving tests still need writing; UI blob lifecycle needs stronger verification; one card test has an incorrect expected Sydney date (25 Sept should replace 26 Sept). Focused card tests 20 passed/1 failed; full test also fails launch-readiness AC3 due new endpoint contract and operator-docs localhost listen EPERM in sandbox (run gate with approved local-server permissions). Lint had no errors, baseline three Flow warnings and intentional private-blob img warning later suppressed; build/coverage not yet run. No service-role access or provider content fetches added. Exact next action: orchestrator add README.md and src/lib/operations/** to touches and unblock on main; fresh worker resume this branch, update endpoint contract/docs, finish proving tests and run all four gates, rebase, update PR acceptance checklist and mark ready only when green. Existing .pnpm-store/ and supabase/.temp/ preserved."]
 ---
 
 ## Context
