@@ -15,7 +15,14 @@ name: flow-sync
 # the reusable stops on its first step with a message naming this secret.
 #
 # Safe to run anytime: it only ever opens a reviewed PR (never auto-merges, never pushes to main),
-# so it needs no FLOW_AI gate. Bump `canonical_ref` if your other callers pin a tag other than v3.
+# so it needs no FLOW_AI gate.
+#
+# WHICH REF IT ADOPTS FROM (flow-0105). Nothing to set by hand. On the weekly `schedule` the
+# `canonical_ref` input below is empty, and the reusable reads the ref off the `@<ref>` on THIS
+# file's `uses:` line instead — so repinning this repo is the one `sed` over `.github/workflows/`
+# and the sync follows. If two callers in this repo disagree about the ref, the sync fails and names
+# both rather than guessing. A `workflow_dispatch` run overrides all of that: whatever you type in
+# the input wins, which is how you adopt from a canary ref once without repinning anything.
 
 on:
   schedule:
@@ -26,7 +33,6 @@ on:
         description: "Canonical ref to adopt from (tag/branch). Default v3."
         required: false
         type: string
-        default: v3
 
 concurrency:
   group: flow-sync

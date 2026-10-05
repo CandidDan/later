@@ -118,14 +118,124 @@ function defaultGit(repoRoot) {
 // notices is exactly how two allocators would both compute against stale, divergent state. So
 // this wrapper refuses rather than silently degrading — the one place this module diverges from
 // the resolver it reuses.
-export function readIdsFromOrigin(repoRoot, reader = readTasksFromOrigin) {
+export function readStoreFromOrigin(repoRoot, reader = readTasksFromOrigin) {
   const { tasks, source } = reader(repoRoot);
   if (source.startsWith("WORKING TREE")) {
     throw new AllocationError(
       `allocate-task-id: origin/main unreadable (${source}) — refusing to allocate against ` +
       `unauthoritative state`);
   }
-  return tasks.map((t) => t.id);
+  return {
+    ids: tasks.map((t) => t.id),
+    readyCount: tasks.filter((t) => t.status === "ready").length,
+  };
+}
+
+// The ids alone, for a caller that only wants the next number. The id list and the ready count
+// the queue cap needs come out of ONE read of `origin/main` on purpose (see the cap below):
+// counting with a second read would be counting a different moment.
+export function readIdsFromOrigin(repoRoot, reader = readTasksFromOrigin) {
+  return readStoreFromOrigin(repoRoot, reader).ids;
+}
+
+// ── pure: the queue cap ───────────────────────────────────────────────────────────────────
+// A WIP limit on the QUEUE, not on the work. `queue_cap` is the maximum number of `ready`
+// tasks the store may hold, so allocation refuses once that many are already `ready`. Flow has
+// always capped work in progress (one claim per session, `touches` overlap); nothing capped
+// *planning*, and on canonical the orchestrator wrote `ready` tasks faster than they drained —
+// 13 ready on 2026-09-23, nearly all of the last ~25 Flow maintaining itself.
+//
+// Enforced HERE rather than described in the task-writer skill, because prose in a skill holds
+// right up until the session that most wants to break it arrives, and this is the one path
+// every new task already takes to `main`.
+//
+// Absent by default: a repo with no `queue_cap` in `.flow/config.yml` is uncapped, exactly as
+// before.
+
+export const URGENT_LABEL = "urgent";
+
+// `queue_cap` out of a `.flow/config.yml`, with no YAML dependency — the same tolerant
+// line-scan house style as flow-doctor's `parseSourceRoots`. Anchored at column 0 so only a
+// TOP-LEVEL key counts, which is also what keeps the template's commented-out example inert.
+//
+// Returns null — never 0 — for absent, malformed or non-integer. 0 is a real cap meaning
+// "refuse every `ready` draft", so a parse failure that returned it would freeze the queue
+// while looking like configuration.
+export function parseQueueCap(text) {
+  const m = String(text || "").match(/^queue_cap:\s*(.*)$/m);
+  if (!m) return null;
+  const raw = m[1].replace(/\s+#.*$/, "").trim().replace(/^["'](.*)["']$/, "$1");
+  return /^\d+$/.test(raw) ? Number(raw) : null;
+}
+
+export function readQueueCap(repoRoot) {
+  const configPath = join(repoRoot, ".flow", "config.yml");
+  if (!existsSync(configPath)) return null;
+  return parseQueueCap(readFileSync(configPath, "utf8"));
+}
+
+// The draft's own `status` and `labels` — the two fields the cap decision turns on. A local
+// parse rather than flow-state's `parseTask` because that shape carries no `labels`, and
+// widening it would reach outside this task's declared `touches`. Both YAML list forms are
+// accepted, since a draft is hand-written: inline `[a, b]` and a `- a` block.
+export function parseDraftFrontmatter(text) {
+  const out = { status: "", labels: [] };
+  const s = String(text || "");
+  if (!s.startsWith("---")) return out;
+  const end = s.indexOf("\n---", 3);
+  if (end === -1) return out;
+  const lines = s.slice(3, end).split("\n");
+  const clean = (v) => v.replace(/\s+#.*$/, "").trim().replace(/^["'](.*)["']$/, "$1");
+
+  for (let i = 0; i < lines.length; i++) {
+    const status = lines[i].match(/^status:\s*(.*)$/);
+    if (status) { out.status = clean(status[1]); continue; }
+    const labels = lines[i].match(/^labels:\s*(.*)$/);
+    if (!labels) continue;
+    const inline = clean(labels[1]);
+    if (inline.startsWith("[")) {
+      out.labels = inline.replace(/^\[/, "").replace(/\]$/, "").split(",").map(clean).filter(Boolean);
+    } else if (!inline) {
+      for (let j = i + 1; j < lines.length && /^\s+-\s*\S/.test(lines[j]); j++) {
+        out.labels.push(clean(lines[j].replace(/^\s+-\s*/, "")));
+      }
+    }
+  }
+  return out;
+}
+
+// null when the draft may be allocated; the refusal message when it may not. All three
+// conditions must hold, and each is a deliberate way forward rather than a dead end:
+//   · the draft is `ready`        — the cap limits the READY QUEUE, not the store, so a
+//                                   `blocked` draft is never refused.
+//   · it is not labelled `urgent` — the only bypass, and it is the human's label (the same rule
+//                                   as `auto-ok`): no flag, no env var, no --force, because a
+//                                   bypass a session can hand itself is not a limit.
+//   · ready >= cap                — `queue_cap: 8` means "at most 8 ready", so the 9th refuses.
+export function queueCapRefusal({ queueCap, readyCount, draftStatus, draftLabels } = {}) {
+  if (!Number.isInteger(queueCap) || queueCap < 0) return null;      // absent/malformed = uncapped
+  if (draftStatus !== "ready") return null;
+  if ((draftLabels || []).includes(URGENT_LABEL)) return null;
+  if (!(readyCount >= queueCap)) return null;
+  return `allocate-task-id: refusing to allocate — ${readyCount} task(s) are \`ready\` on ` +
+    `origin/main and \`queue_cap\` is ${queueCap}. The queue is a WIP limit: nothing new enters ` +
+    `it until it drains. Two ways forward, both in the draft itself — label it \`${URGENT_LABEL}\` ` +
+    `(the human's label, never the orchestrator's own judgement), or write it \`blocked\` with a ` +
+    `\`blocked_reason\`, which the cap never refuses.`;
+}
+
+// The one line `--dry-run` prints about the cap. Three states, all of them said out loud —
+// "off" is reported rather than omitted, because a cap nobody configured must not be
+// indistinguishable from a cap that passed.
+export function queueCapReport({ queueCap, readyCount, refusal }) {
+  if (refusal) {
+    return `queue_cap: REFUSE — ${readyCount} ready on origin/main, cap ${queueCap}. Label the ` +
+      `draft \`${URGENT_LABEL}\`, or write it \`blocked\`. Nothing was written.`;
+  }
+  if (!Number.isInteger(queueCap) || queueCap < 0) {
+    return `queue_cap: off — no \`queue_cap\` in .flow/config.yml (${readyCount} ready on origin/main).`;
+  }
+  return `queue_cap: ok — ${readyCount} ready on origin/main, cap ${queueCap}.`;
 }
 
 // ── the transaction ──────────────────────────────────────────────────────────────────────
@@ -136,7 +246,7 @@ export function readIdsFromOrigin(repoRoot, reader = readTasksFromOrigin) {
 // no commit and no file behind.
 //
 // Every seam is injected so this is exercisable without a network or a real remote:
-//   - `readIds(repoRoot)`   -> string[]           (defaults to readIdsFromOrigin)
+//   - `readStore(repoRoot)` -> { ids, readyCount } (defaults to readStoreFromOrigin)
 //   - `git(args)`           -> stdout | throws    (defaults to a real `git -C repoRoot ...`)
 //   - `write(path, text)`, `remove(path)`         -> the fs seams
 //
@@ -150,7 +260,8 @@ export function allocateTaskId({
   buildContent,
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
   dryRun = false,
-  readIds = (root) => readIdsFromOrigin(root),
+  queueCap = null,
+  readStore = (root) => readStoreFromOrigin(root),
   git = defaultGit(repoRoot),
   write = (path, text) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); },
   remove = (path) => { if (existsSync(path)) unlinkSync(path); },
@@ -165,15 +276,28 @@ export function allocateTaskId({
   let id = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const ids = readIds(repoRoot);
+    const { ids, readyCount } = readStore(repoRoot);
     id = nextId(ids, prefix);
 
-    if (dryRun) return { id, path: null, attempts: attempt };
+    // The queue cap, judged against the SAME fetched state the id was allocated against (one
+    // read, above) and in the same position as the traversal guard below — before anything is
+    // written, staged, committed or pushed, because that is the only place a refusal is free.
+    const content = buildContent(id);
+    const draft = parseDraftFrontmatter(content);
+    const refusal = queueCapRefusal({
+      queueCap, readyCount, draftStatus: draft.status, draftLabels: draft.labels,
+    });
+
+    // `--dry-run` REPORTS the decision rather than throwing it: its contract is "print what
+    // would happen, write nothing", and a non-zero exit here would be indistinguishable from
+    // an unreadable origin or a bad flag.
+    if (dryRun) return { id, path: null, attempts: attempt, readyCount, queueCap, refusal };
+    if (refusal) throw new AllocationError(refusal);
 
     // Checked BEFORE the write, not after: everything downstream (write, add, commit, push to
     // `main`) acts on this path, so the only safe place to refuse is before anything exists.
     const nextPath = assertInsideTasksDir(tasksDir, join(tasksDir, filenameFor(id)));
-    write(nextPath, buildContent(id));
+    write(nextPath, content);
     path = nextPath;
 
     git(["add", "--", path]);
@@ -223,10 +347,16 @@ const USAGE = `allocate-task-id — first-push-wins task-id allocation.
   node allocate-task-id.mjs --write   --repo-root DIR --prefix PREFIX \\
        --content-file FILE --slug SLUG [--max-attempts N]
 
---dry-run   prints the id that would be allocated; writes, commits and pushes nothing.
+--dry-run   prints the id that would be allocated; writes, commits and pushes nothing. Given a
+            --content-file it also prints the \`queue_cap\` decision for that draft (see below).
 --write     runs the real transaction: writes .flow/tasks/<id>-<slug>.md from FILE with its
             frontmatter \`id:\` line replaced, commits, and pushes to origin/main, retrying
             on a refused push up to --max-attempts (default ${DEFAULT_MAX_ATTEMPTS}).
+
+\`queue_cap\` (optional, read from this repo's .flow/config.yml) is the maximum number of
+\`ready\` tasks the store may hold. --write refuses a \`ready\` draft once that many are already
+ready on origin/main, before writing anything. The only bypass is the draft's own \`urgent\`
+label — there is no flag — and a \`blocked\` draft is never capped. Absent, nothing is capped.
 
 Writes to \`main\` by design — never invoke --write from a feature branch.`;
 
@@ -245,12 +375,22 @@ export function runCli(argv, { log = console.log, logErr = console.error, cwd = 
   if (!prefix) { logErr("allocate-task-id: --prefix is required"); return 1; }
 
   const maxAttempts = flags["max-attempts"] ? Number(flags["max-attempts"]) : DEFAULT_MAX_ATTEMPTS;
+  // Read from THIS repo's config, never from a flag: see queueCapRefusal for why the bypass is
+  // a label on the draft and not something the invocation can hand itself.
+  const queueCap = readQueueCap(repoRoot);
 
   try {
     if (flags["dry-run"]) {
-      const { id } = allocateTaskId({ repoRoot, prefix, dryRun: true, maxAttempts,
-        filenameFor: () => "", buildContent: () => "" });
+      // The cap turns on the DRAFT's `status` and `labels`, so without a --content-file there
+      // is no draft to judge and no decision to report — the output stays the bare id that
+      // every existing caller parses.
+      const draftFile = flags["content-file"];
+      const draft = typeof draftFile === "string" ? readFileSync(resolve(cwd, draftFile), "utf8") : "";
+      const { id, readyCount, refusal } = allocateTaskId({ repoRoot, prefix, dryRun: true,
+        maxAttempts, queueCap,
+        filenameFor: () => "", buildContent: () => draft });
       log(id);
+      if (draft) log(queueCapReport({ queueCap, readyCount, refusal }));
       return 0;
     }
 
@@ -269,7 +409,7 @@ export function runCli(argv, { log = console.log, logErr = console.error, cwd = 
 
     const raw = readFileSync(resolve(cwd, contentFile), "utf8");
     const { id, attempts } = allocateTaskId({
-      repoRoot, prefix, maxAttempts,
+      repoRoot, prefix, maxAttempts, queueCap,
       filenameFor: (allocated) => `${allocated}-${slug}.md`,
       buildContent: (allocated) => buildContentFromFile(raw, allocated),
     });

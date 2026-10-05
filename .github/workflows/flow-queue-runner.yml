@@ -2,12 +2,64 @@ name: flow-queue-runner
 
 # Thin caller — the queue-runner logic lives in canonical (CandidDan/flow) as a reusable
 # workflow, adopted here by reference. This caller owns the schedule and the workflow_dispatch
-# input (forwarded with `with: task_id`), and passes CLAUDE_CODE_OAUTH_TOKEN by name — the only
-# secret the reusable declares — rather than `secrets: inherit`, which would also hand this job
-# FLOW_PAT it never uses. See docs/flow-reusable-workflows.md in the flow repo.
+# input (forwarded with `with: task_id`). See docs/flow-reusable-workflows.md in the flow repo.
+#
+# SECRETS — both are forwarded BY NAME, never `secrets: inherit`. The reusable declares exactly
+# these two and nothing else, so naming them forwards everything it can use and nothing it cannot;
+# `inherit` would hand an agent-driven job every other secret this repo happens to hold.
+#
+#   CLAUDE_CODE_OAUTH_TOKEN — the worker itself (claude-code-action). Without it there is no agent
+#     and the run does nothing useful.
+#   FLOW_PAT — OPTIONAL, and what the worker uses to touch this repo: the credential
+#     actions/checkout persists for the worker's own `git push`, and GH_TOKEN for its `gh` calls.
+#     Unset, both fall back to GITHUB_TOKEN and behaviour is exactly as it was before flow-0093 —
+#     the run still works, with two holes. (1) GitHub refuses ANY GITHUB_TOKEN push that adds or
+#     changes a file under .github/workflows/, server-side, whatever `permissions:` says — so a
+#     worker on a task whose `touches` names a workflow file cannot push at all. (2) A PR or issue
+#     created by GITHUB_TOKEN triggers no downstream workflows, so flow-gates and the three review
+#     checks never run on it: the gate silently bypassed rather than failed.
+#
+# Set FLOW_PAT to a fine-grained PAT scoped to this repository only, with a short expiry and the
+# four permissions listed under "The one permission list" in docs/flow-reusable-workflows.md
+# (Contents, Pull requests, Issues, Workflows — each Read and write). A PAT issued before
+# flow-0093 almost certainly lacks Workflows and Issues.
 #
 # DISABLED BY DEFAULT — the reusable job is gated on repo variable FLOW_AI=true and needs the
-# CLAUDE_CODE_OAUTH_TOKEN secret. Start with a sparse cron and drive it manually until trusted.
+# CLAUDE_CODE_OAUTH_TOKEN secret. Drive it manually with `workflow_dispatch` until trusted.
+#
+# TIMING — THREE REPO VARIABLES, AND NO EDIT TO THIS FILE (flow-0080). The cron below ticks
+# HOURLY and dispatches nothing by itself; `_flow-queue-runner.yml`'s schedule-gate job decides
+# which tick is the day's run. That indirection exists because `on:` is parsed statically and
+# cannot read `vars.*` — a cron hour or GitHub's native `timezone:` written here is a literal in
+# a file `flow-sync` overwrites, so it would have to be re-edited in every repo on every change.
+# Variables need no file edit and survive a sync:
+#
+#   # pause autonomous work, keeping the three PR review checks, triage and compass running:
+#   gh variable set FLOW_QUEUE_RUNNER -R <owner>/<repo> -b paused
+#   gh variable delete FLOW_QUEUE_RUNNER -R <owner>/<repo>          # resume
+#
+#   # run the day's task at 07:00 in the operator's own zone, DST included:
+#   gh variable set FLOW_TZ -R <owner>/<repo> -b Australia/Sydney
+#   gh variable set FLOW_RUN_HOUR -R <owner>/<repo> -b 7
+#
+#   FLOW_QUEUE_RUNNER=paused   scheduled ticks dispatch no worker; `workflow_dispatch` still
+#                              works, so a single task can still be worked on purpose. Any other
+#                              value, or unset, is not paused. Unlike FLOW_AI=false, this leaves
+#                              review, triage and compass running — which is the whole point of
+#                              it: pausing the runner should not empty the gate.
+#   FLOW_TZ                    an IANA zone, e.g. Australia/Sydney.
+#   FLOW_RUN_HOUR              0-23, the LOCAL hour the day's run should start.
+#
+# Set FLOW_TZ and FLOW_RUN_HOUR together or not at all; half a schedule is reported as a
+# misconfiguration on every tick rather than silently half-applied. With both unset the gate
+# reproduces the old behaviour exactly: one run per UTC weekday at 07:00. The day's run is the
+# FIRST tick at or after the hour, so a scheduler that fires late (GitHub's routinely does, by
+# 15 minutes to 2+ hours) delays the run instead of skipping the day, and the once-per-local-day
+# rule is what keeps the other 23 ticks from dispatching anything.
+#
+# A CUSTOMISED CRON NEEDS FLOW_RUN_HOUR. If you replace the hourly cron with a single daily tick
+# earlier than 07:00 UTC, set FLOW_RUN_HOUR to that hour (or set both variables) — otherwise the
+# gate's default run hour is after your only tick of the day and nothing ever runs.
 
 on:
   workflow_dispatch:
@@ -17,7 +69,12 @@ on:
         required: false
         type: string
   schedule:
-    - cron: "0 7 * * 1-5"   # weekday mornings; sparse on purpose — widen once trusted
+    # HOURLY, EVERY DAY — the hour, the weekday test and the pause all live in the repo
+    # variables documented above, because `on:` cannot read them. Most ticks reach the gate job,
+    # write one line saying why they are not the run, and stop: no checkout of the repo, no
+    # agent, a few seconds of runner time. That cost is accepted as the price of a schedule the
+    # operator can move with one command, and of a late tick still running the day's task.
+    - cron: "0 * * * *"
 
 # One runner at a time: don't dispatch two workers in the same beat (first-push-wins still
 # protects the store, but this avoids burning a session on a task another just claimed).
@@ -35,8 +92,16 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
-    uses: CandidDan/flow/.github/workflows/_flow-queue-runner.yml@v2
+      # The schedule-gate job reads this workflow's own earlier runs (`gh run list` and the jobs
+      # API) to answer "has today's run already gone out?". A caller `permissions:` block is
+      # exhaustive and a reusable cannot raise a scope above its caller's grant, so without this
+      # line the gate fails closed every hour and the runner never dispatches.
+      actions: read
+    uses: CandidDan/flow/.github/workflows/_flow-queue-runner.yml@v3
     with:
       task_id: ${{ inputs.task_id }}
+    # Named, not `inherit` — see the SECRETS note in this file's header for what each one buys
+    # and what the worker cannot do without FLOW_PAT.
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      FLOW_PAT: ${{ secrets.FLOW_PAT }}

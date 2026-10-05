@@ -24,6 +24,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decisionLine, DECISION_PREFIX } from "./touches-guard.mjs";
 
+// Every file the touches-guard needs at runtime. `source-roots.mjs` is on the list because the
+// guard imports the repo-root contract (`resolveRepoRoot`) from it — see that function's header
+// in source-roots.mjs for why it lives there rather than in a module of its own.
+const TOUCHES_GUARD_FILES = ["touches-guard.mjs", "parse-task-id.mjs", "source-roots.mjs"];
+
 // Build <root>/real/.flow/bin/<files> and <root>/link -> <root>/real, so a path through `link`
 // is a genuine symlink on every platform, not just where the OS happens to provide one.
 function symlinkedFixture(files) {
@@ -50,7 +55,7 @@ test("parse-task-id CLI resolves an id when invoked through a symlink", () => {
 });
 
 test("touches-guard still ENFORCES scope when invoked through a symlink (fails open otherwise)", () => {
-  const fx = symlinkedFixture(["touches-guard.mjs", "parse-task-id.mjs"]);
+  const fx = symlinkedFixture(TOUCHES_GUARD_FILES);
   writeFileSync(join(fx.viaReal, ".flow", "tasks", "0030-x.md"),
     '---\nid: "CAN-30"\ntouches: ["src/**"]\n---\nbody\n');
 
@@ -92,7 +97,7 @@ test("touches-guard still ENFORCES scope when invoked through a symlink (fails o
 // A throwaway repo with a task declaring `touches: ["src/**"]` and a diff that strays outside
 // it. `bodyTouches` lets a test swap in a different declaration (or none).
 function guardFixture({ bodyTouches = 'touches: ["src/**"]\n', drift = true } = {}) {
-  const fx = symlinkedFixture(["touches-guard.mjs", "parse-task-id.mjs"]);
+  const fx = symlinkedFixture(TOUCHES_GUARD_FILES);
   writeFileSync(join(fx.viaReal, ".flow", "tasks", "0030-x.md"),
     `---\nid: "CAN-30"\n${bodyTouches}---\nbody\n`);
 
