@@ -1,10 +1,17 @@
 #!/usr/bin/env node
 // pick-task.mjs — the queue-runner's task selector. Pure, zero-dependency (Node >= 18).
 //
-// Implements step 1 of the Flow loop (CLAUDE.md): pick the highest-priority `ready`
-// task whose declared `touches` blast radius does NOT overlap any currently
-// `in_progress` task. Prints that task's id to stdout and nothing else, or prints
+// Implements step 1 of the Flow loop (.flow/PROTOCOL.md): pick the highest-priority `ready`
+// task whose declared `touches` blast radius does NOT overlap any task currently IN FLIGHT —
+// `in_progress` **or** `in_review`. Prints that task's id to stdout and nothing else, or prints
 // nothing (exit 0) when there is no eligible task.
+//
+// flow-0118: `in_review` counts because a review-stage PR has not landed yet. Its branch is
+// still live and about to rewrite `main` in exactly the files it declared, so dispatching an
+// overlapping `ready` task branches off a `main` that is about to move underneath it — the
+// collision shows up as a four-file merge conflict instead of as a task waiting its turn.
+// `blocked` deliberately does NOT count: a blocked task has no live branch heading for `main`,
+// and `blocked_by` already sequences it.
 //
 //   node .flow/bin/pick-task.mjs        # prints e.g. "CAN-42" or nothing
 //
@@ -21,6 +28,9 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// flow-0111: the same list parser flow-doctor uses. Both YAML list forms, so block-form
+// `touches` (what every real task file uses) is not silently read as empty.
+import { parseListField } from "./flow-doctor.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -41,8 +51,8 @@ const __isMain = (() => {
   } catch { return false; }
 })();
 // ---------------------------------------------------------------------------------------
-// Parse the YAML frontmatter we care about from a task file's text. Tolerant of the
-// inline-array `touches` form and `#` trailing comments — same shape flow-doctor and
+// Parse the YAML frontmatter we care about from a task file's text. Tolerant of both
+// `touches` list forms (inline array and block sequence) and `#` trailing comments — same shape flow-doctor and
 // touches-guard read. Returns null when there's no frontmatter block.
 export function parseTask(text) {
   if (!text.startsWith("---")) return null;
@@ -53,9 +63,10 @@ export function parseTask(text) {
     const m = head.match(new RegExp(`^${k}:\\s*(.*)$`, "m"));
     return m ? m[1].split("#")[0].trim().replace(/^"(.*)"$/, "$1") : "";
   };
-  const touchesRaw = (head.match(/^touches:\s*\[(.*?)\]/m) || [, ""])[1];
-  const touches = [...touchesRaw.matchAll(/"([^"]*)"|'([^']*)'/g)]
-    .map((x) => x[1] ?? x[2]).filter(Boolean);
+  // flow-0111: this used to be an inline-array-only regex, which read every block-form
+  // `touches:` as [] and made the overlap filter below inert — the queue runner dispatched
+  // straight into collisions, in every repo.
+  const touches = parseListField(head, "touches");
   const id = get("id");
   if (!id) return null;
   return { id, status: get("status"), priority: parseInt(get("priority"), 10), touches };
@@ -93,16 +104,20 @@ export function touchesOverlap(aList, bList) {
   return aList.some((a) => bList.some((b) => globsOverlap(a, b)));
 }
 
+// The statuses that mean "someone is holding these files": a claimed task, and a task whose PR
+// is open for review but not merged. Both have a live branch pointed at `main`.
+export const IN_FLIGHT_STATUSES = ["in_progress", "in_review"];
+
 // Pure selector: given the parsed tasks, return the id of the task to work next, or null.
-// A `ready` task is eligible unless its touches overlap any `in_progress` task's touches.
+// A `ready` task is eligible unless its touches overlap an in-flight task's touches.
 export function pickTask(tasks) {
-  const inProgress = tasks.filter((t) => t.status === "in_progress");
+  const inFlight = tasks.filter((t) => IN_FLIGHT_STATUSES.includes(t.status));
   const numId = (id) => { const m = String(id).match(/(\d+)\s*$/); return m ? parseInt(m[1], 10) : Infinity; };
   const pri = (t) => (Number.isFinite(t.priority) ? t.priority : 999);
 
   const eligible = tasks
     .filter((t) => t.status === "ready")
-    .filter((t) => !inProgress.some((p) => touchesOverlap(t.touches, p.touches)))
+    .filter((t) => !inFlight.some((p) => touchesOverlap(t.touches, p.touches)))
     .sort((a, b) => pri(a) - pri(b) || numId(a.id) - numId(b.id) || String(a.id).localeCompare(b.id));
 
   return eligible.length ? eligible[0].id : null;

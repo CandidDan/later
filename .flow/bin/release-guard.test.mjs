@@ -26,7 +26,9 @@ import {
   checkRelease,
   collectFacts,
   commitDistance,
+  compareFragmentNames,
   formatReport,
+  fragmentsAtRef,
   highestReleaseTag,
   listReleaseTags,
   makeGitRunner,
@@ -36,6 +38,8 @@ import {
   resolveCommit,
   runReleaseGuard,
   versionAtRef,
+  FRAGMENT_DIR,
+  FRAGMENT_NAME,
   RELEASE_TAG,
   ROOT_VERSION_PATH,
   TEMPLATE_VERSION_PATH,
@@ -472,4 +476,111 @@ test("the CLI reads the tag from GITHUB_REF_NAME when no --tag is passed", () =>
   } catch (e) { code = e.status; stdout = e.stdout; }
   assert.equal(code, 1, "a push to main must still re-check the newest published stamp");
   assert.match(stdout, /v1\.1\.1/);
+});
+
+// ── flow-0069: a release cut without its notes ─────────────────────────────────────────
+//
+// The failure this closes has the same signature as the 2026-08-19 stamp incident: the wrong
+// outcome arrives quietly, in the direction that looks healthy. Fragments left in a tagged tree
+// mean the changes ship and the changelog never mentions them, and nothing else in the release
+// path would say so — the tag is cut, the alias moves, everything is green.
+
+test("a release tag whose tree still holds fragments is a PROBLEM that names each one", () => {
+  const { problems, warnings } = checkRelease({
+    tag: "v1.2.0", tagVersion: "1.2.0", rootVersion: "1.2.0", templateVersion: "1.2.0",
+    fragments: ["changes/flow-0102.md", "changes/flow-0101.md"],
+  });
+  assert.equal(problems.length, 1, "unassembled notes are the only thing wrong with this tree");
+  assert.match(problems[0], /changes\/flow-0101\.md/, "the problem must name the fragment");
+  assert.match(problems[0], /changes\/flow-0102\.md/);
+  assert.ok(problems[0].indexOf("flow-0101") < problems[0].indexOf("flow-0102"),
+    "listed in ascending id order, the same order they would be assembled in");
+  assert.match(problems[0], /--assemble/, "a problem with no repair is a problem people learn to ignore");
+  assert.deepEqual(warnings, [], "this is a problem, not a warning — it is a forgotten step, not a deliberate one");
+});
+
+test("a tagged tree with no `changes/` directory reports no fragment problem — that is the fleet", () => {
+  const { problems } = checkRelease({
+    tag: "v1.2.0", tagVersion: "1.2.0", rootVersion: "1.2.0", templateVersion: "1.2.0",
+    fragments: [],
+  });
+  assert.deepEqual(problems, [],
+    "every consuming repo has no changes/ directory; failing them would make the guard unusable");
+
+  // Absent rather than empty: a caller on an older facts shape must not be failed either.
+  assert.deepEqual(checkRelease({
+    tag: "v1.2.0", tagVersion: "1.2.0", rootVersion: "1.2.0", templateVersion: "1.2.0",
+  }).problems, []);
+});
+
+test("pending fragments on a NON-release ref are not a problem — that is what the directory is for", () => {
+  const { problems } = checkRelease({
+    tag: "v1", tagVersion: "1.2.0", rootVersion: "1.2.0", templateVersion: "1.2.0",
+    fragments: ["changes/flow-0101.md"],
+  });
+  assert.deepEqual(problems, [],
+    "main carries fragments between releases by design; failing on that reddens every push");
+});
+
+test("fragmentsAtRef reads the tagged tree, skips README.md, and orders by id", () => {
+  const r = makeRepo("fragments");
+  stamp(r.dir, "1.2.0");
+  mkdirSync(join(r.dir, FRAGMENT_DIR), { recursive: true });
+  writeFileSync(join(r.dir, FRAGMENT_DIR, "README.md"), "# the convention\n");
+  writeFileSync(join(r.dir, FRAGMENT_DIR, "flow-0102.md"), "- b\n");
+  writeFileSync(join(r.dir, FRAGMENT_DIR, "flow-0101.md"), "- a\n");
+  commit(r, "release 1.2.0 with its notes not yet assembled");
+  r.git("tag", "-a", "v1.2.0", "-m", "1.2.0");     // ANNOTATED, like canonical's release tags
+
+  assert.deepEqual(
+    fragmentsAtRef(r.runner, resolveCommit(r.runner, "v1.2.0")),
+    ["changes/flow-0101.md", "changes/flow-0102.md"],
+    "README.md is documentation and must never be counted as a pending note",
+  );
+  assert.deepEqual(fragmentsAtRef(r.runner, null), [], "no ref is no fragments, not a crash");
+  assert.deepEqual(fragmentsAtRef(r.runner, "HEAD", "no-such-dir"), [],
+    "an absent directory is [], which is what every consuming repo looks like");
+});
+
+test("end to end: the tag is refused, and assembling the notes clears it", () => {
+  const r = makeRepo("unassembled");
+  stamp(r.dir, "1.2.0");
+  mkdirSync(join(r.dir, FRAGMENT_DIR), { recursive: true });
+  writeFileSync(join(r.dir, FRAGMENT_DIR, "README.md"), "# the convention\n");
+  writeFileSync(join(r.dir, FRAGMENT_DIR, "flow-0101.md"), "- a\n");
+  commit(r, "1.2.0, notes not assembled");
+  r.git("tag", "-a", "v1.2.0", "-m", "1.2.0");
+
+  const bad = runReleaseGuard({ git: r.runner, tag: "v1.2.0" });
+  assert.deepEqual(bad.facts.fragments, ["changes/flow-0101.md"]);
+  assert.equal(bad.problems.length, 1);
+  assert.match(bad.problems[0], /v1\.2\.0 tags a tree that still contains 1 unassembled/);
+
+  // The documented repair: assemble on a branch, merge, and cut a NEW tag at that commit.
+  rmSync(join(r.dir, FRAGMENT_DIR, "flow-0101.md"));
+  stamp(r.dir, "1.2.1");
+  commit(r, "assemble the fragments, release 1.2.1");
+  r.git("tag", "-a", "v1.2.1", "-m", "1.2.1");
+
+  const good = runReleaseGuard({ git: r.runner, tag: "v1.2.1" });
+  assert.deepEqual(good.facts.fragments, [], "README.md alone is not a pending note");
+  assert.deepEqual(good.problems, [], `expected a clean release, got: ${good.problems.join(" | ")}`);
+});
+
+test("the healthy fixture — no `changes/` directory at all — is still silent", () => {
+  const { facts, problems, warnings } = runReleaseGuard({ git: healthyRepo().runner, tag: "v1.2.0" });
+  assert.deepEqual(facts.fragments, []);
+  assert.deepEqual(problems, []);
+  assert.deepEqual(warnings, []);
+});
+
+test("FRAGMENT_NAME admits a task id and refuses README.md; compareFragmentNames is numeric", () => {
+  assert.equal(FRAGMENT_NAME.test("flow-0069.md"), true);
+  assert.equal(FRAGMENT_NAME.test("CAN-42.md"), true, "the convention is any repo's task-id shape");
+  assert.equal(FRAGMENT_NAME.test("README.md"), false,
+    "a `*.md` pattern would have the assembler delete the documentation of its own convention");
+  assert.equal(FRAGMENT_NAME.test("flow-0069.txt"), false);
+  assert.equal(FRAGMENT_DIR, "changes");
+  assert.ok(compareFragmentNames("flow-9999.md", "flow-10000.md") < 0,
+    "lexical order gets this pair backwards");
 });

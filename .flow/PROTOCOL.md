@@ -21,19 +21,38 @@ the canonical procedure and produces a correctly-shaped file in `.flow/tasks/` (
 `_TEMPLATE.md`, `status: ready`, next sequential id, `touches` declared) committed to `main`. The
 worker never creates tasks; it only executes `ready` ones.
 
-## Response style — always TL;DR
+**Changelog entries, where the repo keeps a `changes/` directory.** A task's changelog entry goes
+in `changes/<task-id>.md` — one file per task, holding exactly what would otherwise have gone
+under `## Unreleased` — and a task never edits `CHANGELOG.md` directly. This is a concurrency rule
+wearing a changelog's clothes: a shared append-only changelog ends up in every task's `touches`,
+and `touches` overlap is what makes a task ineligible to claim, so one file every task only
+*appends* to serialises the whole queue behind whichever task is in progress. Declare
+`changes/<task-id>.md` in `touches`, never `CHANGELOG.md`; the directory's own README documents the
+format, and cutting a release is what folds the fragments in. A repo with no `changes/` directory
+has nothing to do here and keeps whatever changelog habit it already has.
 
-End every response to the human with a one-line **TL;DR** synopsis of what the turn covered —
-include it even on short replies — so they can absorb each turn at a glance without re-reading the
-full output. If the turn leaves **actions for the human to take**, follow the TL;DR with a short
-**ordered checklist of just those to-dos** — numbered, one line each, in the order to do them.
-Omit the checklist entirely when there's nothing for them to do (don't pad it with things you've
-already handled or future "maybe" work).
+**Proving that entry, in a repo that has fragments.** A test that proves the entry exists reads
+the fragment **if it exists, and otherwise the assembled entry in `CHANGELOG.md`** — the entry
+whose file list ends `, <task-id>)`. Reading only the fragment is green until the next release and
+red on the release's own PR, because assembling the changelog deletes the file the test reads.
 
-This applies to **Claude Code worker** sessions too — they auto-load this file. For a worker, the
-"response" is its end-of-run summary and its **PR description**: close those with the same TL;DR and,
-where the human needs to act (review/merge, a kickback to address, or a `blocked` reason), the same
-short ordered checklist.
+## Response style — show, don't tell
+
+**Show, don't tell.** Use the fewest words that carry the point — no preamble, recap, hedging or
+drama. Anything with structure (a comparison, flow, hierarchy, state or before/after) is a
+visual — table, tree, call stack, mermaid, diff — not a paragraph. Terse is not cryptic: plain
+words, full sentences, no unexplained jargon. Formats and examples:
+`.claude/skills/show-me/SKILL.md`.
+
+End a response with a one-line **TL;DR** only when it runs past about 15 lines; a short reply is
+its own summary. If the human has to act, end with a numbered **checklist of just those to-dos**,
+in order; omit it when there are none.
+
+Workers too — a worker's host file (`CLAUDE.md` for Claude Code) auto-loads and imports this
+protocol, so these rules reach it as well. A worker's "response" is its end-of-run summary, and
+its **PR description**, which is in this order — TL;DR, then one visual of the change, then the
+criteria checklist with proving tests, then the human's to-dos (review/merge, a kickback, a
+`blocked` reason).
 
 ---
 
@@ -87,7 +106,10 @@ ready  →  in_progress  →  in_review  →  done
   task correctly stays `in_progress`, and `flow-status` records `branch` and `pr` on it anyway. A
   PR that someone opens directly as non-draft still transitions on `opened`, as before.
 - `done` — set automatically by `flow-done` when the PR **merges**. Never by hand.
-- `blocked` — you hit something undecidable. Set `blocked_reason`, stop, surface it. Also fill
+- `blocked` — you hit something undecidable. Set `blocked_reason`, stop, surface it. Put the
+  decision in **`asks`** too, as a `decision` ask carrying its `Recommend:` — `blocked_reason` is
+  prose a human reads only once they are already looking at the task, and `asks` is what brings
+  them there. Also fill
   **`blocked_by`**: the list of things the block is waiting on, each entry a task id in this repo
   (`"PROJ-0007"`) or a PR url. `blocked_reason` is the sentence a person reads; `blocked_by` is the
   same fact in a shape a machine can act on, and it never replaces the sentence. This matters
@@ -118,7 +140,9 @@ commit owns the task; the others never started it.
 
 **`touches` declares the blast radius.** Every task's frontmatter carries a `touches` list
 of path globs it expects to modify. Before claiming, skip any `ready` task whose `touches`
-overlaps an `in_progress` task's `touches` — work it later, once the conflicting task lands.
+overlaps an `in_progress` **or `in_review`** task's `touches` — work it later, once the
+conflicting task lands. `in_review` counts because that PR has not merged: its branch is still
+live and about to rewrite `main` in those very files.
 This keeps two sessions out of the same files. If you discover mid-build that you must touch
 a path outside your declared `touches`, that's a scope signal: stop and treat it as a
 `blocked` task or a note for the orchestrator, don't silently expand.
@@ -142,7 +166,7 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
 ## The loop you run
 
 1. **Pick.** Take the highest-`priority` task in `ready` with no `touches` overlap against
-   anything `in_progress`. If none, stop — do not invent work.
+   anything `in_progress` or `in_review`. If none, stop — do not invent work.
 2. **Claim (atomic).** `git pull --rebase`; set `in_progress` + `owner` + `started` (full UTC
    ISO datetime, see *Status lifecycle*); commit
    that task file and push to `main`. If the push is rejected, rebase and go back to step 1.
@@ -238,6 +262,34 @@ doc (see *The store*). Append a `notes` entry on `main` covering:
 
 Commit it to `main` *before* you stop. A session that ends without this has spent its
 whole context for nothing: the next one pays all over again to learn what you already knew.
+
+**`notes` is for the next session. `asks` is for the human.** This is the one split in the task
+file that routes, and getting it wrong is how work goes silently missing. `notes` is read by
+whatever session picks the task up next; the human never opens task frontmatter, so an item only
+a *person* can act on reaches nobody when it is written as a note. Prose cannot be routed —
+nothing can tell "for the next worker" from "for you". So put it in **`asks`**: a list of
+strings, one per open item, each prefixed with its kind. There are exactly three:
+
+```yaml
+asks:
+  - "decision: v2 or v3 in the schema id? Recommend: v3, the id should say the shape"
+  - "follow-up: the retry path needs its own task, it is out of scope here"
+  - "fyi: the fixture store moved, so a stale checkout fails one test"
+```
+
+- **`decision`** — a ruling that is not yours to make. It **must** carry `Recommend: <the option
+  and why>`: a decision reaches the human with the recommendation you are already holding, or it
+  hands back thinking that was already done. `flow-doctor` fails a `decision` without one.
+- **`follow-up`** — a task that should exist and doesn't. You never create it (the orchestrator
+  writes tasks); you name it in one sentence.
+- **`fyi`** — what the reviewer should know before merging.
+
+`flow-doctor` fails a malformed ask — an unknown kind, empty text, a `decision` with no
+`Recommend:` — naming the task and the ask. `flow-state --json` reports every task's asks parsed,
+which is what the human's surfaces read. **Resolving an ask removes it from `asks` and appends a
+`notes` line recording the answer**; an ask left in place after it is answered is an item a
+person is asked twice. A task with no `asks:` key has nothing to ask, which is why every task
+written before this field is already correct.
 
 **Orchestrator sessions are on the same budget.** An orchestrator that plans for hours and
 writes nothing down is the most expensive failure in this system — nothing survives the

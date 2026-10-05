@@ -18,12 +18,19 @@ import test from "node:test";
 import {
   AllocationError,
   SLUG_RE,
+  URGENT_LABEL,
   allocateTaskId,
   assertInsideTasksDir,
   buildContentFromFile,
   idWidth,
   nextId,
+  parseDraftFrontmatter,
+  parseQueueCap,
+  queueCapRefusal,
+  queueCapReport,
   readIdsFromOrigin,
+  readQueueCap,
+  readStoreFromOrigin,
   runCli,
 } from "./allocate-task-id.mjs";
 
@@ -215,7 +222,7 @@ test("exhausting the retry budget throws, names the attempt count, and leaves no
       repoRoot: "/fixture/root",
       prefix: "flow",
       maxAttempts: 3,
-      readIds: () => ["flow-0001"],
+      readStore: () => ({ ids: ["flow-0001"], readyCount: 0 }),
       git,
       write: () => { writes++; },
       rename: () => {},
@@ -491,4 +498,332 @@ test("runCli reports a non-AllocationError through the same catch, still exiting
     assert.match(err, /allocate-task-id: /,
       "an unexpected error must still be surfaced with the tool's name, not swallowed");
   } finally { cleanup(root); }
+});
+
+// ══ the queue cap (flow-0070) ══════════════════════════════════════════════════════════════
+//
+// A WIP limit on the QUEUE, not on the work. The cap is enforced in the allocator rather than
+// described in the task-writer skill, so these tests are the thing that makes it real — prose
+// in a skill holds until the session that most wants to break it arrives.
+//
+// Every transaction test below uses the SAME real-remote fixtures as the rest of this file:
+// `buildRemoteAndClone` seeds task files whose frontmatter says `status: "ready"`, so "8 ready
+// on origin/main" is eight real committed files, counted by the same `readTasksFromOrigin` the
+// allocator uses in production.
+
+const readyIds = (n) => Array.from({ length: n }, (_, i) => `flow-${String(i + 1).padStart(4, "0")}`);
+
+// A draft as the orchestrator would hand it to --content-file: `id:` still a placeholder,
+// `status`/`labels` whatever is being proved.
+function draftFile({ status = "ready", labels = null } = {}) {
+  return `---\nid: "PENDING"\nstatus: "${status}"\npriority: 3\n` +
+    (labels ? `labels: [${labels.join(", ")}]\n` : "") +
+    `touches: []\n---\n\ndraft body\n`;
+}
+const draftOpts = (text) => ({
+  filenameFor: (id) => `${id}-x.md`,
+  buildContent: (id) => buildContentFromFile(text, id),
+});
+
+// ── pure: parseQueueCap ───────────────────────────────────────────────────────────────────
+
+test("parseQueueCap reads a top-level integer and ignores a trailing comment or quotes", () => {
+  assert.equal(parseQueueCap("coverage_min: 80\nqueue_cap: 8\ngit:\n"), 8);
+  assert.equal(parseQueueCap("queue_cap: 8   # a WIP limit, see flow-0070\n"), 8);
+  assert.equal(parseQueueCap('queue_cap: "12"\n'), 12);
+  assert.equal(parseQueueCap("queue_cap: 0\n"), 0, "0 is a real cap — refuse every ready draft");
+});
+
+test("parseQueueCap returns null — never 0 — for absent, commented-out, nested or malformed", () => {
+  for (const text of [
+    "",
+    "coverage_min: 80\n",
+    "# queue_cap: 8\n",                       // the template's documented example
+    "review:\n  queue_cap: 8\n",              // nested: only a TOP-LEVEL key is the cap
+    "queue_cap:\n",
+    "queue_cap: lots\n",
+    "queue_cap: 8.5\n",
+    "queue_cap: -1\n",
+  ]) {
+    assert.equal(parseQueueCap(text), null,
+      `${JSON.stringify(text)} must read as uncapped, not as a cap of 0 that would freeze the queue`);
+  }
+});
+
+test("readQueueCap reads the repo's own .flow/config.yml, and is null when there is no config", () => {
+  const dir = tmpRoot("cap-config");
+  try {
+    assert.equal(readQueueCap(dir), null, "a repo with no .flow/config.yml is uncapped");
+    mkdirSync(join(dir, ".flow"), { recursive: true });
+    writeFileSync(join(dir, ".flow", "config.yml"), "project:\n  name: \"x\"\nqueue_cap: 8\n");
+    assert.equal(readQueueCap(dir), 8);
+  } finally { cleanup(dir); }
+});
+
+// ── pure: parseDraftFrontmatter ───────────────────────────────────────────────────────────
+
+test("parseDraftFrontmatter reads status and labels in both YAML list forms", () => {
+  assert.deepEqual(parseDraftFrontmatter(draftFile({ labels: ["queue", "urgent"] })),
+    { status: "ready", labels: ["queue", "urgent"] });
+  assert.deepEqual(parseDraftFrontmatter(draftFile({ status: "blocked" })),
+    { status: "blocked", labels: [] });
+  assert.deepEqual(
+    parseDraftFrontmatter(`---\nid: "x"\nstatus: "ready"\nlabels:\n  - queue\n  - "urgent"\ntouches: []\n---\nbody\n`),
+    { status: "ready", labels: ["queue", "urgent"] },
+    "a block list is as valid as an inline one — a draft is hand-written");
+  assert.deepEqual(parseDraftFrontmatter(`---\nid: "x"\nlabels: []\n---\n`), { status: "", labels: [] });
+});
+
+test("parseDraftFrontmatter reports no status for text that is not a frontmatter document", () => {
+  // The CLI's --dry-run without a --content-file has no draft at all; an empty status is what
+  // makes the cap inert there rather than refusing on a guess.
+  for (const text of ["", "# just a heading\n", "---\nid: \"x\"\nstatus: \"ready\"\n"]) {
+    assert.deepEqual(parseDraftFrontmatter(text), { status: "", labels: [] });
+  }
+});
+
+// ── pure: the decision itself ─────────────────────────────────────────────────────────────
+
+test("queueCapRefusal: 8 ready against a cap of 8 refuses a plain ready draft, naming count, cap and `urgent`", () => {
+  const refusal = queueCapRefusal({ queueCap: 8, readyCount: 8, draftStatus: "ready", draftLabels: [] });
+  assert.ok(refusal, "a cap of 8 is a MAXIMUM — the 9th ready task is refused");
+  assert.match(refusal, /\b8 task\(s\) are `ready`/, "the message must name the current ready count");
+  assert.match(refusal, /`queue_cap` is 8/, "the message must name the cap");
+  assert.match(refusal, /urgent/, "the message must name the one bypass");
+  assert.match(refusal, /blocked/, "the message must name the other way forward");
+});
+
+test("queueCapRefusal: every single condition that lifts the refusal", () => {
+  const base = { queueCap: 8, readyCount: 8, draftStatus: "ready", draftLabels: [] };
+  assert.equal(queueCapRefusal({ ...base, readyCount: 7 }), null, "under the cap, nothing changes");
+  assert.equal(queueCapRefusal({ ...base, draftLabels: [URGENT_LABEL] }), null, "`urgent` is the bypass");
+  assert.equal(queueCapRefusal({ ...base, draftStatus: "blocked" }), null,
+    "the cap limits the READY queue, not the store");
+  assert.equal(queueCapRefusal({ ...base, queueCap: null, readyCount: 50 }), null, "no cap, no refusal");
+  assert.equal(queueCapRefusal({ ...base, queueCap: 8.5 }), null, "a non-integer cap is not a cap");
+  assert.equal(queueCapRefusal(), null, "called with nothing at all, it refuses nothing");
+  assert.ok(queueCapRefusal({ ...base, readyCount: 9 }), "over the cap refuses too, not only exactly at it");
+  assert.ok(queueCapRefusal({ ...base, draftLabels: ["queue", "wip-limit"] }),
+    "some other label is not the bypass");
+});
+
+test("queueCapReport says which of the three states it is in — including `off`", () => {
+  assert.match(queueCapReport({ queueCap: 8, readyCount: 7, refusal: null }), /^queue_cap: ok — 7 ready/);
+  assert.match(queueCapReport({ queueCap: null, readyCount: 13, refusal: null }), /^queue_cap: off —/);
+  assert.match(queueCapReport({ queueCap: null, readyCount: 13, refusal: null }), /13 ready/);
+  const refused = queueCapReport({ queueCap: 8, readyCount: 8, refusal: "x" });
+  assert.match(refused, /^queue_cap: REFUSE — 8 ready on origin\/main, cap 8/);
+  assert.match(refused, /urgent/);
+  assert.match(refused, /blocked/);
+  assert.match(refused, /Nothing was written/);
+});
+
+// ── readStoreFromOrigin counts `ready` from the same read that yields the ids ─────────────
+
+test("readStoreFromOrigin returns the ids and the ready count from one read of origin/main", () => {
+  const { root, work } = buildRemoteAndClone(readyIds(3));
+  try {
+    const { ids, readyCount } = readStoreFromOrigin(work);
+    assert.equal(ids.length, 3);
+    assert.equal(readyCount, 3, "the fixture's seeded task files are all `status: ready`");
+  } finally { cleanup(root); }
+});
+
+// ── the transaction: AC1-AC6 ──────────────────────────────────────────────────────────────
+
+test("cap 8, 8 ready, plain ready draft: AllocationError, and nothing is added, committed or pushed", () => {
+  const { root, bare, work } = buildRemoteAndClone(readyIds(8));
+  try {
+    const calls = [];
+    const git = (args) => {
+      calls.push(args[0]);
+      return execFileSync("git", ["-C", work, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    };
+
+    assert.throws(
+      () => allocateTaskId({ repoRoot: work, prefix: "flow", queueCap: 8, git, ...draftOpts(draftFile()) }),
+      (err) => {
+        assert.ok(err instanceof AllocationError);
+        assert.match(err.message, /8 task\(s\) are `ready`/);
+        assert.match(err.message, /`queue_cap` is 8/);
+        assert.match(err.message, /urgent/);
+        return true;
+      },
+    );
+
+    // The refusal's whole value is its position — before the write, like the traversal guard.
+    assert.deepEqual(calls.filter((c) => ["add", "commit", "push"].includes(c)), [],
+      "a capped draft must be refused before anything is staged, committed or pushed");
+    assert.deepEqual(readdirSync(join(work, ".flow", "tasks")).filter((n) => n.endsWith("-x.md")), [],
+      "no task file may be written");
+    assert.equal(
+      execFileSync("git", ["--git-dir", bare, "log", "--oneline", "main"], { encoding: "utf8" })
+        .split("\n").filter(Boolean).length, 1,
+      "the remote must still hold only the seed commit");
+  } finally { cleanup(root); }
+});
+
+test("cap 8, 7 ready: the same draft is allocated exactly as it is today", () => {
+  const { root, bare, work } = buildRemoteAndClone(readyIds(7));
+  try {
+    const result = allocateTaskId({ repoRoot: work, prefix: "flow", queueCap: 8, ...draftOpts(draftFile()) });
+    assert.equal(result.id, "flow-0008");
+    assert.equal(result.attempts, 1);
+    const onRemote = execFileSync("git", ["--git-dir", bare, "ls-tree", "-r", "--name-only", "main", ".flow/tasks"],
+      { encoding: "utf8" });
+    assert.match(onRemote, /flow-0008-x\.md/, "under the cap the transaction must land as normal");
+  } finally { cleanup(root); }
+});
+
+test("cap 8, 8 ready, draft labelled `urgent`: allocated — the one bypass, and it is the human's", () => {
+  const { root, bare, work } = buildRemoteAndClone(readyIds(8));
+  try {
+    const result = allocateTaskId({ repoRoot: work, prefix: "flow", queueCap: 8,
+      ...draftOpts(draftFile({ labels: ["queue", URGENT_LABEL] })) });
+    assert.equal(result.id, "flow-0009");
+    assert.match(execFileSync("git", ["--git-dir", bare, "ls-tree", "-r", "--name-only", "main", ".flow/tasks"],
+      { encoding: "utf8" }), /flow-0009-x\.md/);
+  } finally { cleanup(root); }
+});
+
+test("cap 8, 8 ready, a `blocked` draft: allocated — the cap limits the ready queue, not the store", () => {
+  const { root, bare, work } = buildRemoteAndClone(readyIds(8));
+  try {
+    const result = allocateTaskId({ repoRoot: work, prefix: "flow", queueCap: 8,
+      ...draftOpts(draftFile({ status: "blocked" })) });
+    assert.equal(result.id, "flow-0009");
+    assert.match(execFileSync("git", ["--git-dir", bare, "ls-tree", "-r", "--name-only", "main", ".flow/tasks"],
+      { encoding: "utf8" }), /flow-0009-x\.md/);
+  } finally { cleanup(root); }
+});
+
+test("no cap at all, 50 ready: allocated — absent `queue_cap` is uncapped, which is the default", () => {
+  const { root, bare, work } = buildRemoteAndClone(readyIds(50));
+  try {
+    const result = allocateTaskId({ repoRoot: work, prefix: "flow", ...draftOpts(draftFile()) });
+    assert.equal(result.id, "flow-0051");
+    assert.match(execFileSync("git", ["--git-dir", bare, "ls-tree", "-r", "--name-only", "main", ".flow/tasks"],
+      { encoding: "utf8" }), /flow-0051-x\.md/);
+  } finally { cleanup(root); }
+}, { timeout: 60000 });
+
+test("the count comes from origin/main only — uncommitted ready task files in the working tree are not counted", () => {
+  const { root, bare, work } = buildRemoteAndClone(readyIds(7));
+  try {
+    // Five more `ready` task files that exist ONLY in the working tree. Counted, they would put
+    // the queue at 12 against a cap of 8 and refuse this draft; they must be invisible, for the
+    // same reason the id is allocated against origin/main and not against local drift.
+    for (let i = 0; i < 5; i++) {
+      writeFileSync(join(work, ".flow", "tasks", `flow-99${i}0-local.md`), taskFile(`flow-99${i}0`));
+    }
+    const result = allocateTaskId({ repoRoot: work, prefix: "flow", queueCap: 8, ...draftOpts(draftFile()) });
+    assert.equal(result.id, "flow-0008", "the id, too, comes from origin/main and not the working tree");
+    assert.match(execFileSync("git", ["--git-dir", bare, "ls-tree", "-r", "--name-only", "main", ".flow/tasks"],
+      { encoding: "utf8" }), /flow-0008-x\.md/);
+  } finally { cleanup(root); }
+});
+
+// ── the CLI reads the cap from config and reports/refuses on it ───────────────────────────
+
+function writeConfig(root, body) {
+  mkdirSync(join(root, ".flow"), { recursive: true });
+  writeFileSync(join(root, ".flow", "config.yml"), body);
+}
+
+test("runCli --write refuses on the cap in .flow/config.yml, exits non-zero and allocates nothing", () => {
+  const { root, bare, work } = buildRemoteAndClone(readyIds(8));
+  try {
+    writeConfig(work, "project:\n  name: \"flow\"\nqueue_cap: 8\n");
+    const contentFile = join(work, "draft.md");
+    writeFileSync(contentFile, draftFile());
+
+    let err = "";
+    let out = "";
+    const code = runCli(
+      ["--write", "--repo-root", work, "--prefix", "flow", "--content-file", contentFile, "--slug", "capped"],
+      { log: (s) => { out += s; }, logErr: (s) => { err += s; }, cwd: work });
+
+    assert.equal(code, 1, "a refused allocation must fail the CLI, not fall through as success");
+    assert.match(err, /`queue_cap` is 8/);
+    assert.match(err, /urgent/);
+    assert.equal(out, "", "nothing may be reported as allocated when nothing landed");
+    assert.deepEqual(readdirSync(join(work, ".flow", "tasks")).filter((n) => n.includes("capped")), []);
+    assert.doesNotMatch(execFileSync("git", ["--git-dir", bare, "log", "--oneline", "main"], { encoding: "utf8" }),
+      /allocate flow-0009/);
+  } finally { cleanup(root); }
+});
+
+test("runCli --write lands the same draft once the config has no cap — the key is the only difference", () => {
+  const { root, work } = buildRemoteAndClone(readyIds(8));
+  try {
+    writeConfig(work, "project:\n  name: \"flow\"\n# queue_cap: 8\n");
+    const contentFile = join(work, "draft.md");
+    writeFileSync(contentFile, draftFile());
+
+    let out = "";
+    const code = runCli(
+      ["--write", "--repo-root", work, "--prefix", "flow", "--content-file", contentFile, "--slug", "uncapped"],
+      { log: (s) => { out += s; }, logErr: () => {}, cwd: work });
+    assert.equal(code, 0, out);
+    assert.match(out, /^flow-0009 /);
+  } finally { cleanup(root); }
+});
+
+test("runCli --dry-run with a --content-file reports the decision and still writes nothing", () => {
+  const { root, bare, work } = buildRemoteAndClone(readyIds(8));
+  try {
+    writeConfig(work, "project:\n  name: \"flow\"\nqueue_cap: 8\n");
+    const run = (text) => {
+      const contentFile = join(work, "draft.md");
+      writeFileSync(contentFile, text);
+      const lines = [];
+      const code = runCli(["--dry-run", "--repo-root", work, "--prefix", "flow", "--content-file", contentFile],
+        { log: (s) => lines.push(s), logErr: () => {}, cwd: work });
+      return { code, lines };
+    };
+
+    const refused = run(draftFile());
+    assert.equal(refused.code, 0, "--dry-run reports; a non-zero exit would read as a real failure");
+    assert.equal(refused.lines[0], "flow-0009", "line 1 stays the bare id every caller parses");
+    assert.match(refused.lines[1], /^queue_cap: REFUSE — 8 ready on origin\/main, cap 8/);
+    assert.match(refused.lines[1], /urgent/);
+
+    const allowed = run(draftFile({ labels: [URGENT_LABEL] }));
+    assert.match(allowed.lines[1], /^queue_cap: ok — 8 ready on origin\/main, cap 8/);
+
+    assert.equal(sh(work, "status", "--porcelain", "--", ".flow/tasks").trim(), "",
+      "--dry-run must leave the store exactly as it found it");
+    assert.equal(
+      execFileSync("git", ["--git-dir", bare, "log", "--oneline", "main"], { encoding: "utf8" })
+        .split("\n").filter(Boolean).length, 1);
+  } finally { cleanup(root); }
+});
+
+test("runCli --dry-run without a --content-file prints the bare id and no decision", () => {
+  const { root, work } = buildRemoteAndClone(readyIds(8));
+  try {
+    writeConfig(work, "project:\n  name: \"flow\"\nqueue_cap: 8\n");
+    const lines = [];
+    const code = runCli(["--dry-run", "--repo-root", work, "--prefix", "flow"],
+      { log: (s) => lines.push(s), logErr: () => {}, cwd: work });
+    assert.equal(code, 0);
+    assert.deepEqual(lines, ["flow-0009"],
+      "with no draft there is nothing to judge — reporting a decision here would be reporting a guess");
+  } finally { cleanup(root); }
+});
+
+// ── the skill says what the allocator enforces ────────────────────────────────────────────
+
+test("the task-writer skill's cap paragraph names `queue_cap`, `urgent` and `blocked`", () => {
+  // The skill sits at `.claude/skills/` next to `.flow/`, in the template and in every repo
+  // that adopts it, so this relative path resolves in both.
+  const skill = readFileSync(resolve(HERE, "..", "..", ".claude", "skills", "task-writer", "SKILL.md"), "utf8");
+  const para = skill.split(/\n(?=\d+\.|##\s)/).find((p) => p.includes("queue_cap"));
+  assert.ok(para, "the skill must have a paragraph about the cap at all");
+  for (const word of ["queue_cap", "urgent", "blocked"]) {
+    assert.match(para, new RegExp(word),
+      `the cap paragraph must name \`${word}\` — a refused task is either not written yet, ` +
+      "written blocked, or labelled urgent by the human, and an orchestrator that is not told " +
+      "all three has only one move left: re-litigate the cap");
+  }
 });

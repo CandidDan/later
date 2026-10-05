@@ -1,0 +1,89 @@
+name: flow-kickback
+
+# Thin caller — the bounded auto-fix round (flow-0082) is authored once in canonical
+# (CandidDan/flow) as a reusable workflow and adopted here by reference. This caller owns the
+# `workflow_run` trigger and the per-PR concurrency group, and passes the two secrets the
+# reusable declares by name rather than `secrets: inherit`.
+# See docs/flow-reusable-workflows.md in the flow repo.
+#
+# WHAT IT DOES. When the `flow-review` run on a PR concludes `failure`, one auto-fix worker is
+# dispatched onto that same PR to address the reviewers' blocking findings, and the PR is then
+# re-reviewed from scratch in CI. Merge stays human. The protocol already called a red review
+# check a kickback; this is what finally starts that work instead of waiting for someone to
+# notice.
+#
+# OFF BY DEFAULT, AND IN TWO PLACES. It does nothing unless BOTH of these are true:
+#
+#   1. repo variable FLOW_AI=true, like every other workflow here that spends model quota; and
+#   2. `review.auto_fix_rounds` in this repo's .flow/config.yml is set to a round count. Absent
+#      or 0 — which is what the template ships — means off. The hard maximum is 3; a larger
+#      value is clamped to 3 with a warning on the run naming what was configured.
+#
+# FLOW_PAT IS REQUIRED, not optional. A push made with GITHUB_TOKEN triggers no workflows
+# (GitHub's recursion guard), so a fix pushed with it would never be re-reviewed — the round
+# would look successful and prove nothing. With no FLOW_PAT the workflow skips, visibly, saying
+# so. See _flow-open-pr.yml's header for the one FLOW_PAT permission list the fleet shares.
+#
+# AND IT REACHES EXACTLY ONE STEP. FLOW_PAT is used only by the reusable's `stamp-and-push`
+# step, which runs after all four guards have passed. Every other step runs on GITHUB_TOKEN.
+#
+# THE BLOCK BELOW IS A CEILING, NOT A BUDGET. A reusable workflow can never raise a scope above
+# its caller's, so this caller grants the UNION of what the reusable's jobs need — and the
+# reusable then hands each job only its own share. The split matters: the two jobs that run a
+# model (the fixer, and the read-only card writer) hold `contents: read` + `pull-requests:
+# read` and no write scope at all, while the jobs that do hold `pull-requests: write` and
+# `issues: write` (the draft toggle, and the two that post the card and the label) run no model.
+# That is deliberate. The fixer is a model under `bypassPermissions` told to read PR comments as
+# instructions, so anyone who can comment on the PR can address it: it must not be holding a
+# credential that can push, approve, comment, close, or remove the `flow:needs-human` label
+# that is this PR's off switch.
+#
+# THE ESCALATION: `flow:needs-human`, PLUS A DECISION CARD. Anything the round may not or cannot
+# do — a failed SECURITY check (never auto-fixed), the round cap reached, a round that weakened
+# the tests, a round that disputed the finding, a round that died — posts ONE comment on the PR
+# and adds the `flow:needs-human` label. The card is the decision, not a pointer to one: the
+# finding, what was tried or disputed, one recommendation ("merge as is" or "kick back with:
+# <change>"), the alternative, and the rounds used. The label is also the off switch for that
+# PR — this workflow never acts on a labelled PR, and removing the label re-arms it.
+#
+# WHY IT IS SAFE TO HOLD CREDENTIALS HERE. A `workflow_run` event always runs the workflow FILE
+# from the default branch, never from the PR head, so a PR cannot edit the workflow, the prompt
+# or the guards that are about to judge it. Fork PRs are skipped outright, matching the fork
+# fence in _flow-review.yml.
+
+on:
+  workflow_run:
+    workflows: ["flow-review"]
+    types: [completed]
+
+# One round per PR at a time. A second review failure arriving mid-round queues behind it rather
+# than racing it — two fixers on one branch would each push over the other's work. The group is
+# keyed on the PR number, with the head branch as the fallback for an event that carries no
+# linked PR (which the reusable skips anyway).
+concurrency:
+  group: flow-kickback-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  flow-kickback:
+    # The union of what the reusable's six jobs need, because a permissions block is exhaustive
+    # and a reusable can't raise a scope above its caller's. No single job gets all of this —
+    # see the reusable's header for the per-job table.
+    #
+    # There is deliberately no `contents: write`: this workflow never commits to the default
+    # branch, and the only branch it pushes to is the PR's own, as FLOW_PAT. `issues: write` is
+    # the `flow:needs-human` label — GitHub's label endpoints live under `issues`, so labelling
+    # a PR needs that grant rather than the `pull-requests` one. `actions: read` is the jobs API
+    # (`.../actions/runs/<id>/jobs`), the only way to learn WHICH review job failed, and it is
+    # used by the reusable's `plan` job alone. `id-token: write` is OIDC, which is never in the
+    # default GITHUB_TOKEN and so has to be granted here.
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    uses: CandidDan/flow/.github/workflows/_flow-kickback.yml@v3
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      FLOW_PAT: ${{ secrets.FLOW_PAT }}

@@ -46,6 +46,15 @@ implementation, that's yours to specify.
 6. State scope boundaries explicitly — what the task does NOT touch. This is what stops scope creep.
 7. Sequence: if task B depends on A, note it and leave B at lower priority or a `blocked` note
    until A lands. Keep a queue of `ready` tasks so the worker never runs dry.
+8. **The queue has a cap, and the allocator enforces it — not this file.** Where
+   `.flow/config.yml` sets `queue_cap`, that is the maximum number of `ready` tasks the store may
+   hold, and `allocate-task-id` refuses a new `ready` task while that many already are, before it
+   writes, commits or pushes anything. A refused task is therefore one of exactly two things:
+   **not written yet** (the queue drains first — usually the right answer), or **written
+   `blocked`** with a `blocked_reason`, which the cap never refuses. The one bypass is the draft's
+   own `urgent` label, and that is the human's to apply — never yours on your own judgement, the
+   same rule as `auto-ok`. Step 7's "never runs dry" stops at the cap: a queue past it is not
+   depth, it is work planned faster than it can be done.
 
 ## Triaging the inbox (GitHub Issues -> ready tasks)
 GitHub Issues are the **capture inbox**: zero-friction logging of bugs and ideas from anywhere,
@@ -90,6 +99,20 @@ them mechanically rather than trusting a plausible-sounding narrative:
 1. **`touches` is complete.** List every file the *scope* says this task will change, and confirm
    each is matched by a `touches` glob. A file named in the scope but absent from `touches` trips
    `touches-guard` and blocks the PR — it is the single most common cause of a bounced/blocked task.
+   **Where the repo keeps a `changes/` directory, list `changes/<id>.md` for the task's changelog
+   entry and never `CHANGELOG.md`.** A shared changelog lands in every task's `touches`, and
+   `touches` overlap is what makes a `ready` task ineligible while another is `in_progress` — so
+   declaring it serialises the queue behind a file no two tasks ever actually conflict over. One
+   fragment per task, and two tasks stop overlapping.
+   **And where that directory exists, the changelog criterion names the test that proves it.**
+   qa maps every criterion to a proving test *by name*, and "the fragment exists and states the
+   caller action" is a property of the whole store — so it is proved once, for every task at once,
+   not by a one-off test per task. Cite the repo's store-wide test in the criterion itself. In
+   canonical (the repo that authors Flow) that test is
+   `.flow/bin/changelog-fragments.test.mjs :: every claimed task that declares a changelog fragment has an entry stating its caller action`.
+   Check the repo you are writing for actually has an equivalent before citing one; if it has
+   none, writing it is the first thing the task owes — never leave the worker to invent a one-off,
+   which is exactly how three tasks in a row failed qa on this criterion.
 2. **"Parallel-safe" is proven, not asserted.** Before calling two tasks parallel, actually
    intersect their `touches` lists. If they share *any* path — a classic one is two tasks both
    editing the same page/router to mount into it — they are NOT parallel: sequence them, or
