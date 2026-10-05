@@ -22,7 +22,7 @@ describe("capture card projection and presentation", () => {
     const losing = run("a", undefined, "Conflicting title");
     const card = await projectCard(capture, [older, losing, run()], [], resolve);
     const html = render(card);
-    for (const value of ["Real source", "A creator", "youtu.be", "whatsapp", "url", "For next week", "26 Sept 2026", "9 days ago", "youtube_video (inferred)", "90 seconds"]) expect(html).toContain(value);
+    for (const value of ["Real source", "A creator", "youtu.be", "whatsapp", "url", "For next week", "25 Sept 2026", "9 days ago", "youtube_video (inferred)", "90 seconds"]) expect(html).toContain(value);
     expect(html).not.toMatch(/Old title|Conflicting title|Invented interest/);
     expect(html).toContain('rel="noopener noreferrer"');
     expect((await projectCard(capture, [run(), losing, older], [], resolve)).title).toBe(card.title);
@@ -39,6 +39,31 @@ describe("capture card projection and presentation", () => {
     const r = run(); r.result.evidence = ["missing"];
     const card = await projectCard(capture, [r], [], resolve);
     expect(card.title).toBe("Real source"); expect(card.sourceDestination).toBeUndefined();
+  });
+  it("AC1 ignores newer failed runs and never fills a selected run from older conflicting metadata", async () => {
+    const selected = run("new", "2026-10-02T00:00:00Z", "Selected title");
+    selected.input_snapshot.publicMetadata = [];
+    selected.input_snapshot.evidence = [];
+    const failed = { ...run("failed", "2026-10-03T00:00:00Z", "Failed title"), status: "failed" };
+    const card = await projectCard(capture, [run("old"), selected, failed], [], resolve);
+    expect(card.title).toBeUndefined(); expect(card.creator).toBeUndefined(); expect(card.durationSeconds).toBeUndefined();
+    expect(render(card)).not.toMatch(/Real source|Failed title/);
+  });
+  it("AC1/AC5 escapes factual malicious metadata and ignores unsupported title/duration assertions", async () => {
+    const r = run("b", undefined, '<script>alert("title")</script>');
+    const card = await projectCard(capture, [r], [], resolve);
+    expect(render(card)).toContain("&lt;script&gt;"); expect(render(card)).not.toContain("<script>");
+    r.input_snapshot.evidence = [];
+    const unsupported = await projectCard(capture, [r], [], resolve);
+    expect(unsupported.title).toBeUndefined(); expect(unsupported.durationSeconds).toBeUndefined();
+  });
+  it("AC2 keeps older synthetic email and image saves recognisable before processing", async () => {
+    const email = await projectCard({ id: "email", capture_channel: "email", capture_kind: "text", raw_text: "From: reader@example.com\nSubject: Weekend reading\nTry this article next month https://example.com/reading", user_note: "For the train journey", captured_at: "2026-09-01T23:30:00Z" }, [], [], resolve);
+    for (const value of ["Weekend reading", "For the train journey", "example.com", "email", "2 Sept 2026"]) expect(render(email)).toContain(value);
+    expect(email.title).toBeUndefined(); expect(email.originalDestination).toBe("https://example.com/reading");
+    const image = await projectCard({ id: "image", capture_channel: "whatsapp", capture_kind: "image", raw_text: "The recipe from Saturday", captured_at: "2026-09-05T00:00:00Z" }, [], [{ id: "photo", filename: "weekend-recipe.jpg", media_type: "image/jpeg", storage_state: "failed" }], resolve);
+    expect(render(image)).toContain("The recipe from Saturday"); expect(render(image)).toContain("weekend-recipe.jpg"); expect(render(image)).toContain("Preview unavailable");
+    expect(image.title).toBeUndefined(); expect(image.durationSeconds).toBeUndefined();
   });
   it("escapes malicious text and HTML; removes unsafe navigation", async () => {
     const card = await projectCard({ ...capture, raw_text: '<script>alert(1)</script> javascript:alert(1) https://user:pass@evil.com https://127.0.0.1/x', user_note: '<img src=x onerror="alert(1)">' }, [], [], resolve);

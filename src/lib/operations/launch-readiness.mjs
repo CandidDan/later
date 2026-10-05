@@ -251,6 +251,8 @@ export const PRODUCTION_ENDPOINTS = [
   "POST /api/research/recall",
   "GET /api/research/reveal",
   "POST /api/research/rating",
+  "GET /api/revisit/cards/[captureId]",
+  "GET /api/revisit/assets/[captureId]/[assetId]",
   "GET /research",
 ];
 

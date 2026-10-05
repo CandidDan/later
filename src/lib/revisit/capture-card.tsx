@@ -8,20 +8,26 @@ export async function requestPrivateAsset(captureId: string, assetId: string, ac
   if (!response.ok) throw new Error("Attachment unavailable");
   return response.blob();
 }
+/** A preview owns its temporary URL until cleanup, including when a request settles late. */
+export function startPrivatePreview(captureId: string, assetId: string, accessToken: string, ready: (url: string) => void, failed: () => void, fetcher: typeof fetch = fetch): () => void {
+  let active = true;
+  let objectUrl: string | undefined;
+  requestPrivateAsset(captureId, assetId, accessToken, false, fetcher).then(blob => {
+    if (!active) return;
+    objectUrl = URL.createObjectURL(blob);
+    ready(objectUrl);
+  }).catch(() => { if (active) failed(); });
+  return () => { active = false; if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = undefined; } };
+}
 function PrivateAttachment({ captureId, asset, accessToken }: { captureId: string; asset: CardAsset; accessToken: string }) {
   const [preview, setPreview] = useState<{ key: string; url: string }>();
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string>();
   const key = `${captureId}/${asset.id}/${accessToken}`;
   useEffect(() => {
-    let active = true;
-    let objectUrl: string | undefined;
     if (asset.available && asset.raster) {
-      requestPrivateAsset(captureId, asset.id, accessToken, false).then(blob => {
-        if (!active) return;
-        objectUrl = URL.createObjectURL(blob); setPreview({ key, url: objectUrl });
-      }).catch(() => { if (active) setFailed(true); });
+      return startPrivatePreview(captureId, asset.id, accessToken,
+        url => setPreview({ key, url }), () => setFailed(key));
     }
-    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [captureId, asset.id, asset.available, asset.raster, accessToken, key]);
   async function download() {
     try {
@@ -29,16 +35,16 @@ function PrivateAttachment({ captureId, asset, accessToken }: { captureId: strin
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a"); anchor.href = url; anchor.download = asset.filename; anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch { setFailed(true); }
+    } catch { setFailed(key); }
   }
   return <li>
     <p>{asset.filename || "Attachment"} · {asset.mediaType || "Unknown file type"}</p>
     {/* Private blob URLs are created only after a bearer-authenticated endpoint response. */}
     {/* eslint-disable-next-line @next/next/no-img-element -- authenticated blob cannot use the public image optimizer */}
-    {preview?.key === key && <img src={preview.url} alt={`Captured attachment: ${asset.filename}`} style={{ maxWidth: "100%", height: "auto" }} onError={() => { setPreview(undefined); setFailed(true); }} />}
+    {preview?.key === key && <img src={preview.url} alt={`Captured attachment: ${asset.filename}`} style={{ maxWidth: "100%", height: "auto" }} onError={() => { setPreview(undefined); setFailed(key); }} />}
     {(!asset.available || (asset.raster && preview?.key !== key)) && <p>Preview unavailable</p>}
     {asset.available && <button type="button" onClick={download} aria-label={`Download ${asset.filename || "attachment"}`}>Download attachment</button>}
-    {failed && <p role="status">Attachment unavailable</p>}
+    {failed === key && <p role="status">Attachment unavailable</p>}
   </li>;
 }
 /** Supply a clock and timezone so server/client rendering agrees across day boundaries. */
