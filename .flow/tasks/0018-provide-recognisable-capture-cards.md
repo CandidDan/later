@@ -1,7 +1,7 @@
 ---
 id: "later-0018"
 title: "Provide trusted capture cards and private attachment previews"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "codex-01a10e26-8728-79f0-a50d-23c63645783e"
