@@ -1,7 +1,7 @@
 ---
 id: "later-0019"
 title: "Persist revisit choices and protect unaided recall"
-status: "blocked"
+status: "ready"
 priority: 3
 project: "later"
 owner: ""
@@ -10,12 +10,12 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waiting for later-0018 to merge; its contract is required by this task."
-blocked_by: ["later-0018"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G2", "G3"]
 touches: ["src/lib/revisit/**", "src/app/api/revisit/**", "src/lib/research/**", "supabase/migrations/*_capture_revisit_state.sql", "supabase/tests/database/capture_revisit_state.test.sql"]
 labels: ["revisit", "capture"]
-notes: ["Approved direction: make daily saves recognisable, then provide a small return surface; keep research separate."]
+notes: ["2026-10-06: Human-authorized dependency reconciliation: latest origin/main c2d7680 confirms later-0018 done after PR #31 merged; sole block cleared, approved spec unchanged.", "Approved direction: make daily saves recognisable, then provide a small return surface; keep research separate."]
 ---
 
 ## Context
