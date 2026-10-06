@@ -4,7 +4,33 @@ import { readFileSync, readdirSync } from "node:fs";
 
 // Pinned Supabase PostgreSQL supplies pgcrypto and pgTAP on both arm64 and amd64.
 // No app database, host port, mounted host directory, or external network is used.
-const image = "public.ecr.aws/supabase/postgres:15.8.1.085";
+// Exact multi-architecture manifest of 15.8.1.085; identical in both registries.
+const digest = "sha256:af083ef64d0408c8f098ee6f5c364a59b26f36fbc0f3a334a62c5c1d57362e9b";
+const images = ["docker.io/supabase/postgres", "public.ecr.aws/supabase/postgres"].map(repo => `${repo}@${digest}`);
+type DockerCommand = (command: string[], timeout?: number) => string;
+export async function acquireDatabaseImage(
+  docker: DockerCommand,
+  wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+) {
+  for (const image of images) {
+    try { docker(["image", "inspect", image], 5000); return image; }
+    catch { /* A fresh runner needs a pull. */ }
+  }
+  const deadline = Date.now() + 120000;
+  let lastError: unknown;
+  // Shared runners can exhaust either registry's anonymous quota. Try the same
+  // immutable image through the other registry, then retry once within a total budget.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    for (const image of images) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error("Pinned database image pull exceeded 120 seconds", { cause: lastError });
+      try { docker(["pull", image], Math.min(60000, remaining)); return image; }
+      catch (error) { lastError = error; }
+    }
+    if (attempt === 0) await wait(1000);
+  }
+  throw new Error("Neither registry could supply the required pinned database image", { cause: lastError });
+}
 export function disposableDatabase() {
   const container = `later-revisit-test-${randomUUID()}`;
   const args = ["exec", "-i", container, "psql", "-h", "/tmp", "-X", "-qAt", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1"];
@@ -23,9 +49,8 @@ export function disposableDatabase() {
   }
   async function start() {
     try {
-      docker(["info", "--format", "{{.ServerVersion}}"]);
-      // Pull is bounded and required on a fresh runner; failure must fail the gate.
-      docker(["pull", image], 120000);
+      docker(["info", "--format", "{{.ServerVersion}}"], 5000);
+      const image = await acquireDatabaseImage(docker);
       started = true; // Even a timed-out run can have created the named container.
       docker(["run", "--detach", "--name", container, "--network", "none", "--user", "postgres",
         "--tmpfs", "/tmp:rw,nosuid,size=256m", "--entrypoint", "sh", image, "-c",

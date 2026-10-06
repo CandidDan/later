@@ -42,7 +42,7 @@ describe("0019 real database boundaries", () => {
       insert into public.captures(id,user_id,capture_channel,captured_at) values('${capture}','${owner}','email',now());
       insert into public.capture_analyses(capture_id,analysis_type,status,input_snapshot,result,model_id,prompt_version,pipeline_version)
         select '${capture}','intent','succeeded','{}','{}','test','v1','v1' from generate_series(1,2);`);
-  }, 180000);
+  }, 240000);
   afterAll(() => { fixture.stop(); });
   it("AC5 exposure wins the lock: concurrent stale recall writes zero multi-run rows", async () => {
     const first = session(`set application_name='later0019-race'; begin; ${auth} ${expose}; select pg_sleep(1); commit;`);

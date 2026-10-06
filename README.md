@@ -31,8 +31,9 @@ retry and recovery contract.
 1. Use a clean checkout of the approved commit. Install the pinned package manager and dependencies
    with `pnpm install --frozen-lockfile`; run `pnpm build`, `pnpm lint`, `pnpm test` and
    `pnpm test:coverage` before preparing production.
-   Both test commands require running Docker: revisit proofs automatically pull the pinned
+   Both test commands require running Docker: revisit proofs reuse or automatically pull the pinned
    Supabase PostgreSQL test image and create a disposable, isolated database with pgTAP.
+   The immutable image is available through Docker Hub and public ECR, with bounded fallback/retry.
    No app database or opt-in variable is needed; startup failures fail the test command.
    The fixture publishes no ports, mounts no host data, and removes its container/volumes afterward.
 2. Copy `.env.example` to an ignored, permission-restricted local file such as
