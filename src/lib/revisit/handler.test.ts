@@ -9,7 +9,7 @@ const request = (token = "owner", download = false) => new Request(`https://test
 function fixture(type = "image/png", bytes = Buffer.from("89504e470d0a1a0a", "hex")) {
   const card = vi.fn(async () => ({ captureId, rawText: "Private note", note: "", kind: "image", channel: "whatsapp", source: "", savedAt: "2026-09-25T00:00:00Z", inferred: [], assets: [] }));
   const asset = vi.fn(async () => ({ bytes: new Blob([new Uint8Array(bytes)]), filename: 'private\r\nphoto.png', mediaType: type }));
-  const storeFor = vi.fn(() => ({ card, asset }));
+  const storeFor = vi.fn(() => ({ card, asset, batch: vi.fn(), action: vi.fn() }));
   const deps: RevisitDependencies = { authenticate: req => authenticateResearchRequest(req, { researchUserId: owner, resolveUser: async token => token === "owner" ? owner : token === "stranger" ? "other-user" : undefined }), storeFor };
   return { deps, card, asset, storeFor };
 }
@@ -33,7 +33,7 @@ describe("private card and attachment handlers", () => {
     expect(await response.json()).toMatchObject({ rawText: "Private note", captureId });
   });
   it("AC4 hides cross-owner or missing captures/assets and storage failures", async () => {
-    const deps: RevisitDependencies = { authenticate: fixture().deps.authenticate, storeFor: () => ({ card: async () => undefined, asset: async () => undefined }) };
+    const deps: RevisitDependencies = { authenticate: fixture().deps.authenticate, storeFor: () => ({ batch: async () => [], action: async () => ({ status: "unavailable" }), card: async () => undefined, asset: async () => undefined }) };
     for (const response of [await handleCard(request(), captureId, deps), await handleAsset(request(), captureId, assetId, deps)]) {
       expect(response.status).toBe(404); expect(await response.json()).toEqual({ error: "Unavailable" }); privateHeaders(response);
     }

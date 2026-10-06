@@ -161,6 +161,17 @@ describe("research API", () => {
     expect(JSON.stringify(payload)).not.toMatch(/pasta|haiku|sonnet|interest|result/iu);
   });
 
+  it("0019 AC4 exposed stale recall returns HTTP 409 without a recorded success", async () => {
+    const recordRecall = vi.fn<ResearchStore["recordRecall"]>(async () => "exposed");
+    const response = await handleRecallSubmission(
+      post("/api/research/recall", recallBody),
+      dependencies({ storeFor: () => store({ recordRecall }) }),
+    );
+    expect(recordRecall).toHaveBeenCalledWith(recallBody);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "exposed" });
+  });
+
   it("AC3 rejects a recall answer that contradicts itself", async () => {
     const recordRecall = vi.fn<ResearchStore["recordRecall"]>();
     const response = await handleRecallSubmission(
