@@ -1,7 +1,7 @@
 ---
 id: "later-0020"
 title: "Add a private page for coming back to saved items"
-status: "blocked"
+status: "ready"
 priority: 3
 project: "later"
 owner: ""
@@ -10,12 +10,12 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waiting for later-0019 to merge; its contract is required by this task."
-blocked_by: ["later-0019"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G2", "G3"]
-touches: ["src/app/revisit/**", "src/app/page.tsx", "src/lib/revisit/**", "src/app/research/auth.ts", "src/app/research/auth.test.ts", "README.md"]
+touches: ["src/app/revisit/**", "src/app/page.tsx", "src/lib/revisit/**", "src/app/research/auth.ts", "src/app/research/auth.test.ts", "README.md", "src/lib/operations/**"]
 labels: ["revisit", "capture"]
-notes: ["Approved direction: make daily saves recognisable, then provide a small return surface; keep research separate."]
+notes: ["Approved direction: make daily saves recognisable, then provide a small return surface; keep research separate.", "2026-10-07: Human requested the next implementation session in the cloud and approved touches widening. later-0018 PR #31 and later-0019 PR #37 have merged. Task unblocked; src/lib/operations/** added for return-route/auth launch contract and proving tests. Keep original acceptance criteria. Do not start Docker or run resource-heavy database tests on the human workstation; use a disposable cloud environment and hosted CI for full database proof. Existing default pnpm test/test:coverage on main already executes real database tests on the GitHub hosted runner; no skips or mocked replacement proofs are approved."]
 ---
 
 ## Context
