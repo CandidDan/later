@@ -27,6 +27,27 @@ describe("capture card projection and presentation", () => {
     expect(html).toContain('rel="noopener noreferrer"');
     expect((await projectCard(capture, [run(), losing, older], [], resolve)).title).toBe(card.title);
   });
+  it("AC1 labels resolved fallback title, creator and duration from a later metadata document as inferred", async () => {
+    const base = run();
+    const evidence = base.input_snapshot.evidence.map(item => ({ ...item, id: `metadata.1.${item.id}` }));
+    const resolved = {
+      ...base,
+      input_snapshot: {
+        ...base.input_snapshot,
+        publicMetadata: [{ contentType: "text/html", requestedUrl: "https://example.com/roundup" }, base.input_snapshot.publicMetadata[0]],
+        evidence,
+      },
+      result: { ...base.result, evidence: evidence.map(item => item.id) },
+    };
+    const card = await projectCard({ ...capture, raw_text: "Compare these next weekend https://example.com/roundup https://youtu.be/abcdefgh" }, [resolved], [], resolve);
+    expect(card).toMatchObject({ title: "Real source", creator: "A creator", durationSeconds: 90, sourceDestination: "https://youtu.be/abcdefgh" });
+    expect(card.inferred).toEqual(["title", "creator", "durationSeconds"]);
+    const html = render(card);
+    for (const value of ["Real source (inferred)", "A creator (inferred)", "90 seconds (inferred)"]) expect(html).toContain(value);
+    const direct = await projectCard(capture, [base], [], resolve);
+    expect(direct.inferred).toEqual(["contentType"]);
+    expect(render(direct)).not.toMatch(/Real source \(inferred\)|A creator \(inferred\)|90 seconds \(inferred\)/);
+  });
   it.each(["pending", "failed", "unresolved", "malformed"])("retains original context with %s enrichment and no fabricated fields", async state => {
     const r = run();
     if (state === "pending" || state === "failed") r.status = state;

@@ -55,8 +55,11 @@ export async function projectCard(capture: Row, runs: readonly Row[], assets: re
   try {
     const result = parseSourceResolutionResult(run.result, evidence);
     if (result.status === "resolved") {
-      card.title ||= text(result.title, 500); card.creator ||= text(result.creator, 500);
-      card.durationSeconds ??= result.durationSeconds ?? undefined;
+      if (!card.title) { card.title = text(result.title, 500); card.inferred.push("title"); }
+      if (!card.creator) { card.creator = text(result.creator, 500); card.inferred.push("creator"); }
+      if (card.durationSeconds === undefined && result.durationSeconds !== null) {
+        card.durationSeconds = result.durationSeconds; card.inferred.push("durationSeconds");
+      }
       card.sourceDestination = await safeDestination(result.canonicalUrl, resolve);
       if (!card.contentType) { card.contentType = result.sourceType; card.inferred.push("contentType"); }
       card.source ||= card.sourceDestination ? new URL(card.sourceDestination).hostname : "";
