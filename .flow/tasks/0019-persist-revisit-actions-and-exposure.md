@@ -1,7 +1,7 @@
 ---
 id: "later-0019"
 title: "Persist revisit choices and protect unaided recall"
-status: "in_progress"
+status: "blocked"
 priority: 3
 project: "later"
 owner: "codex-01a10ef2-903e-7303-bc73-bdd67d2065a5"
@@ -10,12 +10,13 @@ started: "2026-10-06T02:04:01Z"
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
+blocked_reason: "Scope decision, not machine-checkable: required new batch/action routes and migration fail the existing launch-contract gate unless README.md and src/lib/operations/launch-readiness.mjs are updated; neither path is declared in touches."
 blocked_by: []
 serves: ["G2", "G3"]
 touches: ["src/lib/revisit/**", "src/app/api/revisit/**", "src/lib/research/**", "supabase/migrations/*_capture_revisit_state.sql", "supabase/tests/database/capture_revisit_state.test.sql"]
 labels: ["revisit", "capture"]
-notes: ["2026-10-06: Human-authorized dependency reconciliation: latest origin/main c2d7680 confirms later-0018 done after PR #31 merged; sole block cleared, approved spec unchanged.", "Approved direction: make daily saves recognisable, then provide a small return surface; keep research separate."]
+notes: ["2026-10-06 worker handoff: Implemented approved scoped behavior in local commit b12ff57 on flow/later-0019-revisit-state, worktree /private/tmp/later-0019. No feature push or PR: local full gate is not green, so auto-opening a draft would be premature. Genuinely done: forward owner-scoped/RLS state and request-id events; deterministic max-three oldest-first batches including unanalysed captures; durable first exposure for batch/card/assets and storage-policy boundary; validated available Open, server-clock seven-day deferral and explicit consumption; atomic recall RPC and per-owned-capture row-lock guard, research exclusion/resume and immutable evidence. Build passes; lint zero errors/two existing Flow warnings; focused revisit/research tests 151/151 pass including real database race order tests, migration rerun, and 45 pgTAP assertions. Full test and coverage commands each have exactly one failure: src/lib/operations/launch-readiness.test.ts AC3 contract inventory; all other 546 full-suite tests passed (three existing optional media integration skips). Coverage gate is not certified because its command fails. Hosted QA/code-review/security have not run. Local disposable DB later0019_test inside supabase_db_later was used; auth/storage base schemas plus capture/research migrations were applied, excluding unrelated pg_cron scheduling which only runs in the container primary database; no production migration or deployment. Exact next action: human/orchestrator authorizes adding README.md and src/lib/operations/launch-readiness.mjs to touches on main without changing product spec, clears the scope block, then a fresh worker resumes this existing feature branch (do not claim a different task), documents GET /api/revisit/batch, POST /api/revisit/actions/[captureId], and migration 20261006090000_capture_revisit_state.sql in README, updates PRODUCTION_ENDPOINTS, reruns build/lint/test/coverage with LATER_REVISIT_DB=later0019_test, rebases main and reruns changed gates, then pushes for draft PR and completes required hosted-review/ready handoff. Task state stays main-only. Board refreshed in original checkout; original board snapshot backed up at /private/tmp/later-0019-original-board.html, existing untracked .pnpm-store and supabase/.temp untouched.", "2026-10-06: Human-authorized dependency reconciliation: latest origin/main c2d7680 confirms later-0018 done after PR #31 merged; sole block cleared, approved spec unchanged.", "Approved direction: make daily saves recognisable, then provide a small return surface; keep research separate."]
+asks: ["decision: May the approved touches add README.md and src/lib/operations/launch-readiness.mjs to satisfy the required launch-contract gate? Recommend: add exactly these two paths; the existing test checks every endpoint and migration is registered/documented, and product scope stays unchanged."]
 ---
 
 ## Context
