@@ -41,6 +41,7 @@ export type ResearchTable =
 /** The subset of a PostgREST client this store uses, mirroring the capture-job store's shape. */
 export interface ResearchTableClient {
   from(table: ResearchTable): TableBuilder;
+  rpc(name: string, args: Record<string, unknown>): PromiseLike<QueryOutcome>;
 }
 
 /**
@@ -97,20 +98,6 @@ export function createSupabaseResearchStore(
   client: ResearchTableClient,
   evaluatorId: string,
 ): ResearchStore {
-  async function successfulRunIds(captureId: string): Promise<string[]> {
-    const rows = rowsFrom(
-      await client
-        .from("capture_analyses")
-        .select("id")
-        .eq("capture_id", captureId)
-        .eq("analysis_type", "intent")
-        .eq("status", "succeeded")
-        .order("created_at", { ascending: true }),
-      "select the capture's successful runs",
-    );
-
-    return rows.map((row) => text(row, "id"));
-  }
 
   return {
     async nextUnevaluatedCapture() {
@@ -145,47 +132,17 @@ export function createSupabaseResearchStore(
       };
     },
 
-    async recordRecall(submission: RecallSubmission): Promise<RecallOutcome | "no_eligible_runs"> {
-      const runIds = await successfulRunIds(submission.captureId);
-
-      if (runIds.length === 0) {
-        return "no_eligible_runs";
-      }
-
-      const existing = rowsFrom(
-        await client
-          .from("capture_evaluations")
-          .select("analysis_id")
-          .eq("capture_id", submission.captureId)
-          .eq("evaluator_id", evaluatorId),
-        "read the stored recall answer",
-      );
-      const covered = new Set(existing.map((row) => text(row, "analysis_id")));
-      const missing = runIds.filter((id) => !covered.has(id));
-
-      if (missing.length > 0) {
-        // One recall answer, reused across every run of the capture: the evaluator remembers
-        // the capture, not a model. `ignoreDuplicates` makes a repeated submission a no-op
-        // rather than a second, contradictory data point.
-        rowsFrom(
-          await client
-            .from("capture_evaluations")
-            .upsert(
-              missing.map((analysisId) => ({
-                capture_id: submission.captureId,
-                analysis_id: analysisId,
-                evaluator_id: evaluatorId,
-                recall_status: submission.recallStatus,
-                remembered_interest: submission.rememberedInterest,
-              })),
-              { onConflict: "evaluator_id,analysis_id", ignoreDuplicates: true },
-            )
-            .select("id"),
-          "store the unaided recall answer",
-        );
-      }
-
-      return { captureId: submission.captureId, runs: runIds.length, repeated: missing.length === 0 };
+    async recordRecall(submission: RecallSubmission): Promise<RecallOutcome | "no_eligible_runs" | "exposed"> {
+      const { data, error } = await client.rpc("research_record_recall", {
+        p_capture_id: submission.captureId,
+        p_recall_status: submission.recallStatus,
+        p_remembered_interest: submission.rememberedInterest,
+      });
+      if (error || !data || typeof data !== "object") throw new Error("Recall unavailable");
+      const result = data as Record<string, unknown>;
+      if (result.status === "exposed" || result.status === "no_eligible_runs") return result.status;
+      if (result.captureId !== submission.captureId || !Number.isInteger(result.runs) || Number(result.runs) < 1 || typeof result.repeated !== "boolean") throw new Error("Recall unavailable");
+      return { captureId: submission.captureId, runs: Number(result.runs), repeated: result.repeated };
     },
 
     async revealRuns(captureId: string): Promise<RevealOutcome> {

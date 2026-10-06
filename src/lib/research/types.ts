@@ -84,7 +84,7 @@ export type RatingOutcome =
 export interface ResearchStore {
   /** Prefer an incomplete persisted evaluation, otherwise return the oldest fresh capture. */
   nextUnevaluatedCapture(): Promise<PendingEvaluation | undefined>;
-  recordRecall(submission: RecallSubmission): Promise<RecallOutcome | "no_eligible_runs">;
+  recordRecall(submission: RecallSubmission): Promise<RecallOutcome | "no_eligible_runs" | "exposed">;
   /** Marks the runs revealed and returns them, or refuses while recall is missing. */
   revealRuns(captureId: string): Promise<RevealOutcome>;
   recordRating(submission: RatingSubmission): Promise<RatingOutcome>;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createSupabaseResearchStore, type ResearchTableClient } from "./supabase-store";
 
@@ -66,6 +66,7 @@ function fakeClient(responses: Record<string, unknown[]>): {
   return {
     calls,
     client: {
+      rpc: async () => ({ data: null, error: null }),
       from(table) {
         return {
           select(columns: string) {
@@ -166,67 +167,21 @@ describe("supabase research store", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("AC5 stores one recall answer against every successful run of the capture", async () => {
-    const { client, calls } = fakeClient({
-      "capture_analyses:select": [{ id: HAIKU_ANALYSIS }, { id: SONNET_ANALYSIS }],
-      "capture_evaluations:upsert": [{ id: HAIKU_EVALUATION }, { id: SONNET_EVALUATION }],
-    });
-
-    const outcome = await createSupabaseResearchStore(client, EVALUATOR).recordRecall({
-      captureId: CAPTURE_ID,
-      recallStatus: "remembered",
-      rememberedInterest: "the pasta recipe",
-    });
-
-    expect(outcome).toEqual({ captureId: CAPTURE_ID, runs: 2, repeated: false });
-    expect(callsTo(calls, "capture_evaluations", "upsert")[0].rows).toEqual([
-      {
-        capture_id: CAPTURE_ID,
-        analysis_id: HAIKU_ANALYSIS,
-        evaluator_id: EVALUATOR,
-        recall_status: "remembered",
-        remembered_interest: "the pasta recipe",
-      },
-      {
-        capture_id: CAPTURE_ID,
-        analysis_id: SONNET_ANALYSIS,
-        evaluator_id: EVALUATOR,
-        recall_status: "remembered",
-        remembered_interest: "the pasta recipe",
-      },
-    ]);
+  it.each([
+    [{ captureId: CAPTURE_ID, runs: 2, repeated: false }, { captureId: CAPTURE_ID, runs: 2, repeated: false }],
+    [{ captureId: CAPTURE_ID, runs: 2, repeated: true }, { captureId: CAPTURE_ID, runs: 2, repeated: true }],
+    [{ status: "exposed" }, "exposed"],
+    [{ status: "no_eligible_runs" }, "no_eligible_runs"],
+  ])("0019 AC4/AC5 delegates recall atomically and honors persisted outcomes %j", async (data, expected) => {
+    const { client, calls } = fakeClient({});
+    const rpc = vi.fn(async () => ({ data, error: null })); client.rpc = rpc;
+    expect(await createSupabaseResearchStore(client, EVALUATOR).recordRecall({ captureId: CAPTURE_ID, recallStatus: "remembered", rememberedInterest: "recipe" })).toEqual(expected);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("research_record_recall", { p_capture_id: CAPTURE_ID, p_recall_status: "remembered", p_remembered_interest: "recipe" });
+    expect(calls).toEqual([]);
   });
-
-  it("AC6 writes nothing when the same recall is submitted again", async () => {
-    const { client, calls } = fakeClient({
-      "capture_analyses:select": [{ id: HAIKU_ANALYSIS }, { id: SONNET_ANALYSIS }],
-      "capture_evaluations:select": [
-        { analysis_id: HAIKU_ANALYSIS },
-        { analysis_id: SONNET_ANALYSIS },
-      ],
-    });
-
-    const outcome = await createSupabaseResearchStore(client, EVALUATOR).recordRecall({
-      captureId: CAPTURE_ID,
-      recallStatus: "partial",
-      rememberedInterest: null,
-    });
-
-    expect(outcome).toEqual({ captureId: CAPTURE_ID, runs: 2, repeated: true });
-    expect(callsTo(calls, "capture_evaluations", "upsert")).toEqual([]);
-  });
-
-  it("AC6 refuses a recall for a capture with no successful run", async () => {
-    const { client, calls } = fakeClient({ "capture_analyses:select": [] });
-
-    await expect(
-      createSupabaseResearchStore(client, EVALUATOR).recordRecall({
-        captureId: CAPTURE_ID,
-        recallStatus: "remembered",
-        rememberedInterest: "something",
-      }),
-    ).resolves.toBe("no_eligible_runs");
-    expect(callsTo(calls, "capture_evaluations", "upsert")).toEqual([]);
+  it("0019 AC7 never fabricates recall success on persistence failure", async () => {
+    const { client } = fakeClient({}); client.rpc = async () => ({ data: null, error: { message: "secret" } });
+    await expect(createSupabaseResearchStore(client, EVALUATOR).recordRecall({ captureId: CAPTURE_ID, recallStatus: "partial", rememberedInterest: null })).rejects.toThrow("Recall unavailable");
   });
 
   it("AC4 refuses the reveal, and reads no analysis, while no recall row exists", async () => {

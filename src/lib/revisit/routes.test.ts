@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ client: vi.fn(), store: vi.fn(), card: vi.fn(), asset: vi.fn() }));
+const mocks = vi.hoisted(() => ({ client: vi.fn(), store: vi.fn(), card: vi.fn(), asset: vi.fn(), batch: vi.fn(), action: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("../supabase/server", () => ({ createUserScopedClient: mocks.client }));
 vi.mock("./store", () => ({ createRevisitStore: mocks.store }));
@@ -11,7 +11,7 @@ const assetId = "33333333-3333-4333-8333-333333333333";
 beforeEach(() => {
   vi.clearAllMocks(); vi.stubEnv("RESEARCH_USER_ID", owner);
   mocks.client.mockImplementation((token: string) => ({ token, auth: { getUser: vi.fn(async () => ({ data: { user: token === "owner-token" ? { id: owner } : { id: "another-user" } }, error: null })) } }));
-  mocks.store.mockReturnValue({ card: mocks.card, asset: mocks.asset });
+  mocks.store.mockReturnValue({ card: mocks.card, asset: mocks.asset, batch: mocks.batch, action: mocks.action });
   mocks.card.mockResolvedValue({ captureId, rawText: "Private original" });
   mocks.asset.mockResolvedValue({ bytes: new Blob([new Uint8Array([255, 216, 255])]), filename: "photo.jpg", mediaType: "image/jpeg" });
 });
@@ -48,5 +48,24 @@ describe("revisit route authentication and wiring", () => {
     for (const [client, user] of mocks.store.mock.calls) { expect(user).toBe(owner); expect(client.token).toBe("owner-token"); }
     expect(mocks.client.mock.calls).toEqual(Array(4).fill(["owner-token"]));
     for (const index of [0, 2]) expect(mocks.client.mock.results[index].value.auth.getUser).toHaveBeenCalledExactlyOnceWith("owner-token");
+  });
+});
+
+describe("0019 batch/action route wiring", () => {
+  it("AC1/AC3 binds batch and action endpoints to authenticated caller", async () => {
+    mocks.batch.mockResolvedValue([]); mocks.action.mockResolvedValue({ status: "applied", repeated: false });
+    const batch = await import("../../app/api/revisit/batch/route");
+    const actions = await import("../../app/api/revisit/actions/[captureId]/route");
+    const headers = { Authorization: "Bearer owner-token" };
+    expect(await (await batch.GET(new Request("https://test.invalid", { headers }))).json()).toEqual({ status: "empty", cards: [] });
+    const response = await actions.POST(new Request("https://test.invalid", { method: "POST", headers, body: JSON.stringify({ action: "defer", requestId: assetId }) }), { params: Promise.resolve({ captureId }) });
+    expect(response.status).toBe(200); expect(mocks.action).toHaveBeenCalledExactlyOnceWith(captureId,assetId,"defer");
+    for (const [client,user] of mocks.store.mock.calls) { expect(user).toBe(owner); expect(client.token).toBe("owner-token"); }
+  });
+  it("AC6 anonymous actual batch and action routes construct no store", async () => {
+    const batch = await import("../../app/api/revisit/batch/route"); const actions = await import("../../app/api/revisit/actions/[captureId]/route");
+    expect((await batch.GET(new Request("https://test.invalid"))).status).toBe(401);
+    expect((await actions.POST(new Request("https://test.invalid", { method: "POST", body: "{}" }), { params: Promise.resolve({ captureId }) })).status).toBe(401);
+    expect(mocks.store).not.toHaveBeenCalled();
   });
 });

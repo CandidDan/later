@@ -34,3 +34,24 @@ export async function handleAsset(request: Request, captureId: string, assetId: 
     return new Response(asset.bytes, { headers: { ...headers, "Content-Type": mediaType, "Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${filename}`, "Content-Security-Policy": "default-src 'none'; sandbox" } });
   } catch { return failure(503); }
 }
+
+export async function handleBatch(request: Request, deps: RevisitDependencies): Promise<Response> {
+  try {
+    const session = await deps.authenticate(request);
+    if (!session) return failure(401);
+    const cards = await deps.storeFor(session).batch();
+    return Response.json({ status: cards.length ? "available" : "empty", cards }, { headers });
+  } catch { return failure(503); }
+}
+export async function handleAction(request: Request, captureId: string, deps: RevisitDependencies): Promise<Response> {
+  try {
+    const session = await deps.authenticate(request);
+    if (!session) return failure(401);
+    if (!validId(captureId)) return failure(404);
+    let input;
+    try { input = await request.json(); } catch { return failure(400); }
+    if (!input || typeof input.requestId !== "string" || !validId(input.requestId) || !["open", "defer", "consume"].includes(input.action)) return failure(400);
+    const result = await deps.storeFor(session).action(captureId, input.requestId, input.action);
+    return Response.json(result, { status: result.status === "unavailable" ? 409 : 200, headers });
+  } catch { return failure(503); }
+}

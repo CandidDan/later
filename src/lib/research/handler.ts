@@ -107,8 +107,8 @@ export function handleRecallSubmission(
     const submission = parseRecallSubmission(await body(request));
     const outcome = await store.recordRecall(submission);
 
-    if (outcome === "no_eligible_runs") {
-      return json({ error: "no_eligible_runs" }, 409);
+    if (outcome === "no_eligible_runs" || outcome === "exposed") {
+      return json({ error: outcome }, 409);
     }
 
     return json(

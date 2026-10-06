@@ -25,8 +25,9 @@ function fixture(options: { owner?: string; state?: string; path?: string; error
   });
   const download = vi.fn(async () => ({ data: options.missing ? null : new Blob(["private image"]), error: null }));
   const bucket = vi.fn(() => ({ download }));
-  const client = { from, storage: { from: bucket } } as unknown as SupabaseClient;
-  return { store: createRevisitStore(client, owner), from, bucket, download, calls };
+  const rpc = vi.fn(async () => ({ data: true, error: null }));
+  const client = { from, rpc, storage: { from: bucket } } as unknown as SupabaseClient;
+  return { store: createRevisitStore(client, owner), from, bucket, download, calls, rpc };
 }
 describe("caller-scoped revisit store", () => {
   it("AC4 scopes card and asset lookup to owner before reading any child records or bytes", async () => {
@@ -67,5 +68,31 @@ describe("caller-scoped revisit store", () => {
   it.each([`captures/other/${captureId}/photo.png`, `captures/${owner}/other/photo.png`, `${path}/else`, `captures/${owner}/${captureId}/../secret`, `captures/${owner}/${captureId}/%2e%2e`, `captures/${owner}/${captureId}/a\\b`, `captures/${owner}/${captureId}/`, `captures/${owner}/${captureId}/..`, `captures/${owner}/${captureId}/a\u0000b`])("AC5 prevents path escape: %s", async storagePath => {
     expect(ownedObjectPath(storagePath, owner, captureId)).toBe(false);
     const f = fixture({ path: storagePath }); expect(await f.store.asset(captureId, assetId)).toBeUndefined(); expect(f.download).not.toHaveBeenCalled();
+  });
+});
+
+describe("0019 durable exposure boundary", () => {
+  it("AC2 card exposure commits before rich card release and repeats preserve the database timestamp", async () => {
+    const f = fixture(); let committed = false;
+    f.rpc.mockImplementation(async () => { committed = true; return { data: true, error: null }; });
+    const card = await f.store.card(captureId); expect(card?.captureId).toBe(captureId); expect(committed).toBe(true);
+    expect(f.rpc).toHaveBeenCalledExactlyOnceWith("revisit_expose", { p_capture_id: captureId });
+  });
+  it("AC2 asset exposure commits before any private download", async () => {
+    const f = fixture(); let committed = false;
+    f.rpc.mockImplementation(async () => { committed = true; return { data: true, error: null }; });
+    f.download.mockImplementation(async () => { expect(committed).toBe(true); return { data: new Blob(["bytes"]), error: null }; });
+    expect(await (await f.store.asset(captureId, assetId))?.bytes.text()).toBe("bytes");
+  });
+  it("AC2/AC7 failed exposure releases neither card nor bytes", async () => {
+    const f = fixture(); f.rpc.mockRejectedValue(new Error("private"));
+    await expect(f.store.card(captureId)).rejects.toThrow(); await expect(f.store.asset(captureId, assetId)).rejects.toThrow();
+    expect(f.download).not.toHaveBeenCalled();
+  });
+  it("AC2/AC6 rejected card and asset IDs write no exposure", async () => {
+    const f = fixture(); expect(await f.store.card("foreign")).toBeUndefined(); expect(await f.store.asset(captureId,"foreign")).toBeUndefined(); expect(f.rpc).not.toHaveBeenCalled();
+  });
+  it("AC7 source-free Open is unavailable and creates no event or exposure", async () => {
+    const f = fixture(); expect(await f.store.action(captureId, assetId, "open")).toEqual({ status: "unavailable" }); expect(f.rpc).not.toHaveBeenCalled();
   });
 });
