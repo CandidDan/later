@@ -64,9 +64,9 @@ ready.
    `TWILIO_CAPTURE_USER_ID`, `EMAIL_CAPTURE_USER_ID` and `RESEARCH_USER_ID` unless the approved
    experiment plan separates those identities.
 2. In Supabase Auth → URL Configuration, set the production **Site URL** to
-   `https://notfor.now` and add `https://notfor.now/research` to the allowed **Redirect URLs**.
+   `https://notfor.now` and add `https://notfor.now/research` and `https://notfor.now/revisit` to the allowed **Redirect URLs**.
    The console builds its callback from the current browser origin, so add the exact
-   `<deployment-origin>/research` URL for every preview or local deployment that should be able to
+   `<deployment-origin>/research` and `<deployment-origin>/revisit` URLs for every preview or local deployment that should be able to
    sign in; never use a production callback for a preview deployment. Keep the Magic Link email
    template's `{{ .ConfirmationURL }}` variable intact.
 3. Link the checkout interactively with `supabase link --project-ref "$SUPABASE_PROJECT_REF"`.
@@ -184,6 +184,7 @@ Production endpoints are deliberately narrow:
 | `POST /api/revisit/actions/[captureId]` | Accepts `requestId` (UUID) and `action` (`open`, `defer`, `consume`); retries apply once, deferral is seven server-clock days, only explicit consumption removes a save permanently |
 | `GET /api/revisit/cards/[captureId]` | Records first exposure before returning one owned capture card with persisted factual metadata and validated public HTTPS destinations |
 | `GET /api/revisit/assets/[captureId]/[assetId]` | Records first exposure before returning an owned stored raster preview; `?download=1` returns an inert attachment download |
+| `GET /revisit` | Private return shell; authenticated selection of up to three saved items, with no research form |
 | `GET /research` | Private console shell; no capture or analysis data is server-rendered into the page |
 
 Revisit endpoints use the existing authenticated evaluator boundary. Actions never infer consumption
@@ -327,3 +328,27 @@ printf 'header = "Authorization: Bearer %s"\n' "$JOBS_PROCESS_SECRET" |
 The launch is complete only when every readiness capability is ready, the migration chain is
 applied, the domain and signed webhooks are valid, every smoke row has its safe evidence, and pause
 plus rollback ownership is understood. Do not treat a successful deployment alone as launch proof.
+
+### Coming back to your saves
+
+The landing page links to `/revisit`, with a separate `/research` link. Use the existing
+account whose UUID matches `RESEARCH_USER_ID`. The email magic link returns directly to
+`https://notfor.now/revisit`; add that exact URL to Supabase Auth Redirect URLs before use.
+For an approved preview or local origin, allow its exact `<deployment-origin>/revisit` URL too.
+These are setup instructions only; this change does not update live configuration.
+
+“Come back to this” shows at most three recognisable cards. Open original records an opening
+attempt before navigating to the checked destination and never marks consumption. Another time
+hides the item for seven days; Already consumed records your explicit choice. Neither action
+automatically fills its place. Show a few more requests the next bounded selection. Attachments
+remain usable even without an original link. Failed actions retain their choices for retry;
+expired sessions clear private content. Research recall remains a separate activity.
+
+The supplementary UI proof `src/app/revisit/browser-proof.test.mjs` runs only against its own
+loopback server with synthetic auth/API responses. In a cloud checkout, build with
+`NEXT_PUBLIC_SUPABASE_URL=https://return-test.supabase.co` and
+`NEXT_PUBLIC_SUPABASE_ANON_KEY=synthetic-test-anon`, then run the script with an externally
+provisioned `PLAYWRIGHT_MODULE` and `CHROMIUM_EXECUTABLE` if Chromium is not in Playwright's cache.
+It checks keyboard focus, 320px overflow, failed-action recovery, explicit batches and session
+clearing. It supplements the default tests; it does not replace the real PostgreSQL fixture
+that `pnpm test` and `pnpm test:coverage` execute on GitHub-hosted CI.

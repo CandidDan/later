@@ -79,3 +79,9 @@ describe("later-0017 research magic-link authentication", () => {
     expect(resolveUser).toHaveBeenCalledExactlyOnceWith("TEST-ONLY-STRANGER-ACCESS-TOKEN");
   });
 });
+
+it("later-0020 AC1 returns magic-link authentication directly to revisit without research", async () => {
+  const signInWithOtp = vi.fn(async () => ({ error: null }));
+  expect(await requestResearchMagicLink({ signInWithOtp }, "owner@example.test", "https://notfor.now", "/revisit")).toBe(true);
+  expect(signInWithOtp).toHaveBeenCalledExactlyOnceWith({ email: "owner@example.test", options: { emailRedirectTo: "https://notfor.now/revisit", shouldCreateUser: false } });
+});

@@ -256,6 +256,7 @@ export const PRODUCTION_ENDPOINTS = [
   "GET /api/revisit/cards/[captureId]",
   "GET /api/revisit/assets/[captureId]/[assetId]",
   "GET /research",
+  "GET /revisit",
 ];
 
 export const BACKGROUND_QUEUES = [

@@ -38,12 +38,13 @@ export async function requestResearchMagicLink(
   auth: Pick<ResearchAuthClient, "signInWithOtp">,
   email: string,
   origin: string,
+  returnPath: "/research" | "/revisit" = "/research",
 ): Promise<boolean> {
   try {
     const { error } = await auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: new URL("/research", origin).toString(),
+        emailRedirectTo: new URL(returnPath, origin).toString(),
         shouldCreateUser: false,
       },
     });

@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
 
+import { createReturnController } from "./return-controller";
+import { randomUUID } from "node:crypto";
 import { disposableDatabase } from "./database-fixture";
 
 const fixture = disposableDatabase();
@@ -75,4 +77,36 @@ describe("0019 real database boundaries", () => {
     expect(output).not.toContain("not ok"); expect(output).toContain("1..45");
     expect(output.split("\n").filter(line => /^ok \d+ - /.test(line))).toHaveLength(45);
   });
+  it("0020 AC4 controller actions survive reload against real PostgreSQL without automatic replacement", async () => {
+    const user = randomUUID();
+    const ids = Array.from({ length: 4 }, () => randomUUID());
+    sql(`insert into auth.users(id,email) values('${user}','return0020@example.test');`);
+    for (const id of ids) sql(`insert into public.captures(id,user_id,capture_channel,captured_at) values('${id}','${user}','email',now()-interval '10 days');`);
+    const asUser = `set role authenticated; select set_config('request.jwt.claim.sub','${user}',false);`;
+    const calls: string[] = [];
+    // Transport bridge only: selection, events and durable state all execute the real RPCs.
+    const fetcher: typeof fetch = async (input, init) => {
+      const path = String(input); calls.push(path);
+      if (path.endsWith('/batch')) {
+        const selected = JSON.parse(sql(`${asUser} select coalesce(json_agg(id),'[]'::json) from public.revisit_batch() as id;`).split('\n').at(-1)!);
+        return Response.json({ cards: selected.map((captureId: string) => ({ captureId })) });
+      }
+      const captureId = path.split('/').at(-1)!;
+      const { action, requestId } = JSON.parse(String(init?.body));
+      const outcome = JSON.parse(sql(`${asUser} select public.revisit_action('${captureId}','${requestId}','${action}',null);`).split('\n').at(-1)!);
+      return Response.json(outcome);
+    };
+    const page = createReturnController(fetcher); await page.session('synthetic-token');
+    expect(page.snapshot().cards).toHaveLength(3);
+    const [deferred, consumed] = page.snapshot().cards;
+    await page.act(deferred.captureId, 'defer'); await page.act(consumed.captureId, 'consume');
+    expect(page.snapshot().cards).toHaveLength(1); expect(calls.filter(path => path.endsWith('/batch'))).toHaveLength(1);
+    const reloaded = createReturnController(fetcher); await reloaded.session('synthetic-token');
+    expect(reloaded.snapshot().cards.map(card => card.captureId)).not.toContain(deferred.captureId);
+    expect(reloaded.snapshot().cards.map(card => card.captureId)).not.toContain(consumed.captureId);
+    expect(sql(`select count(*) from public.capture_revisit_events where user_id='${user}'`)).toBe('2');
+    expect(sql(`select deferred_until > now() + interval '6 days' from public.capture_revisit_state where capture_id='${deferred.captureId}'`)).toBe('t');
+    await page.load(); expect(calls.filter(path => path.endsWith('/batch'))).toHaveLength(3);
+  });
+
 });
