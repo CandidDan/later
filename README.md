@@ -161,6 +161,8 @@ not structurally configured.
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Vercel browser environment | Browser-safe public key | Private research console | Research authentication fails closed |
 | `RESEARCH_USER_ID` | Vercel server environment plus Supabase Auth user | Server-only identifier | Private research console | Console denies every evaluator |
 
+Capture-card and attachment requests use the same configured `RESEARCH_USER_ID` and verified Supabase bearer session as the research console. Reads use the caller-bound Supabase client and RLS. Responses are private and no-store; storage paths and public storage URLs are never returned. JPEG, PNG, WebP and GIF previews are checked against their bytes. Other files are download-only as `application/octet-stream` with a sandbox policy. Pending or missing attachments remain recognisable by filename/type. These endpoints support single captures; they do not select a feed or fetch provider content.
+
 Production endpoints are deliberately narrow:
 
 | Endpoint | Purpose and safe failure |
@@ -172,6 +174,8 @@ Production endpoints are deliberately narrow:
 | `POST /api/research/recall` | Stores immutable unaided recall before reveal |
 | `GET /api/research/reveal` | Reveals an analysis only after recall exists |
 | `POST /api/research/rating` | Stores one idempotent rating for the exact analysis run |
+| `GET /api/revisit/cards/[captureId]` | Returns one owned capture card with persisted factual metadata and validated public HTTPS destinations |
+| `GET /api/revisit/assets/[captureId]/[assetId]` | Returns an owned stored raster preview; `?download=1` returns an inert attachment download |
 | `GET /research` | Private console shell; no capture or analysis data is server-rendered into the page |
 
 The background route rotates fairly across all five current queues:
