@@ -76,6 +76,7 @@ ready.
    - `20260914080000_create_capture_evaluations.sql`
    - `20260915010000_source_resolution.sql`
    - `20260915150000_segment_resolution.sql`
+   - `20261006090000_capture_revisit_state.sql`
 
 4. Confirm in the dashboard that the `capture-assets` bucket remains private, RLS is enabled, and
    the extensions `pg_cron`, `pg_net`, `pgcrypto` and Vault are installed. Do not weaken policies for
@@ -171,12 +172,24 @@ Production endpoints are deliberately narrow:
 | `POST /api/inbound/email` | Validates Resend signature, persists addressed mail, then returns `Accepted`; unaddressed signed mail receives the same acknowledgement |
 | `POST /api/jobs/process` | Requires bearer `JOBS_PROCESS_SECRET`; responds only with claimed/succeeded/failed counts |
 | `GET /api/research/next` | Authenticated evaluator receives capture-time recall material only |
-| `POST /api/research/recall` | Stores immutable unaided recall before reveal |
+| `POST /api/research/recall` | Atomically stores immutable unaided recall before reveal; rejects fresh recall after revisit exposure while preserving existing recall |
 | `GET /api/research/reveal` | Reveals an analysis only after recall exists |
 | `POST /api/research/rating` | Stores one idempotent rating for the exact analysis run |
-| `GET /api/revisit/cards/[captureId]` | Returns one owned capture card with persisted factual metadata and validated public HTTPS destinations |
-| `GET /api/revisit/assets/[captureId]/[assetId]` | Returns an owned stored raster preview; `?download=1` returns an inert attachment download |
+| `GET /api/revisit/batch` | Returns at most three oldest eligible owned cards after durable exposure; an empty batch is explicit |
+| `POST /api/revisit/actions/[captureId]` | Accepts `requestId` (UUID) and `action` (`open`, `defer`, `consume`); retries apply once, deferral is seven server-clock days, only explicit consumption removes a save permanently |
+| `GET /api/revisit/cards/[captureId]` | Records first exposure before returning one owned capture card with persisted factual metadata and validated public HTTPS destinations |
+| `GET /api/revisit/assets/[captureId]/[assetId]` | Records first exposure before returning an owned stored raster preview; `?download=1` returns an inert attachment download |
 | `GET /research` | Private console shell; no capture or analysis data is server-rendered into the page |
+
+Revisit endpoints use the existing authenticated evaluator boundary. Actions never infer consumption
+from an Open attempt. An unavailable source returns an explicit unavailable outcome, and a database
+failure releases no rich content. Exposure records content released by Later, including direct card
+and asset access; it does not claim the user saw it. Previously exposed captures without persisted
+recall leave fresh research selection; persisted recall can still resume and be rated.
+
+Apply the revisit migration before releasing the new server code. It adds owner-scoped revisit
+metadata/events, serializes exposure and recall on each owned capture, and requires committed exposure
+before direct private-object reads. It preserves existing capture evidence, analyses and evaluations.
 
 The background route rotates fairly across all five current queues:
 `intent_analysis`, `media_download`, `email_enrichment`, `source_resolution` and
