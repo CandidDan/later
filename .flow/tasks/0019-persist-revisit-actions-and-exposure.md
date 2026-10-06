@@ -1,7 +1,7 @@
 ---
 id: "later-0019"
 title: "Persist revisit choices and protect unaided recall"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "codex-01a10ef2-903e-7303-bc73-bdd67d2065a5"
