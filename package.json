@@ -9,8 +9,9 @@
     "start": "next start",
     "lint": "eslint .",
     "launch:check": "node src/lib/operations/launch-readiness.mjs",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test": "vitest run && pnpm test:browser",
+    "test:coverage": "vitest run --coverage && pnpm test:browser",
+    "test:browser": "playwright install chromium --only-shell && playwright test --config src/app/revisit/playwright.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",
@@ -23,6 +24,7 @@
     "twilio": "^6.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

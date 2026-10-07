@@ -344,11 +344,19 @@ automatically fills its place. Show a few more requests the next bounded selecti
 remain usable even without an original link. Failed actions retain their choices for retry;
 expired sessions clear private content. Research recall remains a separate activity.
 
-The supplementary UI proof `src/app/revisit/browser-proof.test.mjs` runs only against its own
-loopback server with synthetic auth/API responses. In a cloud checkout, build with
-`NEXT_PUBLIC_SUPABASE_URL=https://return-test.supabase.co` and
-`NEXT_PUBLIC_SUPABASE_ANON_KEY=synthetic-test-anon`, then run the script with an externally
-provisioned `PLAYWRIGHT_MODULE` and `CHROMIUM_EXECUTABLE` if Chromium is not in Playwright's cache.
-It checks keyboard focus, 320px overflow, failed-action recovery, explicit batches and session
-clearing. It supplements the default tests; it does not replace the real PostgreSQL fixture
-that `pnpm test` and `pnpm test:coverage` execute on GitHub-hosted CI.
+The enforced browser suite `src/app/revisit/browser-proof.spec.ts` runs from both `pnpm test`
+and `pnpm test:coverage`, so the existing Flow CI gate fails if a browser assertion fails.
+`pnpm test:browser` runs it alone. The lockfile pins Playwright; the command installs its
+matching Chromium headless shell. Linux needs the standard Chromium system libraries
+(preinstalled on the cloud image and GitHub Ubuntu runner); on a minimal image provision
+them with `pnpm exec playwright install-deps chromium` before running the gates.
+Playwright starts and stops a dedicated loopback Next.js development server with synthetic
+public auth configuration; it refuses to reuse an existing server. No prior build, live
+credentials, external Playwright installation or manually selected browser is needed.
+
+The suite checks preview failure/retry, decoded attachment recovery, keyboard activation,
+focus after removal, actual 320px layout, failed-action recovery, explicit batches and expiry.
+Browser API fixtures are synthetic; the real PostgreSQL/pgTAP and concurrency proofs still
+run unchanged in both default gates. Run full gates in a disposable cloud environment with
+Docker available for those database fixtures. Browser failure traces are in
+`.next/browser-results/`; the runner uses one worker and no retries.
