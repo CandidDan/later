@@ -9,7 +9,7 @@ export function RevealedCard({ captureId, accessToken }: { captureId: string; ac
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
-    void fetch(`/api/revisit/cards/${encodeURIComponent(captureId)}`, {
+    void fetch(`/api/research/cards/${encodeURIComponent(captureId)}`, {
       headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store", signal: controller.signal,
     }).then(async response => {
       if (!response.ok) return;
@@ -18,6 +18,6 @@ export function RevealedCard({ captureId, accessToken }: { captureId: string; ac
     }).catch(() => { /* This enhancement must never take away the rating controls. */ });
     return () => { active = false; controller.abort(); };
   }, [captureId, accessToken]);
-  return card ? <CaptureCardView card={card} accessToken={accessToken} now={new Date()} timeZone="UTC" />
+  return card ? <CaptureCardView assetSurface="research" hideDestinations card={card} accessToken={accessToken} now={new Date()} timeZone="UTC" />
     : <p role="status">Rich capture preview unavailable. You can still rate the interpretations below.</p>;
 }

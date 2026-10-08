@@ -15,6 +15,7 @@ async function setup(page: Page, options: { resumed?: boolean; malformed?: boole
   await page.route("**/*", route => {
     const url = new URL(route.request().url());
     if (url.origin === "https://research-test.supabase.co") return route.fulfill({ json: {} });
+    if (url.pathname.startsWith("/api/revisit/")) throw new Error("Research must not use ungated revisit endpoints");
     if (url.origin === "http://127.0.0.1:3201") return route.continue();
     return route.abort();
   });
@@ -29,11 +30,11 @@ async function setup(page: Page, options: { resumed?: boolean; malformed?: boole
     state.reveals++; state.order.push("reveal");
     return options.denyReveal ? route.fulfill({ status: 409, json: { error: "recall_required" } }) : route.fulfill({ json: { phase: "reveal", captureId: capture.captureId, runs: frozen() } });
   });
-  await page.route("**/api/revisit/cards/*", route => {
+  await page.route("**/api/research/cards/*", route => {
     state.cards++; state.order.push("card"); expect(state.stored).toBe(true);
     return options.failCard ? route.fulfill({ status: 503, json: {} }) : route.fulfill({ json: { captureId: capture.captureId, title: "Fetched title", creator: "Fetched creator", rawText: capture.rawText, note: capture.userNote, kind: "link", channel: capture.channel, source: "example", savedAt: capture.capturedAt, inferred: [], assets: [{ id: "asset", filename: "photo.png", mediaType: "image/png", available: true, raster: true }] } });
   });
-  await page.route("**/api/revisit/assets/**", route => {
+  await page.route("**/api/research/assets/**", route => {
     state.previews++; state.order.push("preview"); expect(state.stored).toBe(true);
     return route.fulfill({ status: 503, json: {} });
   });
