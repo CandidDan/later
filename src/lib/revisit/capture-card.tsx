@@ -4,7 +4,10 @@ import type { CaptureCard, CardAsset } from "./card";
 import { formatSavedDate } from "./dates";
 
 export async function requestPrivateAsset(captureId: string, assetId: string, accessToken: string, download: boolean, fetcher: typeof fetch = fetch, surface: "revisit" | "research" = "revisit"): Promise<Blob> {
-  const response = await fetcher(`/api/${surface}/assets/${encodeURIComponent(captureId)}/${encodeURIComponent(assetId)}${download ? "?download=1" : ""}`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  const path = surface === "research"
+    ? `/api/research/reveal?view=asset&captureId=${encodeURIComponent(captureId)}&assetId=${encodeURIComponent(assetId)}${download ? "&download=1" : ""}`
+    : `/api/revisit/assets/${encodeURIComponent(captureId)}/${encodeURIComponent(assetId)}${download ? "?download=1" : ""}`;
+  const response = await fetcher(path, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
   if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? "session" : "Attachment unavailable");
   return response.blob();
 }

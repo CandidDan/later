@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const factories = vi.hoisted(() => ({ dependencies: vi.fn() }));
+vi.mock("@/lib/research/enrichment-server", () => ({ createResearchEnrichmentDependencies: factories.dependencies }));
 vi.mock("@/lib/research/server", () => ({ createResearchDependencies: factories.dependencies }));
+vi.mock("@/lib/research/enrichment", () => import("../../../lib/research/enrichment"));
 // Resolve the application's aliases locally without changing shared test configuration.
 vi.mock("@/lib/research/handler", () => import("../../../lib/research/handler"));
 

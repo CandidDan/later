@@ -26,15 +26,15 @@ async function setup(page: Page, options: { resumed?: boolean; malformed?: boole
     state.stored = true; state.order.push("stored");
     return route.fulfill({ json: { phase: "recorded", captureId: capture.captureId } });
   });
-  await page.route("**/api/research/reveal?*", route => {
+  await page.route(/\/api\/research\/reveal\?captureId=/, route => {
     state.reveals++; state.order.push("reveal");
     return options.denyReveal ? route.fulfill({ status: 409, json: { error: "recall_required" } }) : route.fulfill({ json: { phase: "reveal", captureId: capture.captureId, runs: frozen() } });
   });
-  await page.route("**/api/research/cards/*", route => {
+  await page.route(/\/api\/research\/reveal\?view=card&/, route => {
     state.cards++; state.order.push("card"); expect(state.stored).toBe(true);
     return options.failCard ? route.fulfill({ status: 503, json: {} }) : route.fulfill({ json: { captureId: capture.captureId, title: "Fetched title", creator: "Fetched creator", rawText: capture.rawText, note: capture.userNote, kind: "link", channel: capture.channel, source: "example", savedAt: capture.capturedAt, inferred: [], assets: [{ id: "asset", filename: "photo.png", mediaType: "image/png", available: true, raster: true }] } });
   });
-  await page.route("**/api/research/assets/**", route => {
+  await page.route(/\/api\/research\/reveal\?view=asset&/, route => {
     state.previews++; state.order.push("preview"); expect(state.stored).toBe(true);
     return route.fulfill({ status: 503, json: {} });
   });

@@ -9,7 +9,7 @@ export function RevealedCard({ captureId, accessToken }: { captureId: string; ac
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
-    void fetch(`/api/research/cards/${encodeURIComponent(captureId)}`, {
+    void fetch(`/api/research/reveal?view=card&captureId=${encodeURIComponent(captureId)}`, {
       headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store", signal: controller.signal,
     }).then(async response => {
       if (!response.ok) return;

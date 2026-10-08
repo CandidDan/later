@@ -54,7 +54,7 @@ describe("later-0021 server enrichment recall boundary", () => {
     const fetcher = vi.fn<typeof fetch>(async () => new Response(new Blob(["bytes"])));
     await requestPrivateAsset(captureId, assetId, "token", false, fetcher, "research");
     await requestPrivateAsset(captureId, assetId, "token", true, fetcher, "research");
-    expect(fetcher.mock.calls[0][0]).toBe(`/api/research/assets/${captureId}/${assetId}`);
-    expect(fetcher.mock.calls[1][0]).toBe(`/api/research/assets/${captureId}/${assetId}?download=1`);
+    expect(fetcher.mock.calls[0][0]).toBe(`/api/research/reveal?view=asset&captureId=${captureId}&assetId=${assetId}`);
+    expect(fetcher.mock.calls[1][0]).toBe(`/api/research/reveal?view=asset&captureId=${captureId}&assetId=${assetId}&download=1`);
   });
 });
