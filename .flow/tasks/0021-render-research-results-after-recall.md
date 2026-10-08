@@ -1,12 +1,12 @@
 ---
 id: "later-0021"
 title: "Render readable research results after recall"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "later"
-owner: ""
+owner: "codex-cloud-6d52f881b078"
 created: "2026-10-05"
-started: ""
+started: "2026-10-08T03:38:30Z"
 branch: ""
 pr: ""
 issue: ""
