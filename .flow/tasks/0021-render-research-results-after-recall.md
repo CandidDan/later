@@ -1,7 +1,7 @@
 ---
 id: "later-0021"
 title: "Render readable research results after recall"
-status: "blocked"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "codex-cloud-6d52f881b078"
