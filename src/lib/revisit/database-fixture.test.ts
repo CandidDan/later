@@ -43,4 +43,31 @@ describe("required database image acquisition", () => {
     }, async () => {})).rejects.toThrow("Neither registry could supply");
     expect(commands.filter(command => command[0] === "pull")).toHaveLength(4);
   });
+  it("allows a cold image pull and extraction to exceed the old one-minute limit", async () => {
+    let now = 0;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      const image = await acquireDatabaseImage((command, timeout) => {
+        if (command[0] === "image") throw new Error("missing");
+        expect(timeout).toBe(180000);
+        now += 90000;
+        return "extracted";
+      });
+      expect(image).toMatch(/^docker.io\//);
+    } finally { clock.mockRestore(); }
+  });
+  it("caps all registry pulls at five minutes and fails without skipping the proof", async () => {
+    let now = 0;
+    const timeouts: number[] = [];
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      await expect(acquireDatabaseImage((command, timeout = 0) => {
+        if (command[0] === "image") throw new Error("missing");
+        timeouts.push(timeout);
+        now += timeout;
+        throw new Error("timed out");
+      }, async ms => { now += ms; })).rejects.toThrow("exceeded 300 seconds");
+      expect(timeouts).toEqual([180000, 120000]);
+    } finally { clock.mockRestore(); }
+  });
 });

@@ -16,15 +16,17 @@ export async function acquireDatabaseImage(
     try { docker(["image", "inspect", image], 5000); return image; }
     catch { /* A fresh runner needs a pull. */ }
   }
-  const deadline = Date.now() + 120000;
+  const deadline = Date.now() + 300000;
   let lastError: unknown;
   // Shared runners can exhaust either registry's anonymous quota. Try the same
   // immutable image through the other registry, then retry once within a total budget.
+  // Cold hosted runners can take over a minute to extract this image after downloading
+  // it. Keep acquisition bounded without killing a healthy pull during extraction.
   for (let attempt = 0; attempt < 2; attempt++) {
     for (const image of images) {
       const remaining = deadline - Date.now();
-      if (remaining <= 0) throw new Error("Pinned database image pull exceeded 120 seconds", { cause: lastError });
-      try { docker(["pull", image], Math.min(60000, remaining)); return image; }
+      if (remaining <= 0) throw new Error("Pinned database image pull exceeded 300 seconds", { cause: lastError });
+      try { docker(["pull", image], Math.min(180000, remaining)); return image; }
       catch (error) { lastError = error; }
     }
     if (attempt === 0) await wait(1000);

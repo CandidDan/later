@@ -167,7 +167,7 @@ describe("v0 launch readiness", () => {
       expect(documentedRow!.split("|").slice(1, -1).every((cell) => cell.trim().length > 0)).toBe(true);
     }
 
-    const expectedApiEndpoints = PRODUCTION_ENDPOINTS.filter((endpoint) => endpoint !== "GET /research");
+    const expectedApiEndpoints = PRODUCTION_ENDPOINTS.filter((endpoint) => endpoint !== "GET /research" && endpoint !== "GET /revisit");
     expect(actualApiEndpoints().sort()).toEqual(expectedApiEndpoints.sort());
     expect(readFileSync("src/app/research/page.tsx", "utf8")).toContain("ResearchConsole");
     for (const endpoint of PRODUCTION_ENDPOINTS) expect(readme).toContain(`\`${endpoint}\``);
