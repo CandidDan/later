@@ -25,6 +25,13 @@ on:
     types: [opened, reopened, ready_for_review, synchronize]
     branches: [main]
 
+
+# A newer push to a PR cancels the run it supersedes (flow-0136). Pull requests only: a manual run
+# (`workflow_dispatch`) is never cancelled.
+concurrency:
+  group: flow-review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   flow-review:
     # id-token: write must be granted on the caller — OIDC is never in the default GITHUB_TOKEN,

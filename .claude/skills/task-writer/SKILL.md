@@ -43,17 +43,25 @@ implementation, that's yours to specify.
      being updated. Amend `VISION.md` first (vision-writer, branch + PR), then serve the new id.
    - **drift being born** — nothing in the vision wants this. Don't write the task; put the
      question back to the human, in one line, naming what it would serve if anything.
-6. State scope boundaries explicitly — what the task does NOT touch. This is what stops scope creep.
-7. Sequence: if task B depends on A, note it and leave B at lower priority or a `blocked` note
+6. **Name the intent it derives from.** Work that serves a product goal starts from an intent
+   already on `main` in `.flow/intents/` — the human approved it by merging its PR, so its
+   `status` is not consulted. Set `intent` to that intent's `id`. If no such intent exists, say so
+   to the human and stop: the intent comes first, written with the **intent-writer** skill in its
+   own session and its own PR. **Do not write the intent yourself** — authoring the intent and the
+   task in one session puts authorship and approval in the same context, which is the one thing
+   the touchpoint exists to separate. `serves: ["maintenance"]` work needs no intent; leave
+   `intent: ""`. Never edit the intent to list this task — the link runs task → intent only.
+7. State scope boundaries explicitly — what the task does NOT touch. This is what stops scope creep.
+8. Sequence: if task B depends on A, note it and leave B at lower priority or a `blocked` note
    until A lands. Keep a queue of `ready` tasks so the worker never runs dry.
-8. **The queue has a cap, and the allocator enforces it — not this file.** Where
+9. **The queue has a cap, and the allocator enforces it — not this file.** Where
    `.flow/config.yml` sets `queue_cap`, that is the maximum number of `ready` tasks the store may
    hold, and `allocate-task-id` refuses a new `ready` task while that many already are, before it
    writes, commits or pushes anything. A refused task is therefore one of exactly two things:
    **not written yet** (the queue drains first — usually the right answer), or **written
    `blocked`** with a `blocked_reason`, which the cap never refuses. The one bypass is the draft's
    own `urgent` label, and that is the human's to apply — never yours on your own judgement, the
-   same rule as `auto-ok`. Step 7's "never runs dry" stops at the cap: a queue past it is not
+   same rule as `auto-ok`. Step 8's "never runs dry" stops at the cap: a queue past it is not
    depth, it is work planned faster than it can be done.
 
 ## Triaging the inbox (GitHub Issues -> ready tasks)
@@ -124,7 +132,11 @@ them mechanically rather than trusting a plausible-sounding narrative:
    is wrong or the vision has moved, and either way it is a sentence to the human. And if a batch
    is *mostly* `maintenance`, say so before you save — legitimate for a hardening sprint, and the
    clearest early signal of drift when it isn't.
-4. **Stays on the store plane.** A task only commits to `main` (the store). Code and content
+4. **`intent` resolves.** Unless the task is `maintenance`-only, its `intent` is the `id` of a
+   file in `.flow/intents/` on `main` — check the id against the file, don't recall it. A `ready`
+   task naming an id no intent declares fails `flow-doctor`; one naming none warns once the date
+   in `intents.required_from` has passed.
+5. **Stays on the store plane.** A task only commits to `main` (the store). Code and content
    changes — *including* docs like a synopsis or README — are the worker's branch+PR, never a direct
    orchestrator edit to `main`. If something needs a doc changed, that's a task, not a side-edit.
 
