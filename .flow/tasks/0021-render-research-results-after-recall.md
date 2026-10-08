@@ -1,7 +1,7 @@
 ---
 id: "later-0021"
 title: "Render readable research results after recall"
-status: "in_progress"
+status: "blocked"
 priority: 3
 project: "later"
 owner: "codex-cloud-6d52f881b078"
@@ -10,12 +10,13 @@ started: "2026-10-08T03:38:30Z"
 branch: "flow/later-0021-readable-research-results"
 pr: "https://github.com/CandidDan/later/pull/40"
 issue: ""
-blocked_reason: ""
+blocked_reason: "Required cloud validation is unavailable: Docker absent, Chromium download truncated, hosted gate skips draft PR and connector cannot dispatch workflows; browser attempt cancelled. Provisioning/manual dispatch is not machine-checkable."
 blocked_by: []
+asks: ["decision: How should full cloud validation be enabled? Recommend: manually dispatch the existing flow-gates workflow on flow/later-0021-readable-research-results, then resume a fresh worker; keep PR #40 draft until real database/browser proofs and all gates pass."]
 serves: ["G1"]
 touches: ["src/app/research/**", "src/app/api/research/**", "src/lib/research/**", "src/lib/revisit/**"]
 labels: ["revisit", "research"]
-notes: ["Approved direction: make daily saves recognisable, then provide a small return surface; keep research separate.", "2026-10-08: Human requested a fresh session for the next task. Dependencies later-0018, later-0019 and later-0020 have merged; stale dependency block cleared. Preserve existing touches and acceptance criteria. Continue the approved cloud execution preference: no local Docker on the human workstation; full real database proof runs in cloud/hosted CI and must not be skipped."]
+notes: ["Approved direction: make daily saves recognisable, then provide a small return surface; keep research separate.","2026-10-08: Human requested a fresh session for the next task. Dependencies later-0018, later-0019 and later-0020 have merged; stale dependency block cleared. Preserve existing touches and acceptance criteria. Continue the approved cloud execution preference: no local Docker on the human workstation; full real database proof runs in cloud/hosted CI and must not be skipped.","2026-10-08 cloud handoff: claimed atomically at 9395000; implementation bd7b7f7c1a7614351f4aceddefcc91b7e7baa491 on flow/later-0021-readable-research-results, draft PR https://github.com/CandidDan/later/pull/40. Added reveal-only shared card using existing exposure-enforcing endpoints, validated frozen intent fields (specificity absent in schema is explicitly unavailable; evidence shown as rationale), native optional technical disclosure, per-run rating identity, stale response/capture guards and proving unit/browser tests. Main-only state and touches preserved; board snapshot regenerated locally but no canonical infrastructure modified. Build passed before final test/config/guard additions, lint has no errors and two pre-existing Flow warnings. Both full test and coverage attempted: 587 passed, but gates fail because Docker is absent and Chromium download is truncated; no real DB or browser proof passed, no skip/mock replacement introduced. Hosted flow-gates 37724307635 skipped draft PR, connector has no workflow-dispatch action, browser attempt cancelled. NEXT: manually dispatch existing flow-gates on feature branch in hosted CI or supply disposable cloud Docker+Chromium execution; fresh worker fetch/rebase latest main, run final build/lint/test/coverage with real fixture and browser proofs, fix failures within touches, update PR checklist, mark ready only after green, and append main-only handoff. Do not merge/deploy."]
 ---
 
 ## Context
