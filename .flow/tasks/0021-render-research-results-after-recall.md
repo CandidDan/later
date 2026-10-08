@@ -1,7 +1,7 @@
 ---
 id: "later-0021"
 title: "Render readable research results after recall"
-status: "blocked"
+status: "ready"
 priority: 3
 project: "later"
 owner: ""
@@ -10,12 +10,12 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waiting for later-0018 to merge; its contract is required by this task."
-blocked_by: ["later-0018"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G1"]
 touches: ["src/app/research/**", "src/app/api/research/**", "src/lib/research/**", "src/lib/revisit/**"]
 labels: ["revisit", "research"]
-notes: ["Approved direction: make daily saves recognisable, then provide a small return surface; keep research separate."]
+notes: ["Approved direction: make daily saves recognisable, then provide a small return surface; keep research separate.", "2026-10-08: Human requested a fresh session for the next task. Dependencies later-0018, later-0019 and later-0020 have merged; stale dependency block cleared. Preserve existing touches and acceptance criteria. Continue the approved cloud execution preference: no local Docker on the human workstation; full real database proof runs in cloud/hosted CI and must not be skipped."]
 ---
 
 ## Context
