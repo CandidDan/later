@@ -1,3 +1,6 @@
+import { formatSavedDate } from "../../lib/revisit/dates";
+import { IntentResultView } from "./intent-result";
+import { RevealedCard } from "./revealed-card";
 import { INTENT_ACCURACIES, RECALL_STATUSES } from "../../lib/research/types";
 import type { CaptureContext, RevealedRun } from "../../lib/research/types";
 
@@ -13,7 +16,7 @@ const ACCURACY_LABELS: Record<(typeof INTENT_ACCURACIES)[number], string> = {
   wrong: "Wrong",
 };
 
-const panel = "w-full max-w-2xl rounded-lg border border-zinc-200 p-6 dark:border-zinc-800";
+const panel = "w-full max-w-2xl min-w-0 [overflow-wrap:anywhere] rounded-lg border border-zinc-200 p-6 dark:border-zinc-800";
 const choice =
   "flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-zinc-200 px-4 py-3 " +
   "text-base has-[:focus-visible]:outline has-[:focus-visible]:outline-2 dark:border-zinc-800";
@@ -44,7 +47,7 @@ export function CapturePanel({ capture }: { capture: CaptureContext }) {
         ))}
       </ul>
       <p className="text-sm text-zinc-500">
-        {capture.channel} · saved <time dateTime={capture.capturedAt}>{capture.capturedAt}</time>
+        {capture.channel}{capture.sourcePlatform ? ` · ${capture.sourcePlatform}` : ""} · saved <time dateTime={capture.capturedAt}>{formatSavedDate(capture.capturedAt, new Date(capture.capturedAt), "UTC").absolute} UTC</time>
       </p>
     </article>
   );
@@ -100,6 +103,7 @@ export function RecallPanel({ capture, pending, onSubmit }: RecallPanelProps) {
 }
 
 export interface RevealPanelProps {
+  accessToken?: string;
   capture: CaptureContext;
   runs: readonly RevealedRun[];
   rated: readonly string[];
@@ -111,11 +115,12 @@ export interface RevealPanelProps {
  * Phase two, reachable only once recall is stored. Each run is rated on its own form carrying
  * its own evaluation id, so two runs of one capture never collapse into a single verdict.
  */
-export function RevealPanel({ capture, runs, rated, pending, onRate }: RevealPanelProps) {
+export function RevealPanel({ capture, runs, rated, pending, onRate, accessToken }: RevealPanelProps) {
   return (
     <section className={panel} data-phase="reveal">
       <CapturePanel capture={capture} />
-      {runs.map((run) => (
+      {accessToken && <RevealedCard key={`${capture.captureId}/${accessToken}`} captureId={capture.captureId} accessToken={accessToken} />}
+      {runs.map((run, index) => (
         <form
           className="mt-6 flex flex-col gap-4 border-t border-zinc-200 pt-6 dark:border-zinc-800"
           action={onRate}
@@ -124,16 +129,7 @@ export function RevealPanel({ capture, runs, rated, pending, onRate }: RevealPan
           key={run.evaluationId}
         >
           <input type="hidden" name="evaluationId" value={run.evaluationId} />
-          <h2 className="text-sm uppercase tracking-wide text-zinc-500">
-            What the model inferred
-          </h2>
-          <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-zinc-100 p-3 text-sm dark:bg-zinc-900">
-            {JSON.stringify(run.result, null, 2)}
-          </pre>
-          <p className="text-sm text-zinc-500">
-            {run.modelId} · prompt {run.promptVersion} · pipeline {run.pipelineVersion}
-            {run.confidence === null ? "" : ` · confidence ${run.confidence}`}
-          </p>
+          <IntentResultView run={run} number={index + 1} />
           <fieldset className="flex flex-col gap-2">
             <legend className="mb-2 text-base font-medium">Was that your interest?</legend>
             {INTENT_ACCURACIES.map((accuracy, index) => (

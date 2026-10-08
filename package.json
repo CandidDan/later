@@ -11,7 +11,7 @@
     "launch:check": "node src/lib/operations/launch-readiness.mjs",
     "test": "vitest run && pnpm test:browser",
     "test:coverage": "vitest run --coverage && pnpm test:browser",
-    "test:browser": "playwright install chromium --only-shell && playwright test --config src/app/revisit/playwright.config.ts"
+    "test:browser": "playwright install chromium --only-shell && playwright test --config src/app/revisit/playwright.config.ts && playwright test --config src/app/research/playwright.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",
