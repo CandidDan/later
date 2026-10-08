@@ -43,11 +43,14 @@ implementation, that's yours to specify.
      being updated. Amend `VISION.md` first (vision-writer, branch + PR), then serve the new id.
    - **drift being born** — nothing in the vision wants this. Don't write the task; put the
      question back to the human, in one line, naming what it would serve if anything.
-6. **Name the intent it derives from.** Work that serves a product goal starts from an intent
+6. **Name the intent it derives from — only if this repo has adopted intents.** Adopted means
+   **both**: `.flow/intents/` exists, **and** `.flow/config.yml` sets `intents.required_from`.
+   If either is missing, skip this step: leave `intent: ""` and write the task as before.
+   In an adopted repo, work that serves a product goal starts from an intent
    already on `main` in `.flow/intents/` — the human approved it by merging its PR, so its
    `status` is not consulted. Set `intent` to that intent's `id`. If no such intent exists, say so
-   to the human and stop: the intent comes first, written with the **intent-writer** skill in its
-   own session and its own PR. **Do not write the intent yourself** — authoring the intent and the
+   to the human and stop: the intent comes first, written and merged in its own PR, by the human
+   or in a separate session. **Do not write the intent yourself** — authoring the intent and the
    task in one session puts authorship and approval in the same context, which is the one thing
    the touchpoint exists to separate. `serves: ["maintenance"]` work needs no intent; leave
    `intent: ""`. Never edit the intent to list this task — the link runs task → intent only.
@@ -132,7 +135,8 @@ them mechanically rather than trusting a plausible-sounding narrative:
    is wrong or the vision has moved, and either way it is a sentence to the human. And if a batch
    is *mostly* `maintenance`, say so before you save — legitimate for a hardening sprint, and the
    clearest early signal of drift when it isn't.
-4. **`intent` resolves.** Unless the task is `maintenance`-only, its `intent` is the `id` of a
+4. **`intent` resolves** (adopted repos only — see Procedure step 6; elsewhere `intent` stays
+   empty and this check does not apply). Unless the task is `maintenance`-only, its `intent` is the `id` of a
    file in `.flow/intents/` on `main` — check the id against the file, don't recall it. A `ready`
    task naming an id no intent declares fails `flow-doctor`; one naming none warns once the date
    in `intents.required_from` has passed.
