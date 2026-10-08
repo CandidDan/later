@@ -46,7 +46,7 @@ describe("research console state", () => {
 
     expect(recallPhase).toEqual({ phase: "recall", capture });
     // A stray or replayed reveal response cannot put model output on screen mid-recall.
-    expect(reduce(recallPhase, { type: "revealed", runs: [haikuRun] })).toEqual(recallPhase);
+    expect(reduce(recallPhase, { type: "revealed", captureId: capture.captureId, runs: [haikuRun] })).toEqual(recallPhase);
     expect(JSON.stringify(recallPhase)).not.toMatch(/haiku|sonnet|summary|confidence/iu);
   });
 
@@ -54,8 +54,8 @@ describe("research console state", () => {
     const revealed = reduce(
       INITIAL_CONSOLE_STATE,
       { type: "loaded", capture },
-      { type: "recall_stored" },
-      { type: "revealed", runs: [haikuRun, sonnetRun] },
+      { type: "recall_stored", captureId: capture.captureId },
+      { type: "revealed", captureId: capture.captureId, runs: [haikuRun, sonnetRun] },
     );
 
     expect(revealed).toEqual({ phase: "reveal", capture, runs: [haikuRun, sonnetRun], rated: [] });
@@ -81,8 +81,8 @@ describe("research console state", () => {
     const revealed = reduce(
       INITIAL_CONSOLE_STATE,
       { type: "loaded", capture },
-      { type: "recall_stored" },
-      { type: "revealed", runs: [haikuRun, sonnetRun] },
+      { type: "recall_stored", captureId: capture.captureId },
+      { type: "revealed", captureId: capture.captureId, runs: [haikuRun, sonnetRun] },
     );
     const oneRated = reduce(revealed, { type: "rated", evaluationId: haikuRun.evaluationId });
 
@@ -125,5 +125,21 @@ describe("research console state", () => {
     );
 
     expect(state).toEqual({ phase: "recall", capture: second });
+  });
+});
+
+
+describe("later-0021 stale response boundary", () => {
+  it("AC5 discards reveal and resume responses in recall, and confirmations for another capture", () => {
+    const recall: ConsoleState = { phase: "recall", capture };
+    expect(reduce(recall, { type: "resumed", capture, runs: [haikuRun] })).toEqual(recall);
+    expect(reduce(recall, { type: "revealed", captureId: capture.captureId, runs: [haikuRun] })).toEqual(recall);
+    expect(reduce(recall, { type: "recall_stored", captureId: "old-capture" })).toEqual(recall);
+    const recorded = reduce(recall, { type: "recall_stored", captureId: capture.captureId });
+    expect(reduce(recorded, { type: "revealed", captureId: "old-capture", runs: [haikuRun] })).toEqual(recorded);
+  });
+  it("AC3 ignores an unrelated stale rating identity", () => {
+    const state = reduce(INITIAL_CONSOLE_STATE, { type: "resumed", capture, runs: [haikuRun] });
+    expect(reduce(state, { type: "rated", evaluationId: "old-evaluation" })).toEqual(state);
   });
 });

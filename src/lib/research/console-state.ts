@@ -19,8 +19,8 @@ export type ConsoleEvent =
   | { type: "loading" }
   | { type: "loaded"; capture: CaptureContext | undefined }
   | { type: "resumed"; capture: CaptureContext; runs: readonly RevealedRun[] }
-  | { type: "recall_stored" }
-  | { type: "revealed"; runs: readonly RevealedRun[] }
+  | { type: "recall_stored"; captureId: string }
+  | { type: "revealed"; captureId: string; runs: readonly RevealedRun[] }
   | { type: "rated"; evaluationId: string }
   | { type: "signed_out"; message: string | null }
   | { type: "failed"; message: string };
@@ -48,16 +48,16 @@ export function researchConsoleReducer(state: ConsoleState, event: ConsoleEvent)
         : state;
 
     case "recall_stored":
-      return state.phase === "recall" ? { phase: "recorded", capture: state.capture } : state;
+      return state.phase === "recall" && state.capture.captureId === event.captureId ? { phase: "recorded", capture: state.capture } : state;
 
     case "revealed":
       // Only a console that has already stored recall may hold runs.
-      return state.phase === "recorded"
+      return state.phase === "recorded" && state.capture.captureId === event.captureId
         ? { phase: "reveal", capture: state.capture, runs: event.runs, rated: [] }
         : state;
 
     case "rated": {
-      if (state.phase !== "reveal") {
+      if (state.phase !== "reveal" || !state.runs.some(run => run.evaluationId === event.evaluationId)) {
         return state;
       }
 

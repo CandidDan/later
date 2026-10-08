@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import {
   INITIAL_CONSOLE_STATE,
@@ -67,6 +67,8 @@ export default function ResearchConsole() {
   const [token, setToken] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [linkSent, setLinkSent] = useState(false);
+  const generation = useRef(0);
+  useEffect(() => () => { generation.current++; }, []);
 
   useEffect(() => {
     restoreResearchAccessToken(browserSupabaseClient().auth)
@@ -81,10 +83,12 @@ export default function ResearchConsole() {
   }, []);
 
   const load = useCallback(async (active: string) => {
+    const request = ++generation.current;
     dispatch({ type: "loading" });
 
     try {
       const payload = await call(active, "/api/research/next");
+      if (request !== generation.current) return;
 
       if (payload.phase === "reveal") {
         dispatch({
@@ -100,6 +104,7 @@ export default function ResearchConsole() {
         capture: (payload.capture as CaptureContext | undefined) ?? undefined,
       });
     } catch (error) {
+      if (request !== generation.current) return;
       dispatch(
         (error as Error).message === "unauthorized"
           ? { type: "signed_out", message: "That session cannot use the research console." }
@@ -146,6 +151,7 @@ export default function ResearchConsole() {
         return;
       }
 
+      const request = generation.current;
       setPending(true);
       const recallStatus = text(form, "recallStatus");
       const remembered = text(form, "rememberedInterest").trim();
@@ -162,24 +168,29 @@ export default function ResearchConsole() {
             recallStatus === "cannot_remember" || remembered === "" ? null : remembered,
         },
       })
-        .then(() => {
-          dispatch({ type: "recall_stored" });
+        .then((payload) => {
+          if (request !== generation.current) return;
+          if (payload.phase !== "recorded" || payload.captureId !== capture.captureId) throw new Error("recall_not_confirmed");
+          dispatch({ type: "recall_stored", captureId: capture.captureId });
           return call(
             token,
             `/api/research/reveal?captureId=${encodeURIComponent(capture.captureId)}`,
           );
         })
-        .then((payload) =>
-          dispatch({ type: "revealed", runs: (payload.runs as RevealedRun[]) ?? [] }),
-        )
-        .catch((error: Error) =>
+        .then((payload) => {
+          if (request !== generation.current) return;
+          if (payload?.phase !== "reveal" || payload.captureId !== capture.captureId || !Array.isArray(payload.runs)) throw new Error("reveal_not_confirmed");
+          dispatch({ type: "revealed", captureId: capture.captureId, runs: payload.runs as RevealedRun[] });
+        })
+        .catch((error: Error) => {
+          if (request !== generation.current) return;
           dispatch(
             error.message === "unauthorized"
               ? { type: "signed_out", message: "That session cannot use the research console." }
               : { type: "failed", message: UNAVAILABLE },
-          ),
-        )
-        .finally(() => setPending(false));
+          );
+        })
+        .finally(() => { if (request === generation.current) setPending(false); });
     },
     [token],
   );
@@ -190,6 +201,7 @@ export default function ResearchConsole() {
         return;
       }
 
+      const request = generation.current;
       setPending(true);
       const evaluationId = text(form, "evaluationId");
       const notes = text(form, "notes").trim();
@@ -204,20 +216,24 @@ export default function ResearchConsole() {
           notes: notes === "" ? null : notes,
         },
       })
-        .then(() => dispatch({ type: "rated", evaluationId }))
-        .catch((error: Error) =>
+        .then(() => { if (request === generation.current) dispatch({ type: "rated", evaluationId }); })
+        .catch((error: Error) => {
+          if (request !== generation.current) return;
           dispatch(
             error.message === "unauthorized"
               ? { type: "signed_out", message: "That session cannot use the research console." }
               : { type: "failed", message: UNAVAILABLE },
-          ),
-        )
-        .finally(() => setPending(false));
+          );
+        })
+        .finally(() => { if (request === generation.current) setPending(false); });
     },
     [token],
   );
 
-  return renderConsole(state, {
+  const retry = useCallback(() => { generation.current++; dispatch({ type: "loading" }); }, []);
+
+  return <ConsoleView state={state} actions={{
+    accessToken: token ?? undefined,
     pending,
     linkSent,
     signIn,
@@ -227,13 +243,14 @@ export default function ResearchConsole() {
     },
     submitRecall,
     submitRating,
-    retry: () => dispatch({ type: "loading" }),
-  });
+    retry,
+  }} />;
 }
 
-function renderConsole(
-  state: ConsoleState,
+function ConsoleView({ state, actions }: {
+  state: ConsoleState;
   actions: {
+    accessToken?: string;
     pending: boolean;
     linkSent: boolean;
     signIn(form: FormData): void;
@@ -241,8 +258,8 @@ function renderConsole(
     submitRecall(capture: CaptureContext): (form: FormData) => void;
     submitRating(form: FormData): void;
     retry(): void;
-  },
-) {
+  };
+}) {
   switch (state.phase) {
     case "signed_out":
       return actions.linkSent ? (
@@ -264,6 +281,7 @@ function renderConsole(
     case "reveal":
       return (
         <RevealPanel
+          accessToken={actions.accessToken}
           capture={state.capture}
           runs={state.runs}
           rated={state.rated}
