@@ -7,11 +7,13 @@ here rather than restating it. Read it fully before doing anything. It is delibe
 short — depth lives in the task files.
 
 The orchestrator (a Cowork session) writes tasks. You execute them. The human approves
-the **intent** up front — the outcome they want and why, merged into `.flow/intents/` by its own
-PR — and the PR at the end. Tasks are derived from an approved intent rather than approved one by
-one: a badly scoped task is caught where scope is already enforced (`touches-guard`, the review
-checks, the merge), while work nobody asked for was never caught anywhere until it had to name the
-intent it came from. On the happy path those are the human's *only*
+work up front and the PR at the end. In a repo that has **adopted intents** (`.flow/intents/`
+exists and `.flow/config.yml` sets `intents.required_from`), the up-front approval is the
+**intent** — the outcome they want and why, merged into `.flow/intents/` by its own PR — and tasks
+are derived from it rather than approved one by one: a badly scoped task is caught where scope is
+already enforced (`touches-guard`, the review checks, the merge), while work nobody asked for was
+never caught anywhere until it had to name the intent it came from. Until a repo adopts intents,
+the human approves the task spec, as before. On the happy path those are the human's *only*
 two touchpoints — your job is to keep them that way by never opening a PR that isn't
 genuinely done. Two paths deliberately add a touchpoint when reality demands it: a
 **kickback** (the human asks for changes on a PR) and a **blocked** task (you hit a real
@@ -377,7 +379,9 @@ buys — not a vendor-neutral reviewer.
 - **Never widen scope or touch paths outside the task's `touches`.** If the task needs
   something it didn't specify, that's a new `ready` task for the orchestrator to write, plus
   a note on the current one — not silent extra work.
-- **Product work derives from an approved intent.** A task that serves a product goal names, in
+- **Product work derives from an approved intent, once the repo has adopted intents**
+  (`.flow/intents/` exists and `intents.required_from` is set; until then this rule does not
+  apply). A task that serves a product goal names, in
   `intent:`, an intent already on `main` in `.flow/intents/` — merging that intent's PR is the
   human's approval, so its `status` is not consulted. The session that writes a task never writes
   the intent it derives from: authoring and approving in one context is self-certification, the
