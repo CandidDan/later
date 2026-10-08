@@ -16,7 +16,8 @@
 //   below) · a task file present on disk but not committed (the uncommitted-task guard — see
 //   below) · a ready task whose body doesn't meet the readiness bar, or whose `serves` doesn't
 //   resolve against VISION.md (see below) · an intent file with malformed frontmatter, a missing
-//   required field, or a duplicate id (see "intent store" below).
+//   required field, or a duplicate id (see "intent store" below) · a ready task whose `intent`
+//   names no intent file (see "tasks derive from intents" below).
 // WARNINGS (exit 0): ready task with owner set · blocked task with an empty `blocked_by` (a
 //   nudge, never a failure — see below) · ready task with empty touches (concurrency
 //   relies on it) · live tasks with overlapping touches (they can't run in parallel — sequence
@@ -29,7 +30,10 @@
 //   non-ready task · no `.flow/intents/` (intent layer inactive) · an intent whose `evidence` is
 //   declared but isn't a list of paths, whose `status` is outside the three allowed values,
 //   whose `serves` names an id VISION.md doesn't declare, or whose `supersedes` names an id no
-//   intent declares (all of them warnings — see "intent store" below).
+//   intent declares (all of them warnings — see "intent store" below) · a ready task created
+//   on or after `intents.required_from` with no `intent` and a non-maintenance `serves`, a
+//   dangling `intent` on a non-ready task, an `intent` naming a superseded intent, or a store
+//   with `intents.required_from` unset (see "tasks derive from intents" below).
 // NOTES (exit 0): a check that was skipped because its precondition wasn't met (e.g. not run
 //   inside a git work tree, so the uncommitted-task guard can't read `git status`).
 //
@@ -658,7 +662,7 @@ export function intentFindings(intentsDir, { goals = null } = {}) {
     warnings.push("no .flow/intents/ — the intent layer is inactive, so nothing records who asked " +
       "for the work or why (VISION.md G11); create the store and write intents with the " +
       "intent-writer skill");
-    return { problems, warnings, count: 0 };
+    return { problems, warnings, count: 0, intents: null };
   }
   // Read every intent before checking any of them: `supersedes` resolves against the ids the
   // whole store declares, so a forward reference to an intent later in the sort order must not
@@ -710,7 +714,99 @@ export function intentFindings(intentsDir, { goals = null } = {}) {
       }
     }
   }
-  return { problems, warnings, count: parsed.length };
+  // id → status for every intent that declares an id, for taskIntentFindings. First declaration
+  // wins, matching the duplicate report above — a duplicate is already a PROBLEM in its own right.
+  const intents = new Map();
+  for (const { intent } of parsed) {
+    if (intent.id && !intents.has(intent.id)) intents.set(intent.id, intent.status ?? "");
+  }
+  return { problems, warnings, count: parsed.length, intents };
+}
+
+// ── tasks derive from intents (flow-0074, ADR-0007 slice 2) ─────────────────────────────────
+// A task names the intent it came from in `intent:`. This is the slice that moves the human's
+// first touchpoint from approving a task spec to approving an intent, so it is rolled out the
+// way `serves` was: WARN-FIRST, with exactly one failure, and that failure a fact check.
+//
+//   · Empty `intent` on a `ready` task created on or after `intents.required_from`, whose
+//     `serves` is not maintenance-only → WARNING. Not a failure in this slice: escalating it is a
+//     later task, once intent-derived tasks exist to justify the teeth. `serves` empty counts as
+//     not-maintenance — the exemption is for work that SAYS it is maintenance, not for silence.
+//   · Non-empty `intent` naming no intent's `id` → PROBLEM on `ready`, WARNING otherwise. A typo or
+//     a dangling id is a fact, not a judgment, and no task carried `intent` before this rule
+//     existed, so it cannot redden history.
+//   · `intent` resolving to `status: superseded` → WARNING naming both.
+//   · `proposed` is NOT a finding. Intents reach `main` only by a merged PR and the merge IS the
+//     approval (ADR-0007); nothing stamps `approved` until slice 4. Present on main = approved.
+//
+// FORWARD-ONLY is a date in config, not a hand-kept grandfather list (ADR-0007 rejects lists,
+// because they rot): `intents.required_from: "YYYY-MM-DD"`. Each repo sets its own date when it
+// adopts intents. Unset with a store present → ONE warning naming the key, and no per-task
+// missing-intent warnings. No store at all → nothing here; intentFindings has already said so.
+export const INTENTS_REQUIRED_FROM_KEY = "intents.required_from";
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * `intents.required_from` from config.yml: the string as written (quotes and comment stripped),
+ * or undefined when the `intents:` block or the key is absent. Line-scanned, not YAML-parsed —
+ * these helpers run in gate jobs with no install step (see parseSourceRootsIgnore).
+ *   intents:
+ *     required_from: "2026-10-06"
+ */
+export function parseIntentsRequiredFrom(configPath) {
+  if (!existsSync(configPath)) return undefined;
+  const lines = readFileSync(configPath, "utf8").split("\n");
+  const i = lines.findIndex((l) => /^intents:\s*(#.*)?$/.test(l));
+  if (i === -1) return undefined;
+  for (let j = i + 1; j < lines.length; j++) {
+    if (/^\S/.test(lines[j])) break;                 // dedent → the block is over
+    const m = lines[j].match(/^\s+required_from:\s*(.*)$/);
+    if (m) return unquoteEntry(m[1]);
+  }
+  return undefined;
+}
+
+/**
+ * Task → intent findings. `intents` is intentFindings' id → status map, or null when there is no
+ * `.flow/intents/` (then nothing is reported). `requiredFrom` is the raw config value.
+ */
+export function taskIntentFindings(tasks, intents, requiredFrom) {
+  const problems = [], warnings = [];
+  if (!intents) return { problems, warnings };
+  let cutoff = null;
+  if (requiredFrom === undefined || requiredFrom === "") {
+    warnings.push(`${INTENTS_REQUIRED_FROM_KEY} is not set in .flow/config.yml — the missing-intent ` +
+      "rule is inactive, so a ready task that names no intent goes unreported; set it to the date " +
+      "this repo adopted intents (YYYY-MM-DD). Tasks created before it are never asked for one.");
+  } else if (!ISO_DATE.test(requiredFrom)) {
+    warnings.push(`${INTENTS_REQUIRED_FROM_KEY} is "${requiredFrom}", not a YYYY-MM-DD date — the ` +
+      "missing-intent rule is inactive until it parses");
+  } else {
+    cutoff = requiredFrom;
+  }
+  for (const t of tasks) {
+    const intent = (t.intent ?? "").trim();
+    const ready = t.status === "ready";
+    if (intent) {
+      if (!intents.has(intent)) {
+        (ready ? problems : warnings).push(`${t.id}: intent "${intent}" names no intent in .flow/intents/ — ` +
+          "a task derives from an intent already on main; fix the id, or merge the intent first");
+      } else if (intents.get(intent) === "superseded") {
+        warnings.push(`${t.id}: intent "${intent}" is superseded — re-derive the task from the intent ` +
+          "that replaced it, or drop the task");
+      }
+      continue;
+    }
+    if (!ready || !cutoff) continue;
+    const created = String(t.created ?? "").slice(0, 10);
+    if (!ISO_DATE.test(created) || created < cutoff) continue;
+    const serves = (t.servesList ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean);
+    if (serves.length && serves.every((e) => e === MAINTENANCE_SERVES)) continue;
+    warnings.push(`${t.id}: ready with no intent — work that serves a product goal starts from an ` +
+      `intent already on main (intent-writer skill); name its id in \`intent:\`, or use serves ` +
+      `["${MAINTENANCE_SERVES}"] if it is maintenance. A warning in this slice, not yet a failure.`);
+  }
+  return { problems, warnings };
 }
 
 // ── store identity: one id, one file (flow-0052) ──────────────────────────────────────────
@@ -884,6 +980,7 @@ function parseTask(text) {
            touchesList: parseListField(head, "touches"),
            blockedByList: parseListField(head, "blocked_by"),
            servesList: parseListField(head, "serves"),
+           intent: get("intent"), created: get("created"),
            asksList: parseListField(head, "asks"), body };
 }
 
@@ -1106,6 +1203,9 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
     const f = intentFindings(join(flowDir, "intents"), { goals: visionGoals });
     problems.push(...f.problems);
     warnings.push(...f.warnings);
+    const d = taskIntentFindings(tasks, f.intents, parseIntentsRequiredFrom(configPath));
+    problems.push(...d.problems);
+    warnings.push(...d.warnings);
   }
 
   // Version drift: Flow infra is authored in canonical and repos adopt it, so a repo can fall

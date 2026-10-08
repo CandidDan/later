@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync, lstatSync,
 import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runDoctor, parseSourceRootsIgnore, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, asksFindings, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES } from "./flow-doctor.mjs";
+import { runDoctor, parseSourceRootsIgnore, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, asksFindings, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES, taskIntentFindings, parseIntentsRequiredFrom, INTENTS_REQUIRED_FROM_KEY } from "./flow-doctor.mjs";
 
 // The vision every fixture gets unless it asks for none: two live goals, one non-goal, one
 // retired goal. Written in the shape flow-doctor's line regex reads, deliberately mixing the
@@ -59,7 +59,13 @@ None.
 //           reason `vision` defaults to a real vision: the absent-store warning is a fact about
 //           adoption, and a fixture that tripped it by accident would bury it under noise in
 //           every unrelated assertion about warnings.
-function fixture(files, { dirs = ["src"], vision = VISION, intents = {} } = {}) {
+//   requiredFrom  `intents.required_from` written to `.flow/config.yml` — or null for no config
+//           file at all, the "store present, key unset" case. Defaults to a date before every
+//           fixture task's `created` (which `task()` leaves empty unless asked), for the same
+//           reason: a repo that has adopted intents properly, so the one-off unset-key warning
+//           only appears where a test asks for it. Only written when there is an intent store.
+//           `source_roots: []` keeps the gate-coverage nudge quiet without declaring a root.
+function fixture(files, { dirs = ["src"], vision = VISION, intents = {}, requiredFrom = "2026-01-01" } = {}) {
   const repo = mkdtempSync(join(tmpdir(), "flow-doc-"));
   mkdirSync(join(repo, ".flow", "tasks"), { recursive: true });
   for (const d of dirs) mkdirSync(join(repo, d), { recursive: true });
@@ -68,6 +74,10 @@ function fixture(files, { dirs = ["src"], vision = VISION, intents = {} } = {}) 
   if (intents !== null) {
     mkdirSync(join(repo, ".flow", "intents"), { recursive: true });
     for (const [name, body] of Object.entries(intents)) writeFileSync(join(repo, ".flow", "intents", name), body);
+    if (requiredFrom !== null) {
+      writeFileSync(join(repo, ".flow", "config.yml"),
+        `source_roots: []\nintents:\n  required_from: "${requiredFrom}"\n`);
+    }
   }
   return join(repo, ".flow");
 }
@@ -109,7 +119,7 @@ started: "${f.started ?? ""}"
 branch: "${f.branch ?? ""}"
 pr: "${f.pr ?? ""}"
 blocked_reason: "${f.blocked_reason ?? ""}"
-${f.blocked_by === undefined ? "" : `blocked_by: ${f.blocked_by}\n`}${f.asks === undefined ? "" : `asks:\n${f.asks.map((a) => `  - ${JSON.stringify(a)}`).join("\n")}\n`}serves: ${f.serves ?? '["G1"]'}
+${f.created === undefined ? "" : `created: "${f.created}"\n`}${f.intent === undefined ? "" : `intent: "${f.intent}"\n`}${f.blocked_by === undefined ? "" : `blocked_by: ${f.blocked_by}\n`}${f.asks === undefined ? "" : `asks:\n${f.asks.map((a) => `  - ${JSON.stringify(a)}`).join("\n")}\n`}serves: ${f.serves ?? '["G1"]'}
 touches: ${f.touches ?? '["src/**"]'}
 ---
 ${f.body ?? READY_BODY}`;
@@ -1969,4 +1979,201 @@ test("flow-0119: an apostrophe in an unquoted value does not open a quote, so a 
   assert.equal(yamlScalar(`don't # note`), "don't");
   assert.equal(yamlScalar(`'it''s #1' # note`), "it's #1", "a single-quoted scalar still keeps its # and its escaped quote");
   assert.deepEqual(parseListField(`asks: ["fyi: it's #1", 'follow-up: x'] # c\n`, "asks"), ["fyi: it's #1", "follow-up: x"]);
+});
+
+// ── tasks derive from intents (flow-0074, ADR-0007 slice 2) ─────────────────────────────────
+// Each test below proves one acceptance criterion of flow-0074, numbered as the task numbers
+// them. The CLI runs prove the exit code, which is the half CI actually reads.
+const intentWarnings = (r) => r.warnings.filter((w) => /\bintent\b|intents\.required_from/.test(w));
+const NEW_PRODUCT_TASK = { created: "2026-10-02", serves: '["G1"]' };
+
+test("flow-0074 criterion 1: a new ready product task with no intent warns, naming the task, and exits 0", () => {
+  const d = cliFixture({ "0001-a.md": task("P-0001", NEW_PRODUCT_TASK) }, { requiredFrom: "2026-10-01" });
+  const r = runDoctor({ flowDir: d, gitStatus: () => ({ inRepo: false }) });
+  assert.deepEqual(r.problems, []);
+  const w = intentWarnings(r);
+  assert.equal(w.length, 1, JSON.stringify(r.warnings));
+  assert.match(w[0], /^P-0001: ready with no intent/);
+  const { code, out } = runCli(d);
+  assert.equal(code, 0, out);
+  assert.match(out, /WARN\s+P-0001: ready with no intent/);
+  cleanup(d);
+});
+
+test("flow-0074 criterion 1: the cutoff day itself counts — created ON required_from warns", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { created: "2026-10-01" }) }, { requiredFrom: "2026-10-01" });
+  assert.equal(intentWarnings(runDoctor({ flowDir: d })).length, 1);
+  cleanup(d);
+});
+
+test("flow-0074 criterion 1: a datetime `created` is compared by its date", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { created: "2026-10-02T09:00:00Z" }) }, { requiredFrom: "2026-10-01" });
+  assert.equal(intentWarnings(runDoctor({ flowDir: d })).length, 1);
+  cleanup(d);
+});
+
+test("flow-0074: an empty `serves` is not an exemption — only a maintenance-only serves is", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { created: "2026-10-02", serves: "[]" }) },
+    { requiredFrom: "2026-10-01" });
+  assert.ok(intentWarnings(runDoctor({ flowDir: d })).some((w) => w.startsWith("P-0001: ready with no intent")));
+  cleanup(d);
+});
+
+test("flow-0074: the missing-intent rule is ready-only — an in_progress task with no intent is not asked", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { ...NEW_PRODUCT_TASK, status: "in_progress", owner: "s", started: "2026-10-02T00:00:00Z" }) },
+    { requiredFrom: "2026-10-01" });
+  assert.deepEqual(intentWarnings(runDoctor({ flowDir: d })), []);
+  cleanup(d);
+});
+
+test("flow-0074 criterion 2: a ready task created before required_from is never asked for an intent", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { created: "2026-09-30" }) }, { requiredFrom: "2026-10-01" });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(intentWarnings(r), []);
+  cleanup(d);
+});
+
+test("flow-0074 criterion 3: serves [\"maintenance\"] with no intent reports nothing", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { created: "2026-10-02", serves: '["maintenance"]' }) },
+    { requiredFrom: "2026-10-01" });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(intentWarnings(r), []);
+  cleanup(d);
+});
+
+test("flow-0074 criterion 3: maintenance PLUS a goal is product work, and still warns", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { created: "2026-10-02", serves: '["maintenance", "G1"]' }) },
+    { requiredFrom: "2026-10-01" });
+  assert.equal(intentWarnings(runDoctor({ flowDir: d })).length, 1);
+  cleanup(d);
+});
+
+test("flow-0074 criterion 4: a ready task naming an unknown intent is a PROBLEM naming both, and exits 1", () => {
+  const d = cliFixture({ "0001-a.md": task("P-0001", { intent: "no-such-intent" }) },
+    { intents: { "real.md": intent("real") } });
+  const r = runDoctor({ flowDir: d, gitStatus: () => ({ inRepo: false }) });
+  const p = r.problems.filter((x) => x.includes("no-such-intent"));
+  assert.equal(p.length, 1, JSON.stringify(r.problems));
+  assert.match(p[0], /^P-0001: intent "no-such-intent" names no intent/);
+  const { code, out } = runCli(d);
+  assert.equal(code, 1, out);
+  assert.match(out, /FAIL\s+P-0001: intent "no-such-intent"/);
+  cleanup(d);
+});
+
+test("flow-0074 criterion 4: the same dangling intent on an in_progress task is a WARNING, and exits 0", () => {
+  const d = cliFixture({ "0001-a.md": task("P-0001", { intent: "no-such-intent", status: "in_progress", owner: "s", started: "2026-10-02T00:00:00Z" }) },
+    { intents: { "real.md": intent("real") } });
+  const r = runDoctor({ flowDir: d, gitStatus: () => ({ inRepo: false }) });
+  assert.deepEqual(r.problems, []);
+  assert.ok(r.warnings.some((w) => w.startsWith('P-0001: intent "no-such-intent" names no intent')), JSON.stringify(r.warnings));
+  const { code, out } = runCli(d);
+  assert.equal(code, 0, out);
+  cleanup(d);
+});
+
+test("flow-0074 criterion 5: an intent with status proposed resolves — presence on main is approval", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { ...NEW_PRODUCT_TASK, intent: "waiting" }) },
+    { intents: { "waiting.md": intent("waiting", { status: "proposed" }) }, requiredFrom: "2026-10-01" });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.warnings, []);
+  cleanup(d);
+});
+
+test("flow-0074 criterion 6: an intent that is superseded warns, naming the task and the intent", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { intent: "old-mind" }) },
+    { intents: { "old-mind.md": intent("old-mind", { status: "superseded" }) } });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  const w = r.warnings.filter((x) => x.includes("superseded"));
+  assert.equal(w.length, 1, JSON.stringify(r.warnings));
+  assert.match(w[0], /P-0001/);
+  assert.match(w[0], /old-mind/);
+  cleanup(d);
+});
+
+test("flow-0074 criterion 7: a store with required_from unset warns exactly once, naming the key, and asks no task", () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", NEW_PRODUCT_TASK),
+    "0002-b.md": task("P-0002", NEW_PRODUCT_TASK),
+  }, { requiredFrom: null });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  const w = intentWarnings(r);
+  assert.equal(w.length, 1, JSON.stringify(r.warnings));
+  assert.ok(w[0].includes(INTENTS_REQUIRED_FROM_KEY));
+  assert.ok(!w.some((x) => x.includes("P-000")), "no per-task missing-intent warning while the key is unset");
+  cleanup(d);
+});
+
+test("flow-0074 criterion 7: a required_from that is not a date also switches the rule off, once, saying so", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", NEW_PRODUCT_TASK) }, { requiredFrom: "soon" });
+  const w = intentWarnings(runDoctor({ flowDir: d }));
+  assert.equal(w.length, 1, JSON.stringify(w));
+  assert.match(w[0], /intents\.required_from is "soon", not a YYYY-MM-DD date/);
+  cleanup(d);
+});
+
+test("flow-0074 criterion 7: the key is still read with a dangling intent — that check never depends on the date", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { intent: "ghost" }) }, { requiredFrom: null });
+  assert.ok(runDoctor({ flowDir: d }).problems.some((p) => p.includes('"ghost"')));
+  cleanup(d);
+});
+
+test("flow-0074 criterion 8: with no .flow/intents/, the intent rules add nothing beyond the absent-store warning", () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", { ...NEW_PRODUCT_TASK, intent: "ghost" }),
+    "0002-b.md": task("P-0002", NEW_PRODUCT_TASK),
+  }, { intents: null });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  const w = r.warnings.filter((x) => /intent/i.test(x));
+  assert.equal(w.length, 1, JSON.stringify(r.warnings));
+  assert.match(w[0], /^no \.flow\/intents\//);
+  assert.deepEqual(taskIntentFindings([{ id: "X", status: "ready", intent: "ghost" }], null, undefined),
+    { problems: [], warnings: [] });
+  cleanup(d);
+});
+
+test("flow-0074: parseIntentsRequiredFrom reads the nested key, and nothing else", () => {
+  const dir = mkdtempSync(join(tmpdir(), "flow-rf-"));
+  const at = (yaml) => { const p = join(dir, "config.yml"); writeFileSync(p, yaml); return parseIntentsRequiredFrom(p); };
+  assert.equal(parseIntentsRequiredFrom(join(dir, "absent.yml")), undefined);
+  assert.equal(at('intents:\n  required_from: "2026-10-06"   # adopted\n'), "2026-10-06");
+  assert.equal(at("intents:  # the layer\n  # a comment\n  required_from: 2026-10-06\n"), "2026-10-06");
+  assert.equal(at('# intents:\n#   required_from: "YYYY-MM-DD"\n'), undefined, "the shipped commented-out form is unset");
+  assert.equal(at('intents:\n  other: 1\ngit:\n  required_from: "2026-10-06"\n'), undefined, "a same-named key under another block is not it");
+  assert.equal(at('required_from: "2026-10-06"\n'), undefined, "a top-level key is not it");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// The task template ships in an adopting repo too (flow-sync does not touch a repo's own copy, but
+// flow-init scaffolds it), so this reads the template beside this file wherever it runs.
+const TASK_TEMPLATE_PATH = join(import.meta.dirname, "..", "tasks", "_TEMPLATE.md");
+test("flow-0074 criterion 9: the task _TEMPLATE.md declares `intent` as an empty string, and doctor ignores the template",
+  { skip: existsSync(TASK_TEMPLATE_PATH) ? false : "no .flow/tasks/_TEMPLATE.md beside this file" }, () => {
+  const text = readFileSync(TASK_TEMPLATE_PATH, "utf8");
+  const head = text.slice(3, text.indexOf("\n---", 3));
+  const m = head.match(/^intent:\s*(.*)$/m);
+  assert.ok(m, "the template must declare `intent:`");
+  assert.match(m[1], /^""(\s|$)/, "`intent` ships as an empty string");
+  if (yamlParse) assert.equal(yamlParse(head).intent, "", "and a YAML parser reads it as an empty string");
+  const d = fixture({ "_TEMPLATE.md": text, "0001-a.md": task("P-0001") }, { requiredFrom: "2000-01-01" });
+  const r = runDoctor({ flowDir: d });
+  assert.equal(r.count, 1, "the template is not a task");
+  assert.ok(![...r.problems, ...r.warnings].some((x) => x.includes("PROJ-0000")), JSON.stringify(r));
+  cleanup(d);
+});
+
+test("flow-0074 criterion 12: canonical sets intents.required_from, and its own doctor reports no problem from the intent rules",
+  { skip: inCanonical ? false : "canonical-only: reads canonical's own .flow/" }, () => {
+  const canonFlow = join(canonicalRoot, ".flow");
+  const rf = parseIntentsRequiredFrom(join(canonFlow, "config.yml"));
+  assert.match(rf ?? "", /^\d{4}-\d{2}-\d{2}$/, "canonical's .flow/config.yml sets intents.required_from");
+  const r = runDoctor({ flowDir: canonFlow, gitStatus: () => ({ inRepo: false }) });
+  assert.deepEqual(r.problems.filter((p) => /\bintent\b|intents\.required_from/.test(p)), []);
+  assert.ok(!r.warnings.some((w) => w.includes(INTENTS_REQUIRED_FROM_KEY)), "the key is set, so no unset-key warning");
 });
