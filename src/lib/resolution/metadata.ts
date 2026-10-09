@@ -19,15 +19,28 @@ export const SEGMENT_CONTENT_TYPES = [
   "application/json",
 ] as const;
 
-export type MetadataErrorCode =
-  | "unsafe_url"
-  | "unsafe_redirect"
-  | "metadata_unsupported"
-  | "metadata_too_large"
-  | "metadata_unavailable";
+/**
+ * The closed allow-list of metadata failure codes. Every stored resolution notice and job
+ * error code is one of these literals, so provider-controlled text can never reach the store.
+ */
+export const METADATA_ERROR_CODES = [
+  "unsafe_url",
+  "unsafe_redirect",
+  "metadata_unsupported",
+  "metadata_unsupported_platform",
+  "metadata_too_large",
+  "metadata_unavailable",
+] as const;
+
+export type MetadataErrorCode = (typeof METADATA_ERROR_CODES)[number];
 
 export class MetadataError extends Error {
-  constructor(readonly code: MetadataErrorCode) {
+  /**
+   * `status` carries the upstream HTTP status so a caller can tell a permanent client
+   * rejection from a transient outage. It is a number, never persisted, and never a substitute
+   * for the allow-listed `code` that is.
+   */
+  constructor(readonly code: MetadataErrorCode, readonly status?: number) {
     super(code);
     this.name = "MetadataError";
   }
@@ -204,7 +217,8 @@ function normalizedContentType(
   return contentType;
 }
 
-function cleanText(value: unknown): string | undefined {
+/** Reduce an untrusted value to bounded, markup-free display text, or discard it. */
+export function boundedMetadataText(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const cleaned = value.replace(/<[^>]*>/gu, " ").replace(/\s+/gu, " ").trim();
   return cleaned.length > 0 ? cleaned.slice(0, 500) : undefined;
@@ -300,7 +314,9 @@ export async function fetchPublicDocument(
       destination = new URL(location, resolved.url).href;
       continue;
     }
-    if (response.status < 200 || response.status >= 300) throw new MetadataError("metadata_unavailable");
+    if (response.status < 200 || response.status >= 300) {
+      throw new MetadataError("metadata_unavailable", response.status);
+    }
     break;
   }
   if (!resolved || !response) throw new MetadataError("metadata_unavailable");
@@ -329,9 +345,9 @@ export async function fetchPublicMetadata(
   const contentType = document.contentType as PublicMetadata["contentType"];
   const text = new TextDecoder("utf-8", { fatal: true }).decode(document.body);
   const values = contentType === "text/html" ? htmlValues(text) : jsonValues(text);
-  const title = cleanText(values["og:title"] ?? values.title ?? values.documentTitle);
+  const title = boundedMetadataText(values["og:title"] ?? values.title ?? values.documentTitle);
   const creatorValue = values.author_name ?? values.author ?? values.creator;
-  const creator = cleanText(
+  const creator = boundedMetadataText(
     creatorValue !== null && typeof creatorValue === "object" && !Array.isArray(creatorValue)
       ? (creatorValue as Record<string, unknown>).name
       : creatorValue,

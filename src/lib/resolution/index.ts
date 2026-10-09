@@ -19,7 +19,20 @@ export {
   type PublicMetadata,
   type SourceResolutionInputSnapshot,
 } from "./input";
-export { fetchPublicMetadata, MetadataError } from "./metadata";
+export {
+  fetchPublicMetadata,
+  METADATA_ERROR_CODES,
+  MetadataError,
+  type MetadataErrorCode,
+} from "./metadata";
+export {
+  fetchPlatformAwareMetadata,
+  platformMetadataRoute,
+  YOUTUBE_OEMBED_MAX_BYTES,
+  YOUTUBE_OEMBED_ORIGIN,
+  YOUTUBE_OEMBED_PATH,
+  type PlatformMetadataRoute,
+} from "./platform";
 export { recognizeSource } from "./recognized";
 export {
   processNextSegmentResolutionJob,
