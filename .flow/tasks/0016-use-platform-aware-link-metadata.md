@@ -8,7 +8,7 @@ owner: "codex-cloud-later-0016"
 created: "2026-09-29"
 started: "2026-10-09T01:21:29Z"
 branch: "flow/later-0016-platform-aware-link-metadata"
-pr: ""
+pr: "https://github.com/CandidDan/later/pull/43"
 issue: ""
 blocked_reason: ""
 blocked_by: []
