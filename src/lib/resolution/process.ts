@@ -6,7 +6,8 @@ import {
   type SourceResolutionAnalyser,
 } from "./protocol";
 import { buildSourceResolutionInputSnapshot, type PublicMetadata } from "./input";
-import { fetchPublicMetadata, MetadataError } from "./metadata";
+import { MetadataError } from "./metadata";
+import { fetchPlatformAwareMetadata } from "./platform";
 import { recognizeSource } from "./recognized";
 import {
   parseSourceResolutionResult,
@@ -105,7 +106,7 @@ function failureCode(error: unknown): string {
 export async function processNextSourceResolutionJob({
   store,
   analyse,
-  fetchMetadata: metadataFetcher = fetchPublicMetadata,
+  fetchMetadata: metadataFetcher = fetchPlatformAwareMetadata,
 }: ProcessSourceResolutionDependencies): Promise<SourceResolutionOutcome> {
   const job = await store.claimNextJob("source_resolution");
   if (!job) return { status: "idle" };
