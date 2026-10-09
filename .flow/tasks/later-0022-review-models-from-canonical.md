@@ -1,14 +1,14 @@
 ---
 id: "later-0022"
 title: "Reviewer models come from canonical Flow: drop this repo's review model pins"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "later"
 owner: "claude-session-012CTneThg94vo5drhs7QSEY"
 created: "2026-10-09"
 started: "2026-10-09T09:19:05Z"
-branch: ""
-pr: ""
+branch: "review-models-from-canonical"
+pr: "https://github.com/CandidDan/later/pull/45"
 issue: ""
 blocked_reason: ""
 blocked_by: []
