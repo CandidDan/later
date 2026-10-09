@@ -29,6 +29,7 @@ import {
   CHECKS,
   DEFAULT_MAX_DIFF_BYTES,
   DEFAULT_MODEL,
+  DEFAULT_MODELS,
   LINE_BREAKS,
   MAX_DIFF_BYTES_CEILING,
   NO_SOURCES_SENTINEL,
@@ -125,7 +126,11 @@ test("parseReviewConfig takes the reviewer model from config.yml", () => {
   assert.equal(cfg.securityModel, "opus");
   assert.deepEqual(cfg.securityPaths, ["src/auth/**", "package.json"]);
   assert.equal(cfg.configured, true);
-  assert.deepEqual(cfg.warnings, [], "a fully configured repo warns about nothing");
+  assert.equal(cfg.codeReviewModel, DEFAULT_MODELS.code_review_model,
+    "flow-0142: CONFIG leaves code_review_model unset, and it does not inherit `model`");
+  assert.deepEqual(cfg.warnings,
+    [`review.code_review_model is not set — falling back to "${DEFAULT_MODELS.code_review_model}".`],
+    "the one unset key is the one warning; the keys this repo set warn about nothing");
 });
 
 test("parseReviewConfig accepts the inline-array form of security_paths", () => {
@@ -134,19 +139,76 @@ test("parseReviewConfig accepts the inline-array form of security_paths", () => 
   assert.deepEqual(cfg.securityPaths, ["a/**", "b.json"]);
 });
 
-test("security_model falls back to model, and model to the documented default — each with a warning", () => {
-  const one = parseReviewConfig(`review:\n  model: "opus"\n`);
-  assert.equal(one.securityModel, "opus", "one knob unless the repo asks for two");
+// flow-0142: one default per check, and no key falls back to another.
+test("flow-0142: DEFAULT_MODELS is the decided split, and DEFAULT_MODEL is its qa/guide entry", () => {
+  assert.deepEqual({ ...DEFAULT_MODELS }, {
+    model: "claude-sonnet-5-5", code_review_model: "claude-opus-5-5", security_model: "claude-opus-5-5",
+  });
+  assert.ok(Object.isFrozen(DEFAULT_MODELS), "a default a caller can mutate is not a default");
+  assert.equal(DEFAULT_MODEL, DEFAULT_MODELS.model);
+});
 
+test("flow-0142: with no model keys (and with no review: block), qa/guide get Sonnet and code-review + security get Opus", () => {
   const none = parseReviewConfig(`review:\n  security_paths: []\n`);
-  assert.equal(none.model, DEFAULT_MODEL);
-  assert.ok(none.warnings.some((w) => /review\.model is not set/.test(w)),
-    "falling back to a default must be reported, or an unconfigured repo looks configured");
-
   const absent = parseReviewConfig("project:\n  name: x\n");
+  assert.equal(none.configured, true);
   assert.equal(absent.configured, false);
-  assert.equal(absent.model, DEFAULT_MODEL);
   assert.ok(absent.warnings.some((w) => /no `review:` block/.test(w)));
+  for (const cfg of [none, absent]) {
+    assert.equal(cfg.model, "claude-sonnet-5-5");
+    assert.equal(cfg.codeReviewModel, "claude-opus-5-5");
+    assert.equal(cfg.securityModel, "claude-opus-5-5");
+  }
+});
+
+test("flow-0142: only review.model set — qa/guide use it, code-review and security stay on their Opus defaults", () => {
+  const cfg = parseReviewConfig(`review:\n  model: "claude-haiku-5-5"\n`);
+  assert.equal(cfg.model, "claude-haiku-5-5");
+  assert.equal(cfg.codeReviewModel, "claude-opus-5-5", "code_review_model must not inherit `model`");
+  assert.equal(cfg.securityModel, "claude-opus-5-5", "security_model must not inherit `model`");
+});
+
+test("flow-0142: all three keys set — each check uses its own key", () => {
+  const cfg = parseReviewConfig(
+    `review:\n  model: "claude-haiku-5-5"\n  code_review_model: "claude-sonnet-5-5"\n  security_model: "claude-opus-5"\n`);
+  assert.equal(cfg.model, "claude-haiku-5-5");
+  assert.equal(cfg.codeReviewModel, "claude-sonnet-5-5");
+  assert.equal(cfg.securityModel, "claude-opus-5");
+  assert.deepEqual(cfg.warnings, [], "a fully configured repo warns about nothing");
+});
+
+for (const [key, def] of [
+  ["model", "claude-sonnet-5-5"], ["code_review_model", "claude-opus-5-5"], ["security_model", "claude-opus-5-5"],
+]) {
+  test(`flow-0142: unset review.${key} warns naming the key and the default it fell to`, () => {
+    const others = ["model", "code_review_model", "security_model"].filter((k) => k !== key)
+      .map((k) => `  ${k}: "claude-haiku-5-5"\n`).join("");
+    const cfg = parseReviewConfig(`review:\n${others}`);
+    assert.deepEqual(cfg.warnings, [`review.${key} is not set — falling back to "${def}".`],
+      "falling back to a default must be reported, naming which key and which default");
+  });
+}
+
+test("flow-0142: an unusable value in any model key still fails the plan, naming that key", () => {
+  for (const key of ["model", "code_review_model", "security_model"]) {
+    assert.throws(() => parseReviewConfig(`review:\n  ${key}: "opus; rm -rf"\n`),
+      (e) => e instanceof ReviewError && new RegExp(`\\b${key}\\b`).test(e.message) &&
+        /not a usable model name/.test(e.message),
+      `${key}: an independent default must not mask a bad explicit value`);
+  }
+});
+
+test("flow-0140: an unusable code_review_model fails naming the key, as security_model does", () => {
+  for (const value of ["opus; rm -rf", "opus --print", "-x"]) {
+    assert.throws(() => parseReviewConfig(`review:\n  code_review_model: "${value}"\n`),
+      (e) => e instanceof ReviewError && /code_review_model/.test(e.message) && /not a usable model name/.test(e.message),
+      `${JSON.stringify(value)} reaches the code-review check as \`--model <value>\` and must not pass`);
+  }
+});
+
+test("flow-0140: DEFAULT_MODEL is a full model id, not an alias", () => {
+  assert.match(DEFAULT_MODEL, /^claude-[a-z]+-\d+(-\d+)*$/,
+    "an alias resolves through whatever CLI the action pin installs — the drift flow-0140 fixed");
 });
 
 // ── the conditional security review (criterion 3) ─────────────────────────────────────────
@@ -1074,6 +1136,21 @@ test("runReviewCli plan takes its defaults from opts — and the environment sti
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("flow-0140: plan emits code_review_model, overriding only the code-review check", () => {
+  const dir = tmp("cli-crm");
+  try {
+    writeFileSync(join(dir, "config.yml"),
+      `review:\n  model: "claude-sonnet-5-5"\n  code_review_model: "claude-opus-5-5"\n`);
+    const gh = join(dir, "gh");
+    assert.equal(runReviewCli(["plan"], {
+      env: { GITHUB_OUTPUT: gh }, configPath: join(dir, "config.yml"), outDir: join(dir, "out"), git: () => "",
+    }), 0);
+    const outputs = readFileSync(gh, "utf8");
+    assert.match(outputs, /^code_review_model=claude-opus-5-5$/m);
+    assert.match(outputs, /^model=claude-sonnet-5-5$/m, "qa and the guide keep review.model");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 // End-to-end `plan` against a real git repo: proves the outputs the workflow reads are actually
 // produced, including the model (criterion 5) and the visible security decision (criterion 3).
 test("CLI `plan` publishes the model and the security decision as workflow outputs", () => {
@@ -1105,6 +1182,15 @@ test("CLI `plan` publishes the model and the security decision as workflow outpu
     const outputs = readFileSync(out, "utf8");
     assert.match(outputs, /^model=haiku$/m, "the workflow reads the model from here — it names none itself");
     assert.match(outputs, /^security_model=opus$/m);
+    assert.match(outputs, /^code_review_model=claude-opus-5-5$/m,
+      "flow-0142: the code-review job reads its model from here; unset, it is its own default, not review.model");
+    const summaryText = readFileSync(summary, "utf8");
+    assert.match(summaryText, /reviewer model: `haiku`/, "the plan summary names all three resolved models");
+    assert.match(summaryText, /code-review model: `claude-opus-5-5`/,
+      "flow-0140: the plan summary says which model code-review runs on");
+    assert.match(summaryText, /security reviewer model: `opus`/);
+    assert.match(summaryText, /review\.code_review_model is not set — falling back to "claude-opus-5-5"/,
+      "flow-0142: the fallback is visible on the run, naming the key and its default");
     assert.match(outputs, /^security_run=false$/m, "a docs-only diff touches no configured trigger path");
     assert.match(outputs, /^security_reason=SKIPPED — /m);
     assert.match(readFileSync(summary, "utf8"), /security review: \*\*SKIPPED\*\*/,

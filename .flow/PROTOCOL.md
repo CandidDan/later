@@ -56,9 +56,10 @@ in order; omit it when there are none.
 
 Workers too — a worker's host file (`CLAUDE.md` for Claude Code) auto-loads and imports this
 protocol, so these rules reach it as well. A worker's "response" is its end-of-run summary, and
-its **PR description**, which is in this order — TL;DR, then one visual of the change, then the
-criteria checklist with proving tests, then the human's to-dos (review/merge, a kickback, a
-`blocked` reason).
+its **PR description**, which is in this order — TL;DR, then one visual of the change, then
+captures (screenshots, a recording for motion) when the change is something a person sees and the
+session can run it, then the criteria checklist with proving tests, then the human's to-dos
+(review/merge, a kickback, a `blocked` reason).
 
 ---
 
