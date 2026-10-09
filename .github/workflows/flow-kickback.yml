@@ -24,8 +24,10 @@ name: flow-kickback
 # would look successful and prove nothing. With no FLOW_PAT the workflow skips, visibly, saying
 # so. See _flow-open-pr.yml's header for the one FLOW_PAT permission list the fleet shares.
 #
-# AND IT REACHES EXACTLY ONE STEP. FLOW_PAT is used only by the reusable's `stamp-and-push`
-# step, which runs after all four guards have passed. Every other step runs on GITHUB_TOKEN.
+# AND IT NEVER SHARES A JOB WITH A MODEL (flow-0135). FLOW_PAT is used only by the reusable's
+# `push` job, which runs no model: it takes the round's commits from the fixer's job as a git
+# bundle, runs the guards, and pushes with hooks off. On a runner the boundary is the job, not
+# the step — steps share `.git/hooks/`, `$GITHUB_ENV` and `$GITHUB_PATH`.
 #
 # THE BLOCK BELOW IS A CEILING, NOT A BUDGET. A reusable workflow can never raise a scope above
 # its caller's, so this caller grants the UNION of what the reusable's jobs need — and the

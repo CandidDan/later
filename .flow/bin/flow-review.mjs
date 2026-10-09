@@ -60,11 +60,32 @@ const __isMain = (() => {
 })();
 // ---------------------------------------------------------------------------------------
 
-// The model used when `review.model` is absent. It is a DEFAULT, not a hardcode: nothing in
-// `_flow-review.yml` names a model, so a repo changes every reviewer by editing config.yml.
-// `plan` reports loudly when it falls back, so an unconfigured repo is visible rather than
-// quietly running on whatever this line happens to say.
-export const DEFAULT_MODEL = "sonnet";
+// The model each check runs on when its key is absent. They are DEFAULTS, not hardcodes: nothing
+// in `_flow-review.yml` names a model, so a repo changes any reviewer by editing config.yml.
+// `plan` reports loudly when a key falls back, naming the key and the default, so an
+// unconfigured repo is visible rather than quietly running on whatever these lines say.
+//
+// ONE DEFAULT PER CHECK, AND NO KEY FALLS BACK TO ANOTHER (flow-0142). flow-0140 decided the
+// split — qa and the guide on Sonnet, code-review and security on Opus — but shipped it as
+// template config, and an adopter's config.yml is repo-owned and never synced, so the split
+// reached only new repos. This file IS synced, so the split lives here. The keys are independent
+// on purpose: if `code_review_model` fell back to `model`, a repo that set `model` alone (to pin
+// qa) would silently move code-review and security onto it — the drift flow-0140 removed, hidden
+// inside an innocent-looking key. A repo that wants one model everywhere sets all three.
+//
+// A FULL model ID, never an alias (flow-0140). An alias resolves through whatever Claude Code CLI
+// the claude-code-action pin happens to install, and an older CLI resolves it to an older model —
+// which is how every reviewer ran a generation behind with nothing reporting it. A full ID makes
+// a new model a one-line, reviewed change.
+export const DEFAULT_MODELS = Object.freeze({
+  model: "claude-sonnet-5-5",             // qa and the review guide
+  code_review_model: "claude-opus-5-5",   // the code-review check
+  security_model: "claude-opus-5-5",      // the conditional security check
+});
+
+// `review.model`'s default, kept as its own export because canonical's `.flow/bin/` adapter
+// re-exports it. It is DEFAULT_MODELS.model — never the default for the other two checks.
+export const DEFAULT_MODEL = DEFAULT_MODELS.model;
 
 // Cap on the diff handed to a reviewer, when nothing else says otherwise. The bound is the cost
 // control: reviewers read the diff and its blast radius, never the whole repo. A truncated diff is
@@ -283,9 +304,13 @@ export function parseReviewConfig(src) {
     );
   }
   const b = block ?? "";
-  const model = stringAt(b, "model");
-  if (!model) warnings.push(`review.model is not set — falling back to "${DEFAULT_MODEL}".`);
-  const securityModel = stringAt(b, "security_model");
+  // Each key resolves `its own value || its own default` — never another key (flow-0142).
+  const resolved = {};
+  for (const key of ["model", "security_model", "code_review_model"]) {
+    const value = stringAt(b, key);
+    if (!value) warnings.push(`review.${key} is not set — falling back to "${DEFAULT_MODELS[key]}".`);
+    resolved[key] = checkModel(value || DEFAULT_MODELS[key], key);
+  }
   const securityPaths = listAt(b, "security_paths");
   // `null`, not the default, when the key is absent. The two facts are different — "this repo
   // chose 300000" and "this repo chose nothing" — and only `resolveMaxDiffBytes` may collapse
@@ -293,9 +318,11 @@ export function parseReviewConfig(src) {
   const maxDiffRaw = stringAt(b, "max_diff_bytes");
   const maxDiffBytes = maxDiffRaw ? checkMaxDiffBytes(maxDiffRaw, "review.max_diff_bytes") : null;
   return {
-    model: checkModel(model || DEFAULT_MODEL, "model"),
-    // A repo that wants a deeper model on security diffs says so; otherwise one model, one knob.
-    securityModel: checkModel(securityModel || model || DEFAULT_MODEL, "security_model"),
+    model: resolved.model,
+    // flow-0140: code-review and security run a stronger model than qa and the guide — builds run
+    // on Sonnet, and a reviewer of the same model shares the builder's blind spots.
+    securityModel: resolved.security_model,
+    codeReviewModel: resolved.code_review_model,
     securityPaths,
     maxDiffBytes,
     configured: block !== null,
@@ -1245,6 +1272,7 @@ export function runReviewCli(argv, {
       emit(env.GITHUB_OUTPUT, [
         `model=${cfg.model}`,
         `security_model=${cfg.securityModel}`,
+        `code_review_model=${cfg.codeReviewModel}`,
         `security_run=${security.run}`,
         `security_reason=${security.reason.replace(/\r?\n/g, " ")}`,
         `changed_count=${changedFiles.length}`,
@@ -1377,6 +1405,8 @@ export function planSummary({
     "### Flow review gate — plan",
     "",
     `- reviewer model: \`${cfg.model}\`${cfg.configured ? "" : " *(default — no `review:` block in .flow/config.yml)*"}`,
+    // `?? cfg.model` so a caller holding an older cfg (no codeReviewModel) still renders the truth.
+    `- code-review model: \`${cfg.codeReviewModel ?? cfg.model}\``,
     `- security reviewer model: \`${cfg.securityModel}\``,
     `- changed files: ${changedFiles.length}`,
     `- diff handed to the reviewers: ${diff.bytes} bytes${diff.truncated ? ` **(truncated from ${diff.fullBytes})**` : ""}`,
