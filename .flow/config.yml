@@ -54,8 +54,8 @@ security:
 # boundaries below: external entry points, auth/session handling, privileged data access,
 # webhook verification, private captures, database policy, environment contracts and deps.
 review:
-  model: "sonnet"
-  security_model: "opus"
+  # Reviewer models are not set here, by rule: every repo runs canonical Flow's defaults
+  # (DEFAULT_MODELS in .flow/bin/flow-review.mjs). A pin goes stale when canonical moves on.
   security_paths:
     - ".env.example"
     - "src/app/api/**"
