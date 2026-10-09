@@ -1,7 +1,7 @@
 ---
 id: "later-0016"
 title: "Use platform-aware metadata retrieval for captured links"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "later"
 owner: "codex-cloud-later-0016"
