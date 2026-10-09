@@ -1,7 +1,7 @@
 ---
 id: "later-0022"
 title: "Reviewer models come from canonical Flow: drop this repo's review model pins"
-status: "in_review"
+status: "done"
 priority: 2
 project: "later"
 owner: "claude-session-012CTneThg94vo5drhs7QSEY"
