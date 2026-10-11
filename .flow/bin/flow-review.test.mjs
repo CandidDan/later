@@ -128,9 +128,10 @@ test("parseReviewConfig takes the reviewer model from config.yml", () => {
   assert.equal(cfg.configured, true);
   assert.equal(cfg.codeReviewModel, DEFAULT_MODELS.code_review_model,
     "flow-0142: CONFIG leaves code_review_model unset, and it does not inherit `model`");
-  assert.deepEqual(cfg.warnings,
-    [`review.code_review_model is not set — falling back to "${DEFAULT_MODELS.code_review_model}".`],
-    "the one unset key is the one warning; the keys this repo set warn about nothing");
+  assert.deepEqual(cfg.warnings, [
+    `review.model is set to "haiku"; reviewer models come from canonical (default "${DEFAULT_MODELS.model}"); remove it unless this repo deliberately overrides`,
+    `review.security_model is set to "opus"; reviewer models come from canonical (default "${DEFAULT_MODELS.security_model}"); remove it unless this repo deliberately overrides`,
+  ], "flow-0144: the two keys this repo set are the two warnings; the unset one says nothing");
 });
 
 test("parseReviewConfig accepts the inline-array form of security_paths", () => {
@@ -155,6 +156,8 @@ test("flow-0142: with no model keys (and with no review: block), qa/guide get So
   assert.equal(absent.configured, false);
   assert.ok(absent.warnings.some((w) => /no `review:` block/.test(w)));
   for (const cfg of [none, absent]) {
+    assert.deepEqual(cfg.warnings.filter((w) => /model/.test(w)), [],
+      "flow-0144: an unset model key is the intended path and warns about nothing");
     assert.equal(cfg.model, "claude-sonnet-5-5");
     assert.equal(cfg.codeReviewModel, "claude-opus-5-5");
     assert.equal(cfg.securityModel, "claude-opus-5-5");
@@ -174,18 +177,38 @@ test("flow-0142: all three keys set — each check uses its own key", () => {
   assert.equal(cfg.model, "claude-haiku-5-5");
   assert.equal(cfg.codeReviewModel, "claude-sonnet-5-5");
   assert.equal(cfg.securityModel, "claude-opus-5");
-  assert.deepEqual(cfg.warnings, [], "a fully configured repo warns about nothing");
+  assert.equal(cfg.warnings.length, 3, "flow-0144: three set keys are three overrides, each visible");
+});
+
+test("flow-0144: no model keys at all, the template's shape, gives no warnings whatsoever", () => {
+  const cfg = parseReviewConfig(`review:\n  security_paths:\n    - "src/auth/**"\n`);
+  assert.deepEqual(cfg.warnings, [], "unset is the norm: a repo that follows it is told nothing");
+  assert.deepEqual([cfg.model, cfg.codeReviewModel, cfg.securityModel],
+    [DEFAULT_MODELS.model, DEFAULT_MODELS.code_review_model, DEFAULT_MODELS.security_model]);
 });
 
 for (const [key, def] of [
   ["model", "claude-sonnet-5-5"], ["code_review_model", "claude-opus-5-5"], ["security_model", "claude-opus-5-5"],
 ]) {
-  test(`flow-0142: unset review.${key} warns naming the key and the default it fell to`, () => {
+  test(`flow-0144: set review.${key} warns once, naming the key, its value and canonical's default`, () => {
+    const cfg = parseReviewConfig(`review:\n  ${key}: "claude-haiku-5-5"\n`);
+    assert.deepEqual(cfg.warnings, [
+      `review.${key} is set to "claude-haiku-5-5"; reviewer models come from canonical (default "${def}"); ` +
+      "remove it unless this repo deliberately overrides",
+    ], "exactly one warning, for the one set key; the two unset keys say nothing");
+    const used = { model: cfg.model, code_review_model: cfg.codeReviewModel, security_model: cfg.securityModel };
+    assert.equal(used[key], "claude-haiku-5-5", "a warning, not a failure: the override is still the model used");
+  });
+
+  test(`flow-0144: unset review.${key} is silent and resolves to canonical's default`, () => {
     const others = ["model", "code_review_model", "security_model"].filter((k) => k !== key)
       .map((k) => `  ${k}: "claude-haiku-5-5"\n`).join("");
     const cfg = parseReviewConfig(`review:\n${others}`);
-    assert.deepEqual(cfg.warnings, [`review.${key} is not set — falling back to "${def}".`],
-      "falling back to a default must be reported, naming which key and which default");
+    assert.ok(!cfg.warnings.some((w) => w.startsWith(`review.${key} `)),
+      "the unset key earns no warning of its own");
+    assert.equal(cfg.warnings.length, 2, "only the two set keys warn");
+    const used = { model: cfg.model, code_review_model: cfg.codeReviewModel, security_model: cfg.securityModel };
+    assert.equal(used[key], def);
   });
 }
 
@@ -1189,8 +1212,10 @@ test("CLI `plan` publishes the model and the security decision as workflow outpu
     assert.match(summaryText, /code-review model: `claude-opus-5-5`/,
       "flow-0140: the plan summary says which model code-review runs on");
     assert.match(summaryText, /security reviewer model: `opus`/);
-    assert.match(summaryText, /review\.code_review_model is not set — falling back to "claude-opus-5-5"/,
-      "flow-0142: the fallback is visible on the run, naming the key and its default");
+    assert.match(summaryText, /review\.model is set to "haiku"; reviewer models come from canonical \(default "claude-sonnet-5-5"\)/,
+      "flow-0144: an override is visible on every run's plan summary, naming the key, value and default");
+    assert.doesNotMatch(summaryText, /review\.code_review_model is/,
+      "flow-0144: the unset key is the norm and says nothing on the run");
     assert.match(outputs, /^security_run=false$/m, "a docs-only diff touches no configured trigger path");
     assert.match(outputs, /^security_reason=SKIPPED — /m);
     assert.match(readFileSync(summary, "utf8"), /security review: \*\*SKIPPED\*\*/,

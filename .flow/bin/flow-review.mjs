@@ -60,10 +60,12 @@ const __isMain = (() => {
 })();
 // ---------------------------------------------------------------------------------------
 
-// The model each check runs on when its key is absent. They are DEFAULTS, not hardcodes: nothing
-// in `_flow-review.yml` names a model, so a repo changes any reviewer by editing config.yml.
-// `plan` reports loudly when a key falls back, naming the key and the default, so an
-// unconfigured repo is visible rather than quietly running on whatever these lines say.
+// The model each check runs on. These lines ARE the decision, made once here in canonical and
+// shipped to every repo: nothing in `_flow-review.yml` names a model, and a repo does not set
+// one (flow-0144). An unset key is the norm and is silent. A SET key still works — an override
+// for a deliberate experiment stays possible — but `plan` warns on it every run, naming the key,
+// its value and the default it displaces, because a per-repo pin drifts silently: inflight sat a
+// generation behind on pins nobody remembered setting.
 //
 // ONE DEFAULT PER CHECK, AND NO KEY FALLS BACK TO ANOTHER (flow-0142). flow-0140 decided the
 // split — qa and the guide on Sonnet, code-review and security on Opus — but shipped it as
@@ -71,7 +73,7 @@ const __isMain = (() => {
 // reached only new repos. This file IS synced, so the split lives here. The keys are independent
 // on purpose: if `code_review_model` fell back to `model`, a repo that set `model` alone (to pin
 // qa) would silently move code-review and security onto it — the drift flow-0140 removed, hidden
-// inside an innocent-looking key. A repo that wants one model everywhere sets all three.
+// inside an innocent-looking key.
 //
 // A FULL model ID, never an alias (flow-0140). An alias resolves through whatever Claude Code CLI
 // the claude-code-action pin happens to install, and an older CLI resolves it to an older model —
@@ -293,23 +295,30 @@ function stringAt(block, key) {
   return v || "";
 }
 
+// The warning a set model key earns (flow-0144). A warning, not a failure: the override works.
+function setModelWarning(key, value) {
+  return `review.${key} is set to ${JSON.stringify(value)}; reviewer models come from canonical ` +
+    `(default ${JSON.stringify(DEFAULT_MODELS[key])}); remove it unless this repo deliberately overrides`;
+}
+
 // `review:` as the workflow needs it, with every fallback made explicit rather than implied.
 export function parseReviewConfig(src) {
   const block = reviewBlock(src);
   const warnings = [];
   if (block === null) {
     warnings.push(
-      "no `review:` block in .flow/config.yml — using defaults. Add one to choose the reviewer " +
-      "model and to scope the security review to the paths that warrant it.",
+      "no `review:` block in .flow/config.yml — using defaults. Add one to scope the security " +
+      "review to the paths that warrant it.",
     );
   }
   const b = block ?? "";
   // Each key resolves `its own value || its own default` — never another key (flow-0142).
+  // Unset is the intended path and says nothing; a set key is an override and says so (flow-0144).
   const resolved = {};
   for (const key of ["model", "security_model", "code_review_model"]) {
     const value = stringAt(b, key);
-    if (!value) warnings.push(`review.${key} is not set — falling back to "${DEFAULT_MODELS[key]}".`);
     resolved[key] = checkModel(value || DEFAULT_MODELS[key], key);
+    if (value) warnings.push(setModelWarning(key, value));
   }
   const securityPaths = listAt(b, "security_paths");
   // `null`, not the default, when the key is absent. The two facts are different — "this repo
