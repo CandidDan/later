@@ -207,7 +207,7 @@ test("flow-0111: no task in a real store that declares touches parses to an empt
 test("flow-0111: pick-task has one list parser, flow-doctor's, and no touches regex of its own", async () => {
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("./pick-task.mjs", import.meta.url), "utf8");
-  assert.match(src, /import \{ parseListField \} from "\.\/flow-doctor\.mjs";/);
+  assert.match(src, /import \{ parseListField\b[^}]*\} from "\.\/flow-doctor\.mjs";/);
   assert.doesNotMatch(src, /\/\^touches:/, "a second touches regex is how this bug happened");
 });
 
@@ -328,3 +328,20 @@ test("flow-0118: both statements of the claim rule in PROTOCOL.md name in_review
       assert.match(text, /caller action/i, "the entry must state whether a caller has to act");
     });
 }
+
+// ── flow-0131: a quoted `#` is data, not a comment ─────────────────────────────────────
+//
+// `get()` used to cut every scalar at its first `#`, so `blocked_reason: "waits for PR #172"`
+// read as `waits for PR`. It now uses flow-doctor's quote-aware `yamlScalar`.
+
+test("flow-0131: pick-task reads a quoted \"x #1\" whole", () => {
+  const t = parseTask('---\nid: "x #1"\nstatus: "ready"\npriority: 2\ntouches: ["a"]\n---\n');
+  assert.equal(t.id, "x #1");
+});
+
+test("flow-0131: pick-task still drops a trailing unquoted # comment", () => {
+  const t = parseTask('---\nid: CAN-1 # the first\nstatus: ready # c\npriority: 2 # urgent\ntouches: ["a"]\n---\n');
+  assert.equal(t.id, "CAN-1");
+  assert.equal(t.status, "ready");
+  assert.equal(t.priority, 2);
+});

@@ -677,3 +677,22 @@ test("without FLOW_CI the helper keeps its old behaviour — a repo on an older 
     for (const d of [canon, a]) rmSync(d, { recursive: true, force: true });
   }
 });
+
+// ── flow-0131: a quoted `#` is data, not a comment ─────────────────────────────────────
+//
+// parseCeiling cut the value at its first `#`. It now reads the scalar with the quote-aware
+// `yamlScalar`, so a quoted `#` reaches the error message whole and a trailing comment is dropped.
+
+test("flow-0131: check-claude-md reads a quoted \"x #1\" whole", () => {
+  const dir = repo({ "CLAUDE.md": "root\n" }, `${CEILING_KEY}: "x #1"\n`);
+  const c = parseCeiling(join(dir, ".flow", "config.yml"));
+  assert.equal(c.value, null);
+  assert.match(c.problem, /is "x #1",/, "the whole quoted value is what was read");
+});
+
+test("flow-0131: check-claude-md still drops a trailing unquoted # comment", () => {
+  const dir = repo({ "CLAUDE.md": "root\n" }, `${CEILING_KEY}: 25000 # bytes\n`);
+  const c = parseCeiling(join(dir, ".flow", "config.yml"));
+  assert.equal(c.problem, null);
+  assert.equal(c.value, 25000);
+});

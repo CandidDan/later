@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync, lstatSync,
 import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runDoctor, parseSourceRootsIgnore, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, asksFindings, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES, taskIntentFindings, parseIntentsRequiredFrom, INTENTS_REQUIRED_FROM_KEY } from "./flow-doctor.mjs";
+import { runDoctor, parseSourceRootsIgnore, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, asksFindings, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES, taskIntentFindings, parseIntentsRequiredFrom, INTENTS_REQUIRED_FROM_KEY, workstreamFindings, WORKSTREAM_REQUIRED } from "./flow-doctor.mjs";
 
 // The vision every fixture gets unless it asks for none: two live goals, one non-goal, one
 // retired goal. Written in the shape flow-doctor's line regex reads, deliberately mixing the
@@ -2193,4 +2193,126 @@ test("flow-0138: criterion 9 runs in canonical, and skips in an adopting repo na
 test("flow-0138: in canonical, criterion 9 is not skipped", { skip: inCanonical ? false : "canonical-only" }, () => {
   assert.equal(criterion9Skip(inCanonical, existsSync(TASK_TEMPLATE_PATH)), false,
     "canonical lost project-template/.flow/tasks/_TEMPLATE.md, or the skip condition widened");
+});
+
+// ── workstream store (flow-0150, ADR-0009 §9) ──
+// Shape, uniqueness and reference resolution only. Every finding is a warning except a duplicate
+// id, and an absent store is no finding at all — the layer is optional.
+
+// A workstream file in the shape `.flow/workstreams/_TEMPLATE.md` ships. `omit` leaves fields out.
+const workstream = (id, f = {}) => {
+  const fields = { id: `"${id}"`, title: `"${f.title ?? "TanPlan Link"}"`, created: `"2026-10-20"`,
+    serves: '["G1"]', status: '"active"' };
+  for (const k of f.omit ?? []) delete fields[k];
+  return `---\n${Object.entries(fields).map(([k, v]) => `${k}: ${v}`).join("\n")}\n---\n\nPurpose.\n`;
+};
+// An intent naming a workstream: the intent() fixture with a `workstream:` line added.
+const memberIntent = (id, ws) => intent(id).replace(/^evidence:/m, `workstream: ${ws}\nevidence:`);
+function wsFixture(workstreams, intents = {}) {
+  const d = fixture({ "0001-a.md": task("P-0001") }, { intents });
+  if (workstreams !== null) {
+    mkdirSync(join(d, "workstreams"), { recursive: true });
+    for (const [name, body] of Object.entries(workstreams)) writeFileSync(join(d, "workstreams", name), body);
+  }
+  return d;
+}
+const wsFindings = (r) => [...r.problems, ...r.warnings].filter((m) => /workstream/i.test(m));
+
+test("workstreams: no .flow/workstreams/ reports nothing about workstreams, even with a member intent", () => {
+  const d = wsFixture(null, { "i-a.md": memberIntent("i-a", '"tanplan-link"') });
+  assert.equal(existsSync(join(d, "workstreams")), false);
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(wsFindings(r), []);
+  assert.deepEqual(r.problems, []);
+  cleanup(d);
+});
+
+test("workstreams: a file missing title warns naming the file and `title`, and the exit is unchanged", () => {
+  const clean = cliFixture({ "0001-a.md": task("P-0001") });
+  mkdirSync(join(clean, "workstreams"));
+  const base = runCli(clean);
+  const d = cliFixture({ "0001-a.md": task("P-0001") });
+  mkdirSync(join(d, "workstreams"));
+  writeFileSync(join(d, "workstreams", "tanplan-link.md"), workstream("tanplan-link", { omit: ["title"] }));
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  const w = r.warnings.filter((m) => m.includes(".flow/workstreams/tanplan-link.md"));
+  assert.equal(w.length, 1, JSON.stringify(r.warnings));
+  assert.match(w[0], /missing required field title\b/);
+  const cli = runCli(d);
+  assert.equal(cli.code, base.code, cli.out);
+  assert.equal(cli.code, 0, cli.out);
+  cleanup(clean); cleanup(d);
+});
+
+test("workstreams: missing id and created, and malformed frontmatter, each warn naming the file", () => {
+  const d = wsFixture({ "a.md": workstream("a", { omit: ["id", "created"] }), "b.md": "---\nid: \"b\"\nno close\n" });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.ok(r.warnings.some((m) => /workstreams\/a\.md: missing required field id\b/.test(m)));
+  assert.ok(r.warnings.some((m) => /workstreams\/a\.md: missing required field created\b/.test(m)));
+  assert.ok(r.warnings.some((m) => /workstreams\/b\.md: malformed frontmatter/.test(m)));
+  assert.deepEqual(WORKSTREAM_REQUIRED, ["id", "title", "created"]);
+  cleanup(d);
+});
+
+test("workstreams: a.md declaring id \"b\" warns that the id differs from the filename", () => {
+  const d = wsFixture({ "a.md": workstream("b") });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  const w = wsFindings(r);
+  assert.equal(w.length, 1, JSON.stringify(w));
+  assert.match(w[0], /workstreams\/a\.md: id "b" differs from its filename "a"/);
+  cleanup(d);
+});
+
+test("workstreams: two files declaring one id is a PROBLEM naming both, and the CLI exits 1", () => {
+  const d = cliFixture({ "0001-a.md": task("P-0001") });
+  mkdirSync(join(d, "workstreams"));
+  writeFileSync(join(d, "workstreams", "one.md"), workstream("one"));
+  writeFileSync(join(d, "workstreams", "two.md"), workstream("one"));
+  const r = runDoctor({ flowDir: d });
+  const p = r.problems.filter((m) => /duplicate workstream id/.test(m));
+  assert.equal(p.length, 1, JSON.stringify(r.problems));
+  assert.match(p[0], /\.flow\/workstreams\/one\.md/);
+  assert.match(p[0], /\.flow\/workstreams\/two\.md/);
+  assert.equal(runCli(d).code, 1);
+  cleanup(d);
+});
+
+test("workstreams: an intent naming workstream \"nope\" with no such workstream warns naming both", () => {
+  const d = wsFixture({ "real.md": workstream("real") },
+    { "i-a.md": memberIntent("i-a", '"nope"'), "i-b.md": memberIntent("i-b", '"real"') });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  const w = wsFindings(r);
+  assert.equal(w.length, 1, JSON.stringify(w));
+  assert.match(w[0], /\.flow\/intents\/i-a\.md/);
+  assert.match(w[0], /"nope"/);
+  cleanup(d);
+});
+
+test("workstreams: an intent with workstream \"\" or none at all gets no workstream finding", () => {
+  const d = wsFixture({ "real.md": workstream("real") },
+    { "i-a.md": memberIntent("i-a", '""'), "i-b.md": intent("i-b") });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(wsFindings(r), []);
+  assert.deepEqual(r.problems, []);
+  cleanup(d);
+});
+
+test("workstreams: a store holding only _TEMPLATE.md reports nothing", () => {
+  const tplPath = join(import.meta.dirname, "..", "workstreams", "_TEMPLATE.md");
+  const tpl = existsSync(tplPath) ? readFileSync(tplPath, "utf8") : workstream("", { omit: ["title"] });
+  const d = wsFixture({ "_TEMPLATE.md": tpl });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(wsFindings(r), []);
+  assert.deepEqual(r.problems, []);
+  assert.equal(workstreamFindings(join(d, "workstreams")).count, 0, "the template is not a workstream");
+  cleanup(d);
+});
+
+test("workstreamFindings: an absent directory returns no findings and a null id set", () => {
+  const r = workstreamFindings(join(tmpdir(), "flow-0150-no-such-dir"), [{ rel: "x", workstream: "y" }]);
+  assert.deepEqual(r, { problems: [], warnings: [], count: 0, ids: null });
 });

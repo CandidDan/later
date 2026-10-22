@@ -31,6 +31,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { idFromTitle } from "./parse-task-id.mjs";
+import { yamlScalar } from "./flow-doctor.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -231,7 +232,7 @@ function parseTask(text) {
   const head = text.slice(3, end);
   const get = (k) => {
     const m = head.match(new RegExp(`^${k}:\\s*(.*)$`, "m"));
-    return m ? m[1].split("#")[0].trim().replace(/^"(.*)"$/, "$1") : "";
+    return m ? yamlScalar(m[1]) : "";   // flow-0131: a quoted `#` is data, not a comment
   };
   const id = get("id");
   if (!id) return null;

@@ -30,7 +30,7 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 // flow-0111: the same list parser flow-doctor uses. Both YAML list forms, so block-form
 // `touches` (what every real task file uses) is not silently read as empty.
-import { parseListField } from "./flow-doctor.mjs";
+import { parseListField, yamlScalar } from "./flow-doctor.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -61,7 +61,7 @@ export function parseTask(text) {
   const head = text.slice(3, end);
   const get = (k) => {
     const m = head.match(new RegExp(`^${k}:\\s*(.*)$`, "m"));
-    return m ? m[1].split("#")[0].trim().replace(/^"(.*)"$/, "$1") : "";
+    return m ? yamlScalar(m[1]) : "";   // flow-0131: a quoted `#` is data, not a comment
   };
   // flow-0111: this used to be an inline-array-only regex, which read every block-form
   // `touches:` as [] and made the overlap filter below inert — the queue runner dispatched

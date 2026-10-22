@@ -59,3 +59,7 @@ couldn't express.
 - Don't add a backend or persistence layer; `apply-board-edits.mjs` is the persistence story.
 - Don't let the board write task files directly — only apply-board-edits.mjs writes frontmatter.
 - Don't redesign the board on a data refresh; only swap the `TASKS` array.
+
+## This repo's additions
+
+If `LOCAL.md` exists beside this file, read it; it extends and overrides this skill for this repo.

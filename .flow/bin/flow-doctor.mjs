@@ -17,7 +17,8 @@
 //   below) · a ready task whose body doesn't meet the readiness bar, or whose `serves` doesn't
 //   resolve against VISION.md (see below) · an intent file with malformed frontmatter, a missing
 //   required field, or a duplicate id (see "intent store" below) · a ready task whose `intent`
-//   names no intent file (see "tasks derive from intents" below).
+//   names no intent file (see "tasks derive from intents" below) · two workstream files declaring
+//   one id (see "workstream store" below).
 // WARNINGS (exit 0): ready task with owner set · blocked task with an empty `blocked_by` (a
 //   nudge, never a failure — see below) · ready task with empty touches (concurrency
 //   relies on it) · live tasks with overlapping touches (they can't run in parallel — sequence
@@ -33,7 +34,9 @@
 //   intent declares (all of them warnings — see "intent store" below) · a ready task created
 //   on or after `intents.required_from` with no `intent` and a non-maintenance `serves`, a
 //   dangling `intent` on a non-ready task, an `intent` naming a superseded intent, or a store
-//   with `intents.required_from` unset (see "tasks derive from intents" below).
+//   with `intents.required_from` unset (see "tasks derive from intents" below) · a workstream
+//   with malformed frontmatter, a missing `id`/`title`/`created`, or an `id` unlike its filename,
+//   and an intent whose `workstream` names no workstream (see "workstream store" below).
 // NOTES (exit 0): a check that was skipped because its precondition wasn't met (e.g. not run
 //   inside a git work tree, so the uncommitted-task guard can't read `git status`).
 //
@@ -152,9 +155,10 @@ const ROOT_IGNORE = new Set([
 // unreadable escape hatch must not be able to fail a gate all by itself.
 const IGNORE_GLOB_CHARS = /[*?[\]{}!]/;
 
-// Strip a trailing `# comment`, whitespace and one layer of quotes from one scalar entry.
+// Strip a trailing `# comment`, whitespace and one layer of quotes from one scalar entry — the
+// quote-aware reader, so a quoted `#` survives (flow-0131).
 function unquoteEntry(v) {
-  return v.split("#")[0].trim().replace(/^["'](.*)["']$/, "$1");
+  return yamlScalar(v);
 }
 
 /**
@@ -174,7 +178,7 @@ export function parseSourceRootsIgnore(configPath) {
   const lines = readFileSync(configPath, "utf8").split("\n");
   const i = lines.findIndex((l) => /^source_roots_ignore:/.test(l));
   if (i === -1) return [];
-  const inline = lines[i].replace(/^source_roots_ignore:\s*/, "").split("#")[0].trim();
+  const inline = stripYamlComment(lines[i].replace(/^source_roots_ignore:\s*/, "")).trim();
   if (inline.startsWith("[")) {
     const body = inline.replace(/^\[/, "").replace(/\]\s*$/, "").trim();
     return body === "" ? [] : body.split(",").map(unquoteEntry);   // `[]` is an empty list, not one empty entry
@@ -617,7 +621,7 @@ export function evidenceShape(head) {
   const lines = String(head).split("\n");
   const i = lines.findIndex((l) => /^\s*evidence:/.test(l));
   if (i === -1) return "absent";
-  const inline = lines[i].replace(/^\s*evidence:\s*/, "").split("#")[0].trim();
+  const inline = stripYamlComment(lines[i].replace(/^\s*evidence:\s*/, "")).trim();
   if (inline.startsWith("[")) {
     if (!inline.endsWith("]")) return "not-a-list";
     const inner = inline.slice(1, -1).trim();
@@ -630,7 +634,7 @@ export function evidenceShape(head) {
     if (t === "" || t.startsWith("#")) continue;
     const m = t.match(/^-\s*(.*)$/);
     if (!m) break;                                     // dedent to the next key → list done
-    entries.push(m[1].split("#")[0]);
+    entries.push(stripYamlComment(m[1]));
   }
   // `evidence:` with nothing beneath it is YAML null, which is the empty case, not a broken one.
   return entries.length === 0 || entries.every(isScalarStringEntry) ? "list" : "not-a-list";
@@ -643,6 +647,7 @@ function parseIntent(text) {
   const out = {
     evidence: evidenceShape(fm.head),
     supersedes: get("supersedes"),
+    workstream: get("workstream"),
     servesList: parseListField(fm.head, "serves"),
   };
   for (const k of INTENT_REQUIRED) out[k] = get(k);
@@ -720,7 +725,74 @@ export function intentFindings(intentsDir, { goals = null } = {}) {
   for (const { intent } of parsed) {
     if (intent.id && !intents.has(intent.id)) intents.set(intent.id, intent.status ?? "");
   }
-  return { problems, warnings, count: parsed.length, intents };
+  // Every non-empty `workstream:` an intent declares, for workstreamFindings. Empty or absent is
+  // dropped here, so it can never become a finding downstream (ADR-0009 §7).
+  const workstreamRefs = parsed
+    .map(({ rel, intent }) => ({ rel, workstream: (intent.workstream ?? "").trim() }))
+    .filter((r) => r.workstream);
+  return { problems, warnings, count: parsed.length, intents, workstreamRefs };
+}
+
+// ── workstream store (flow-0150, ADR-0009 §9) ──
+// `.flow/workstreams/*.md` groups intents; an intent joins one by naming its id in `workstream:`.
+// This is the FACT half of ADR-0009 §9 — shape, uniqueness, and whether a reference resolves —
+// and nothing here reads a word of prose. Every finding is a WARNING except a duplicate id, a
+// PROBLEM exactly as a duplicate intent id is: two files claiming one id is a fact, and it cannot
+// redden a repo that was passing because no repo had workstreams before this check.
+//
+//   · No `.flow/workstreams/` → NO finding at all, not even the one repo-level nudge the intent
+//     store gets. The layer is optional (ADR-0009 §7): a repo without it is complete, not behind.
+//     That includes an intent naming a workstream while the store is absent — the layer is off.
+//   · Malformed frontmatter or a missing `id` / `title` / `created` → WARNING naming the file and
+//     the field. Softer than intents on purpose: a half-written workstream must not stop a gate.
+//   · `id` differing from the filename → WARNING. Unlike intents, it is checked here, because the
+//     id is the word an intent cites, and the filename is where a reader goes looking for it.
+//   · An intent's `workstream:` naming an id no workstream declares → WARNING naming both. Empty
+//     or absent → nothing, ever.
+//   · `_TEMPLATE.md` is skipped, as it is for tasks and intents.
+// Not here: `serves`, `status` and dependency warnings — judgement-adjacent, and a later task.
+export const WORKSTREAM_REQUIRED = ["id", "title", "created"];
+
+// Validate `<flowDir>/workstreams/` and resolve intents' `workstream:` against it. `refs` is
+// intentFindings' `workstreamRefs`: `{ rel, workstream }` per intent that names one.
+export function workstreamFindings(workstreamsDir, refs = []) {
+  const problems = [], warnings = [];
+  if (!existsSync(workstreamsDir)) return { problems, warnings, count: 0, ids: null };
+  const seen = new Map();
+  let count = 0;
+  for (const name of readdirSync(workstreamsDir).sort()) {
+    if (!name.endsWith(".md") || name === "_TEMPLATE.md") continue;
+    count++;
+    const rel = `.flow/workstreams/${name}`;
+    const fm = splitFrontmatter(readFileSync(join(workstreamsDir, name), "utf8"));
+    if (!fm) {
+      warnings.push(`${rel}: malformed frontmatter — no closing \`---\`, so none of its fields ` +
+        "can be read; a warning, not a failure, while the workstream layer is optional");
+      continue;
+    }
+    const get = scalarReader(fm.head);
+    const ws = Object.fromEntries(WORKSTREAM_REQUIRED.map((k) => [k, get(k)]));
+    for (const k of WORKSTREAM_REQUIRED.filter((f) => !ws[f])) {
+      warnings.push(`${rel}: missing required field ${k} — a workstream declares ` +
+        `${WORKSTREAM_REQUIRED.join(", ")}`);
+    }
+    if (!ws.id) continue;
+    const stem = name.slice(0, -".md".length);
+    if (ws.id !== stem) {
+      warnings.push(`${rel}: id "${ws.id}" differs from its filename "${stem}" — an intent cites ` +
+        "the id, and a reader looks for it by filename, so the two must be the same word");
+    }
+    const first = seen.get(ws.id);
+    if (first) problems.push(`duplicate workstream id ${ws.id} — declared in both ${first} and ${rel}`);
+    else seen.set(ws.id, rel);
+  }
+  for (const { rel, workstream } of refs) {
+    if (!seen.has(workstream)) {
+      warnings.push(`${rel}: workstream "${workstream}", which no workstream in .flow/workstreams/ ` +
+        "declares — membership lives on the intent, so a dangling id puts it in no workstream at all");
+    }
+  }
+  return { problems, warnings, count, ids: new Set(seen.keys()) };
 }
 
 // ── tasks derive from intents (flow-0074, ADR-0007 slice 2) ─────────────────────────────────
@@ -1206,6 +1278,10 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
     const d = taskIntentFindings(tasks, f.intents, parseIntentsRequiredFrom(configPath));
     problems.push(...d.problems);
     warnings.push(...d.warnings);
+    // Workstream store: optional, so an absent one is no finding at all — see its block above.
+    const w = workstreamFindings(join(flowDir, "workstreams"), f.workstreamRefs ?? []);
+    problems.push(...w.problems);
+    warnings.push(...w.warnings);
   }
 
   // Version drift: Flow infra is authored in canonical and repos adopt it, so a repo can fall

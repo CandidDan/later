@@ -20,6 +20,15 @@ genuinely done. Two paths deliberately add a touchpoint when reality demands it:
 decision that isn't yours to make). Those aren't failures of the model; they're the model
 refusing to guess. Everything else runs unattended.
 
+**Workstreams, where a repo has them (ADR-0009).** A workstream is a grouping of intents that
+serves VISION.md goals, carries a purpose, and has an end. It is one file in `.flow/workstreams/`,
+on the code plane like an intent, and **merging its PR is its approval**. Membership lives on the
+intent — its `workstream:` field names the workstream — never as a list on the workstream, so
+there is one source of truth. **Tasks never name a workstream**; they name the intent they derive
+from. Its `status` (`active | done | retired`) is set by hand, because finished or abandoned is a
+human call; **progress is derived** by `flow-state` and never stored. A repo with no
+`.flow/workstreams/` is valid, and an intent with an empty `workstream:` is never a finding.
+
 **Creating a task (orchestrator).** A Cowork/orchestrator session does **not** auto-discover
 this repo's local skills, so asking it to "create a task" will not trigger `task-writer` on its
 own. To write a new task, **read `.claude/skills/task-writer/SKILL.md` and follow it** — that is
@@ -89,6 +98,12 @@ issues (from anywhere, with whatever context exists at the time); the orchestrat
 into `ready` tasks, linking the origin in the task's `issue` field. You never pick up work
 directly from an issue — if it isn't a `ready` task in `.flow/tasks/`, it isn't yours to do.
 
+**Task-state commits change nothing deployable.** A repo may skip deploys for them **only** through
+`.flow/bin/only-flow-changed.mjs` (or an equivalent that keeps its contract: exit 0 skips, exit 1
+builds, diff from the last deployed commit, never exit 0 on an error). Any doubt builds. Hand-written
+skip commands in a host dashboard are discouraged: they live outside git and drift. Wiring the hook
+is the adopting repo's, not Flow's; the recipe is in the helper's header.
+
 ## Status lifecycle
 
 A task's `status` field moves in one direction only:
@@ -120,17 +135,42 @@ ready  →  in_progress  →  in_review  →  done
   **`blocked_by`**: the list of things the block is waiting on, each entry a task id in this repo
   (`"PROJ-0007"`) or a PR url. `blocked_reason` is the sentence a person reads; `blocked_by` is the
   same fact in a shape a machine can act on, and it never replaces the sentence. This matters
-  because `blocked` is the only status with no automatic way out — every other transition is owned
-  by a workflow, while a blocked task sits there until someone *remembers* that the PR it waited on
-  merged. If the block genuinely isn't mechanical (you are waiting on a phone call), say so in
-  `blocked_reason` using the words "not machine-checkable" and flow-doctor stops asking. Clear
-  `blocked_by` when the block clears: flow-doctor reports a populated `blocked_by` on a live
-  non-blocked task as stale data. On a `done` task it stays, as the record of what the task waited
-  on.
+  because `blocked_by` is what lets a block end on its own: **`flow-unblock`** releases a blocked
+  task back to `ready` once **every** entry resolves — a task id that is `done` on `main`, a PR
+  url that merged (one closed unmerged never counts) — clearing `blocked_reason` and `blocked_by`
+  as it goes, then starts the next worker. A block with no machine-readable entry still needs a
+  human: an empty `blocked_by` is never released. If the block genuinely isn't mechanical (you are
+  waiting on a phone call), say so in `blocked_reason` using the words "not machine-checkable" and
+  flow-doctor stops asking. Clear `blocked_by` when you lift a block by hand: flow-doctor reports a
+  populated `blocked_by` on a live non-blocked task as stale data. On a `done` task it stays, as
+  the record of what the task waited on.
 
 You hand-write exactly **two** transitions: the claim (it must stay an atomic first-push-wins
 commit — see Concurrency) and `blocked` (a judgment call). Every PR-event transition is owned
 by workflows committing to `main`.
+
+### Which model builds a task
+
+A task names the model that builds it, in its own frontmatter: `model` (`haiku` | `sonnet` |
+`opus` | `fable`), `effort` (`low` | `medium` | `high` | `max`) and `model_reason`, one line,
+required whenever either is set. **Unset is the default: `sonnet` / `medium`.** The orchestrator
+departs from it deliberately, by this rubric:
+
+| Tier / effort | For |
+|---|---|
+| `fable` / `high`–`max` | the hardest judgement: planning a large rebuild, a messy brief, debugging that went in circles. **Never Fable for security-review-style work.** |
+| `opus` / `high` | risky or ambiguous: money, auth, concurrency, CI workflows and Flow infra, cross-cutting changes, open design decisions |
+| `sonnet` / `medium` (default) | well-specified: precise criteria, small `touches`, no design decisions, an existing pattern to follow |
+| `haiku` / `low` | trivial, fully mechanical |
+
+`.flow/bin/task-model.mjs` is the one table from tier to model ID; a value outside the lists, or
+either field without `model_reason`, fails the run rather than building on a guess.
+
+**A failed attempt moves the task up a tier** (`haiku → sonnet → opus → fable`), as a commit to
+the task file on `main`: a queue-runner run that ends without a PR, and a PR closed unmerged, both
+escalate it mechanically. At `fable` the task gets a `decision` ask recommending a split instead.
+**And you escalate yourself:** if you judge the task beyond you on the model you are running, do
+not guess — set it `blocked` with a `decision` ask carrying `Recommend: re-run on <tier>`.
 
 ## Concurrency — how parallel sessions don't collide
 

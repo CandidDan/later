@@ -149,3 +149,7 @@ Too little:
 - Dropped articles and verbs ("fixed, pushed, PR up").
 - Unexplained jargon, task ids or internal names the reader hasn't seen.
 - Arrow chains (`a → b → c`) standing in for a sentence that explains why.
+
+## This repo's additions
+
+If `LOCAL.md` exists beside this file, read it; it extends and overrides this skill for this repo.

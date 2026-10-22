@@ -20,5 +20,7 @@ jobs:
       contents: read
       pull-requests: write
     uses: CandidDan/flow/.github/workflows/_flow-open-pr.yml@v3
+    with:
+      runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
     secrets:
       FLOW_PAT: ${{ secrets.FLOW_PAT }}

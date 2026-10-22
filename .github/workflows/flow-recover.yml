@@ -30,6 +30,7 @@ jobs:
       pull-requests: write
     uses: CandidDan/flow/.github/workflows/_flow-recover.yml@v3
     with:
+      runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
       threshold_minutes: ${{ inputs.threshold_minutes }}
     secrets:
       FLOW_PAT: ${{ secrets.FLOW_PAT }}
