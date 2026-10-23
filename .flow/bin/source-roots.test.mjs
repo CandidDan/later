@@ -890,3 +890,46 @@ test("without FLOW_CI the helper keeps its old behaviour — a repo on an older 
     rmSync(a, { recursive: true, force: true });
   }
 });
+
+// ── flow-0131: a quoted `#` is data, not a comment ─────────────────────────────────────
+
+test("flow-0131: source-roots reads a quoted \"x #1\" whole", () => {
+  const root = repo(`source_roots:\n  - path: "x #1"\n    check: 'echo "#1"' # a comment\n`);
+  const { roots } = parseSourceRoots(configOf(root));
+  assert.equal(roots[0].path, "x #1");
+  assert.equal(roots[0].check, 'echo "#1"');
+  cleanup(root);
+});
+
+test("flow-0131: source-roots still drops a trailing unquoted # comment", () => {
+  const root = repo(`source_roots:\n  - path: app/ # the app\n    check: npm run lint # lints\n`);
+  const { roots } = parseSourceRoots(configOf(root));
+  assert.equal(roots[0].path, "app/");
+  assert.equal(roots[0].check, "npm run lint");
+  cleanup(root);
+});
+
+// source-roots.mjs carries a COPY of flow-doctor's scalar reader (it must stay a leaf that
+// flow-doctor imports optionally — see the comment on `stripYamlComment` there). One table, both
+// copies, so they cannot drift without this failing.
+test("flow-0131: source-roots' yamlScalar copy agrees with flow-doctor's on every case", async () => {
+  const { yamlScalar } = await import("./source-roots.mjs");
+  const doctor = await import("./flow-doctor.mjs");
+  const cases = [
+    `"x #1"`, `'x #1'`, `x #1`, `x # c`, `"x" # c`, `'it''s #1' # c`, `"a \\"#\\" b" # c`,
+    `don't # c`, `#all comment`, `plain`, `  padded  # c`, `"#"`, `x#y`, `""`, `''`, ``,
+  ];
+  for (const c of cases) assert.equal(yamlScalar(c), doctor.yamlScalar(c), `diverged on ${JSON.stringify(c)}`);
+});
+
+// Acceptance: no reader in the shipped helpers splits on `#` any more.
+test("flow-0131: no project-template helper reads a value with split(\"#\")", async () => {
+  const { readdirSync } = await import("node:fs");
+  const { dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const bin = dirname(fileURLToPath(import.meta.url));
+  const offenders = readdirSync(bin)
+    .filter((f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs"))
+    .filter((f) => /split\(\s*["']#["']\s*\)/.test(readFileSync(join(bin, f), "utf8")));
+  assert.deepEqual(offenders, [], "a split on the first `#` truncates any quoted value carrying one");
+});

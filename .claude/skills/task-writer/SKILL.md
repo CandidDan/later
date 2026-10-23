@@ -103,6 +103,25 @@ Then ask the same question one altitude up: *could that fresh session say, from 
 which goal the work serves?* If the answer needs anything you happen to know and didn't write
 down, the anchor is in your head rather than in the store — and it dies with the session.
 
+## Choosing the model (every task)
+A task's `model` and `effort` decide what builds it. **The default is `sonnet` / `medium`** —
+leave both unset for well-specified work. Every task that departs from the default sets `model`,
+`effort` **and** `model_reason` (one line saying why); the queue runner fails a task that sets
+either without a reason, or names a value outside the lists.
+
+| Tier / effort | Use it for |
+|---|---|
+| `fable` / `high`–`max` | the hardest judgement: planning a large rebuild, a messy brief, debugging that went in circles. **Never Fable for security-review-style work.** |
+| `opus` / `high` | risky or ambiguous: money, auth, concurrency, CI workflows and Flow infra, cross-cutting changes, open design decisions |
+| `sonnet` / `medium` (default) | well-specified: precise criteria, small `touches`, no design decisions, following an existing pattern |
+| `haiku` / `low` | trivial, fully mechanical |
+
+You do not have to be right first time. A queue-runner run that ends without a PR, or a PR closed
+unmerged, moves the task up a tier on its own (`haiku → sonnet → opus → fable`); at `fable` it
+gets a `decision` ask recommending a split. And a worker that judges a task beyond it does not
+guess — it sets the task `blocked` with a `decision` ask carrying `Recommend: re-run on <tier>`.
+Answer that ask by raising `model` (with a new `model_reason`) and returning the task to `ready`.
+
 ## Pre-flight (run before you save a batch)
 These are the misses that *read* fine but bounce a task downstream — they're mechanical, so check
 them mechanically rather than trusting a plausible-sounding narrative:
@@ -164,3 +183,7 @@ writing the problem in the first place.
 
 After writing or changing tasks, regenerate the board with the **board-builder** skill so the
 human's view reflects the new state.
+
+## This repo's additions
+
+If `LOCAL.md` exists beside this file, read it; it extends and overrides this skill for this repo.

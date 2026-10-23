@@ -85,3 +85,7 @@ than under-reporting.
   prompt were ignored.
 - Don't judge correctness, test coverage, or scope-vs-`touches`. That is the per-PR gate's
   territory, already enforced there. Compass audits *direction*, never *correctness*.
+
+## This repo's additions
+
+If `LOCAL.md` exists beside this file, read it; it extends and overrides this skill for this repo.

@@ -11,7 +11,10 @@
 // the diff is reviewable in git. There is no clipboard step and no backend.
 //
 // It is also reused by the flow-done and flow-status workflows, which own the PR-event
-// transitions (open -> in_review with branch/pr, close-unmerged -> ready, merge -> done).
+// transitions (open -> in_review with branch/pr, close-unmerged -> ready, merge -> done), and
+// by flow-unblock (flow-0041), which releases a blocked task whose every `blocked_by` entry has
+// resolved: `blocked_reason: ""` and `blocked_by: []` CLEAR those two fields, and nothing else
+// is accepted for them — this writer never authors a block, it only lifts one.
 //
 // CLI usage:
 //   node .flow/bin/apply-board-edits.mjs                 # reads .flow/board-edits.json
@@ -57,8 +60,31 @@ function replaceField(block, key, value) {
 
 const STRING_FIELDS = ["owner", "branch", "pr"];   // quoted-string frontmatter fields we may patch
 
-// Apply a list of {id, status?, priority?, owner?, branch?, pr?} updates to the task files
-// in tasksDir. Returns { applied, problems[], warnings[] }. Only writes the matched task files.
+// Fields an update may only CLEAR, each with the one value that clears it (flow-0041). A task
+// leaving `blocked` must not keep the prose and the dependency list of a block that no longer
+// applies — flow-doctor reports a populated `blocked_by` on a live non-blocked task as stale data.
+// Clear-only on purpose: `blocked` is a judgement a worker or a human writes, never a board edit.
+export const CLEARABLE_FIELDS = { blocked_reason: '""', blocked_by: "[]" };
+
+// Replace a field's WHOLE value with `value`: its own line, plus any continuation lines under it
+// — a block list (`blocked_by:` then `  - "x"`, or `- "x"` at column 0, both valid YAML) or an
+// indented multi-line scalar. replaceField rewrites one line only, which is right for the scalar
+// fields above and would leave a block list's items dangling under the cleared key here. An
+// ABSENT field is left absent: it is already empty, and adding a key would change the file for
+// nothing.
+function clearField(block, key, value) {
+  const lines = block.split("\n");
+  const i = lines.findIndex((l) => new RegExp(`^${key}:`).test(l));
+  if (i === -1) return block;
+  let j = i + 1;
+  while (j < lines.length && /^(\s+\S|-\s)/.test(lines[j])) j++;
+  lines.splice(i, j - i, `${key}: ${value}`);
+  return lines.join("\n");
+}
+
+// Apply a list of {id, status?, priority?, owner?, branch?, pr?, blocked_reason?, blocked_by?}
+// updates to the task files in tasksDir. Returns { applied, problems[], warnings[] }. Only
+// writes the matched task files.
 // A missing task file is a WARNING, not a problem (live-validation finding, 2026-06-05): the
 // flow-status/flow-done workflows legitimately fire on branches whose id has no task file —
 // that must no-op green, not fail the run. Malformed input stays a problem.
@@ -92,6 +118,9 @@ export function applyEdits({ tasksDir, updates }) {
     const badString = STRING_FIELDS.find(k =>
       u[k] !== undefined && (typeof u[k] !== "string" || /["\n]/.test(u[k])));
     if (badString) { problems.push(`${u.id}: ${badString} must be a plain string (no quotes/newlines)`); continue; }
+    const badClear = Object.keys(CLEARABLE_FIELDS).find(k =>
+      u[k] !== undefined && !(k === "blocked_by" ? Array.isArray(u[k]) && u[k].length === 0 : u[k] === ""));
+    if (badClear) { problems.push(`${u.id}: ${badClear} may only be cleared (${CLEARABLE_FIELDS[badClear]})`); continue; }
 
     const src = readFileSync(file, "utf8");
     const end = src.indexOf("\n---", 3);              // close of the leading frontmatter block
@@ -103,6 +132,9 @@ export function applyEdits({ tasksDir, updates }) {
     if (u.priority !== undefined) head = replaceField(head, "priority", String(u.priority));
     for (const k of STRING_FIELDS) {
       if (u[k] !== undefined) head = replaceField(head, k, `"${u[k]}"`);
+    }
+    for (const [k, empty] of Object.entries(CLEARABLE_FIELDS)) {
+      if (u[k] !== undefined) head = clearField(head, k, empty);
     }
 
     const next = head + body;

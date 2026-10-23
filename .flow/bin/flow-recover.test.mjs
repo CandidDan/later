@@ -626,3 +626,31 @@ test("criterion 8: the changelog fragment exists and says no caller action is ne
   assert.ok(text, "flow-0104's changelog entry must exist, as a fragment or in CHANGELOG.md");
   assert.match(text, /no caller action/i, "an adopting repo has to be told it need do nothing");
 });
+
+// ── flow-0131: a quoted `#` is data, not a comment ─────────────────────────────────────
+//
+// The sweep's frontmatter reader used to cut every scalar at its first `#`; a branch or id
+// carrying one was read truncated. It now uses flow-doctor's quote-aware `yamlScalar`.
+
+function readOne(frontmatter) {
+  const dir = mkdtempSync(join(tmpdir(), "flow-recover-0131-"));
+  try {
+    writeFileSync(join(dir, "0131-x.md"), `---\n${frontmatter}\n---\nbody\n`);
+    return readTasks(dir)[0];
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("flow-0131: flow-recover reads a quoted \"x #1\" whole", () => {
+  const t = readOne('id: "x #1"\nstatus: "in_progress"\nbranch: \'flow/x #1\'');
+  assert.equal(t.id, "x #1");
+  assert.equal(t.branch, "flow/x #1");
+});
+
+test("flow-0131: flow-recover still drops a trailing unquoted # comment", () => {
+  const t = readOne("id: CAN-1 # c\nstatus: in_progress # claimed\nstarted: 2026-06-18T00:00:00Z # utc");
+  assert.equal(t.id, "CAN-1");
+  assert.equal(t.status, "in_progress");
+  assert.equal(t.started, "2026-06-18T00:00:00Z");
+});

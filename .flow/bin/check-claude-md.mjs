@@ -55,7 +55,7 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveRepoRoot } from "./source-roots.mjs";
+import { resolveRepoRoot, yamlScalar } from "./source-roots.mjs";
 
 // Claude Code follows imports to a maximum depth of 5 hops. The root `CLAUDE.md` is hop 0, a file
 // it imports is hop 1, and an import that would land at hop 6 is NOT loaded by Claude Code — so
@@ -232,7 +232,7 @@ export function parseCeiling(configPath) {
   for (const line of lines) {
     const m = new RegExp(`^${CEILING_KEY}:\\s*(.*)$`).exec(line);
     if (!m) continue;
-    const raw = m[1].split("#")[0].trim().replace(/^["'](.*)["']$/, "$1");
+    const raw = yamlScalar(m[1]);
     const value = Number(raw);
     if (!raw || !Number.isFinite(value) || value <= 0) {
       return {

@@ -122,3 +122,65 @@ test("an unchanged update is a no-op (idempotent)", () => {
   assert.deepEqual(problems, []);
   rmSync(dir, { recursive: true, force: true });
 });
+
+// ── flow-0041: releasing a blocked task clears blocked_reason and blocked_by, and only them ──
+
+const blockedTask = (id, blockedBy) =>
+  `---\nid: "${id}"\ntitle: "x"\nstatus: "blocked"\npriority: 2\nowner: "w-1"\n` +
+  `blocked_reason: "waits on PROJ-0001 (its \\"merge\\")"\n${blockedBy}\n` +
+  `touches: ["src/**"]\nnotes:\n  - "kept"\n---\n\n## Context\nbody\n`;
+const RELEASE = { status: "ready", blocked_reason: "", blocked_by: [] };
+
+test("a released task ends ready with blocked_reason and blocked_by empty, and no other field changed", () => {
+  for (const blockedBy of ['blocked_by: ["PROJ-0001"]',
+                           'blocked_by:\n  - "PROJ-0001"\n  - "https://github.com/o/r/pull/3"',
+                           'blocked_by:\n- "PROJ-0001"']) {
+    const before = blockedTask("PROJ-0002", blockedBy);
+    const dir = fixture({ "0002-b.md": before });
+    const { applied, problems } = applyEdits({ tasksDir: dir, updates: [{ id: "PROJ-0002", ...RELEASE }] });
+    assert.equal(applied, 1);
+    assert.deepEqual(problems, []);
+    const out = readFileSync(join(dir, "0002-b.md"), "utf8");
+    // The whole file, compared against the input with exactly the three fields swapped: any
+    // other line that moved — a dangling list item, a lost note, a touched owner — fails here.
+    const expected = before
+      .replace('status: "blocked"', 'status: "ready"')
+      .replace(/^blocked_reason: .*$/m, 'blocked_reason: ""')
+      .replace(blockedBy, "blocked_by: []");
+    assert.equal(out, expected, `for ${JSON.stringify(blockedBy)}`);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("clearing leaves an absent blocked_reason/blocked_by absent rather than adding the key", () => {
+  const dir = fixture({ "0001-a.md": task("PROJ-0001", { status: "blocked" }) });
+  applyEdits({ tasksDir: dir, updates: [{ id: "PROJ-0001", ...RELEASE }] });
+  const out = readFileSync(join(dir, "0001-a.md"), "utf8");
+  assert.equal(out, task("PROJ-0001", { status: "ready" }));
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("blocked_reason and blocked_by may only be cleared — a value is a problem and writes nothing", () => {
+  for (const bad of [{ blocked_reason: "new prose" }, { blocked_by: ["PROJ-0009"] },
+                     { blocked_by: "" }, { blocked_reason: [] }]) {
+    const before = blockedTask("PROJ-0002", 'blocked_by: ["PROJ-0001"]');
+    const dir = fixture({ "0002-b.md": before });
+    const { applied, problems } = applyEdits({ tasksDir: dir, updates: [{ id: "PROJ-0002", status: "ready", ...bad }] });
+    assert.equal(applied, 0, JSON.stringify(bad));
+    assert.match(problems[0], /may only be cleared/);
+    assert.equal(readFileSync(join(dir, "0002-b.md"), "utf8"), before);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("existing callers are unchanged: a status/owner edit leaves blocked_reason and blocked_by alone", () => {
+  // flow-recover writes through this module; an update that does not name the clearable fields
+  // must patch exactly what it did before flow-0041.
+  const before = blockedTask("PROJ-0002", 'blocked_by:\n  - "PROJ-0001"');
+  const dir = fixture({ "0002-b.md": before });
+  applyEdits({ tasksDir: dir, updates: [{ id: "PROJ-0002", status: "ready", owner: "", branch: "", pr: "" }] });
+  const out = readFileSync(join(dir, "0002-b.md"), "utf8");
+  assert.match(out, /^blocked_reason: "waits on PROJ-0001/m);
+  assert.match(out, /^blocked_by:\n  - "PROJ-0001"$/m);
+  rmSync(dir, { recursive: true, force: true });
+});

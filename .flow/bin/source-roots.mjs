@@ -110,10 +110,47 @@ export function primaryChecks(commands = {}) {
 // The parser (moved here from flow-doctor — behaviour for `path`/`check` unchanged)
 // ─────────────────────────────────────────────────────────────────────────────────────────
 
-// Strip a trailing `# comment`, surrounding whitespace and one layer of quotes.
-function unquote(v) {
-  return v.split("#")[0].trim().replace(/^["'](.*)["']$/, "$1");
+// A YAML scalar as written on one line: strip a trailing `# comment` ONLY outside quotes (YAML
+// needs whitespace before the `#`), then drop the surrounding quotes and unescape them.
+//
+// WHY A COPY of flow-doctor's `stripYamlComment` / `yamlScalar` and not an import (flow-0131).
+// flow-doctor loads this file through an OPTIONAL dynamic import so a repo mid-sync — flow-doctor
+// present, this file not yet — keeps its store checks. A static import of flow-doctor from here
+// would close that loop into a cycle through flow-doctor's top-level await, and this file is the
+// leaf the gate jobs run with nothing else guaranteed. So the logic is copied, and
+// `source-roots.test.mjs` runs both copies over one table so they cannot drift silently.
+// Exported for check-claude-md.mjs, whose only sibling dependency is this file.
+function stripYamlComment(s) {
+  let q = null;
+  let atScalarStart = true;                          // a quote opens a scalar only where one can start
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) {
+      if (c === "\\" && q === '"') { i++; continue; }
+      if (c === q) {
+        if (q === "'" && s[i + 1] === "'") { i++; continue; } // '' is an escaped quote
+        q = null;
+      }
+      continue;
+    }
+    if ((c === '"' || c === "'") && atScalarStart) { q = c; atScalarStart = false; continue; }
+    if (c === "#" && (i === 0 || /\s/.test(s[i - 1]))) return s.slice(0, i);
+    if (c === "[" || c === ",") { atScalarStart = true; continue; }
+    if (!/\s/.test(c)) atScalarStart = false;
+  }
+  return s;
 }
+
+export function yamlScalar(raw) {
+  const v = stripYamlComment(raw).trim();
+  const dq = v.match(/^"((?:[^"\\]|\\.)*)"$/);
+  if (dq) return dq[1].replace(/\\(["\\])/g, "$1");
+  const sq = v.match(/^'((?:[^']|'')*)'$/);
+  if (sq) return sq[1].replace(/''/g, "'");
+  return v;
+}
+
+const unquote = yamlScalar;
 
 // `key: value` on an already-trimmed line, with the optional leading list dash split off.
 const KEY_RE = /^([A-Za-z_][A-Za-z0-9_-]*):\s*(.+)$/;

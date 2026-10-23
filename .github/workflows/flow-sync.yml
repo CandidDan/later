@@ -57,6 +57,7 @@ jobs:
       # REQUIRED SETUP note at the top of this file).
     uses: CandidDan/flow/.github/workflows/_flow-sync.yml@v3
     with:
+      runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
       canonical_ref: ${{ inputs.canonical_ref }}
     secrets:
       FLOW_PAT: ${{ secrets.FLOW_PAT }}

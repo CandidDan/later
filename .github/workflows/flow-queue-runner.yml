@@ -99,6 +99,7 @@ jobs:
       actions: read
     uses: CandidDan/flow/.github/workflows/_flow-queue-runner.yml@v3
     with:
+      runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
       task_id: ${{ inputs.task_id }}
     # Named, not `inherit` — see the SECRETS note in this file's header for what each one buys
     # and what the worker cannot do without FLOW_PAT.

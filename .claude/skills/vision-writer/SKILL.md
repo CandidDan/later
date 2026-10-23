@@ -81,6 +81,13 @@ is the thing that isn't. Every rule here exists so a reader a year from now can 
 - Confirm each change with the human in their own words before writing it. An amendment inferred
   from a conversation about a task is drift with better manners.
 
+**A workstream no goal covers is case (b) of the three-way test** — the vision is missing a goal.
+Do not stretch an existing goal to fit it, and do not leave the workstream's `serves` empty
+to avoid the question. Add the new `G<n>` goal and its change-log row, naming the source of the
+work, **in the same PR as the workstream file**: merging that PR approves both, and that is one
+decision, not two (ADR-0009 §3). Feedback-driven change is the normal way a goal gets added; the
+change log is how a stakeholder tells that the plan moved because someone asked, not because it drifted.
+
 ## Output — always a branch and a PR
 
 `VISION.md` lives on the code plane, not the store plane, precisely so the PR machinery reviews it.
@@ -107,3 +114,7 @@ destroys that distinction for every future audit, not just this one.
 
 After `VISION.md` lands, run `node .flow/bin/flow-doctor.mjs`: it reports any `ready` task whose
 `serves` no longer resolves, and any goal heading it could not read.
+
+## This repo's additions
+
+If `LOCAL.md` exists beside this file, read it; it extends and overrides this skill for this repo.

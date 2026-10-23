@@ -1,0 +1,36 @@
+name: flow-unblock
+
+# Thin caller — the blocked-task release sweep (flow-0041) lives in canonical (CandidDan/flow) as a
+# reusable workflow, adopted here by reference. See docs/flow-reusable-workflows.md in the flow repo.
+#
+# Releases every `blocked` task whose `blocked_by` entries have ALL resolved (a task `done` on
+# main, a PR merged) back to `ready`, then dispatches flow-queue-runner.yml with no task_id when
+# there is ready work, no runner active, and FLOW_QUEUE_RUNNER is not `paused`. No model in the
+# loop. A block with no machine-readable `blocked_by` entry is never released — only a human may
+# lift it.
+#
+# Three triggers, one job: flow-done completing (fast), hourly (the backstop), and on demand.
+# NOT gated on FLOW_AI: a repo worked entirely by humans still has blocks whose dependencies land.
+# No secrets — the reusable uses GITHUB_TOKEN only. If your queue runner's workflow file is named
+# differently, pass it with `with: queue_runner_workflow: <file>.yml`.
+
+on:
+  workflow_run:
+    workflows: [flow-done]
+    types: [completed]
+  schedule:
+    - cron: "17 * * * *"       # hourly; off the top of the hour, where scheduled runs queue
+  workflow_dispatch:
+
+concurrency:
+  group: flow-unblock
+  cancel-in-progress: false
+
+jobs:
+  flow-unblock:
+    permissions:
+      contents: write          # the release commit to main
+      actions: write           # dispatch the queue runner, list its runs
+    uses: CandidDan/flow/.github/workflows/_flow-unblock.yml@v3
+    with:
+      runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
