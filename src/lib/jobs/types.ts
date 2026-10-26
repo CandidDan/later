@@ -7,7 +7,8 @@ export type CaptureJobType =
   | "source_resolution"
   | "segment_resolution"
   | "media_download"
-  | "email_enrichment";
+  | "email_enrichment"
+  | "article_extraction";
 
 export interface CaptureJob {
   id: string;
@@ -115,4 +116,32 @@ export interface SegmentResolutionJobStore extends SourceResolutionJobStore {
     analysisId: string,
     captureId: string,
   ): Promise<StoredSourceAnalysis | undefined>;
+}
+
+export type ArticleExtractionStatus = "full" | "partial" | "unsupported";
+
+/**
+ * What one extraction attempt publishes. Paragraphs travel only with `full`; every other status
+ * carries its closed-list reason instead. The database computes the content digest itself.
+ */
+export interface ArticleExtractionRecordInput {
+  captureId: string;
+  status: ArticleExtractionStatus;
+  reason: string | null;
+  sourceUrl: string | null;
+  title: string | null;
+  byline: string | null;
+  siteName: string | null;
+  language: string | null;
+  paragraphs: string[] | null;
+  wordCount: number | null;
+  extractorVersion: string;
+}
+
+export interface ArticleExtractionJobStore extends SegmentResolutionJobStore {
+  finishArticleExtractionAttempt(
+    job: CaptureJob,
+    record: ArticleExtractionRecordInput | null,
+    errorCode?: string,
+  ): Promise<{ extractionId: string | null } | undefined>;
 }

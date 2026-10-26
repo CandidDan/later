@@ -1,10 +1,11 @@
 import type {
   AnalysisRecordInput,
+  ArticleExtractionJobStore,
+  ArticleExtractionRecordInput,
   CaptureJob,
   CaptureJobType,
   CaptureRecord,
   JsonValue,
-  SegmentResolutionJobStore,
   StoredIntentAnalysis,
   StoredSourceAnalysis,
 } from "./types";
@@ -64,18 +65,21 @@ function jsonObject(value: unknown): Record<string, JsonValue> {
 }
 
 /** Claims and finalization are database transactions, fenced by the claimed attempt. */
-export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): SegmentResolutionJobStore {
+export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): ArticleExtractionJobStore {
   return {
     async claimNextJob(jobType: CaptureJobType): Promise<CaptureJob | undefined> {
       const rpcName = jobType === "source_resolution"
         ? "claim_source_resolution_job"
         : jobType === "segment_resolution"
           ? "claim_segment_resolution_job"
-          : "claim_intent_job";
+          : jobType === "article_extraction"
+            ? "claim_article_extraction_job"
+            : "claim_intent_job";
       const claimed = rowsFrom(
         await client.rpc(
           rpcName,
           jobType === "source_resolution" || jobType === "segment_resolution"
+            || jobType === "article_extraction"
             ? {}
             : { p_job_type: jobType },
         ),
@@ -246,6 +250,24 @@ export function createSupabaseCaptureJobStore(client: CaptureJobTableClient): Se
         ...(resolutionJobId === null ? {} : { resolutionJobId }),
         ...(segmentJobId === null ? {} : { segmentJobId }),
       };
+    },
+
+    async finishArticleExtractionAttempt(
+      job: CaptureJob,
+      record: ArticleExtractionRecordInput | null,
+      errorCode?: string,
+    ) {
+      const finished = rowsFrom(
+        await client.rpc("finish_article_extraction_attempt", {
+          p_job_id: job.id,
+          p_attempt: job.attempts,
+          p_record: record,
+          p_error_code: errorCode ?? null,
+        }),
+        "finish the article extraction attempt",
+      );
+      if (finished.length === 0) return undefined;
+      return { extractionId: optionalString(finished[0], "extraction_id") };
     },
   };
 }

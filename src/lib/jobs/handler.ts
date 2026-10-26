@@ -5,6 +5,7 @@ import type { MediaOutcome } from "../assets/process";
 import type { EmailEnrichmentOutcome } from "../email/enrich";
 import type { SourceResolutionOutcome } from "../resolution/process";
 import type { SegmentResolutionOutcome } from "../resolution/segment-process";
+import type { ArticleExtractionOutcome } from "../resolution/article/process";
 
 const DEFAULT_MAX_JOBS = 10;
 
@@ -12,7 +13,12 @@ export interface ProcessJobsDependencies {
   /** The shared secret callers must present. An empty value disables the endpoint. */
   secret: string;
   processNext: () => Promise<
-    IntentProcessingOutcome | MediaOutcome | EmailEnrichmentOutcome | SourceResolutionOutcome | SegmentResolutionOutcome
+    | IntentProcessingOutcome
+    | MediaOutcome
+    | EmailEnrichmentOutcome
+    | SourceResolutionOutcome
+    | SegmentResolutionOutcome
+    | ArticleExtractionOutcome
   >;
   maxJobs?: number;
 }

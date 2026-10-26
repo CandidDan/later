@@ -6,6 +6,8 @@ import { handleProcessJobsRequest } from "@/lib/jobs/handler";
 import { createCaptureJobStore } from "@/lib/jobs/server";
 import { processNextIntentJob, type IntentProcessingOutcome } from "@/lib/processing";
 import { createIntentAnalyser } from "@/lib/processing/server";
+import type { ArticleExtractionOutcome } from "@/lib/resolution/article/process";
+import { createArticleExtractionProcessor } from "@/lib/resolution/article/server";
 import type { SourceResolutionOutcome } from "@/lib/resolution";
 import { createSourceResolutionProcessor } from "@/lib/resolution/server";
 import type { SegmentResolutionOutcome } from "@/lib/resolution/segment-process";
@@ -24,10 +26,12 @@ let mediaProcessor: ReturnType<typeof createMediaProcessor> | undefined;
 let emailProcessor: ReturnType<typeof createEmailEnrichmentProcessor> | undefined;
 let sourceProcessor: ReturnType<typeof createSourceResolutionProcessor> | undefined;
 let segmentProcessor: ReturnType<typeof createSegmentResolutionProcessor> | undefined;
+let articleProcessor: ReturnType<typeof createArticleExtractionProcessor> | undefined;
 let nextQueue = 0;
 let imageReader: ReturnType<typeof createPrivateImageReader> | undefined;
 
-type Outcome = IntentProcessingOutcome | MediaOutcome | EmailEnrichmentOutcome | SourceResolutionOutcome | SegmentResolutionOutcome;
+type Outcome = IntentProcessingOutcome | MediaOutcome | EmailEnrichmentOutcome | SourceResolutionOutcome
+  | SegmentResolutionOutcome | ArticleExtractionOutcome;
 
 async function processNext(): Promise<Outcome> {
   // Rotate the queues so none can starve the others. Credential lookups happen only after
@@ -52,6 +56,10 @@ async function processNext(): Promise<Outcome> {
     () => {
       segmentProcessor ??= createSegmentResolutionProcessor();
       return segmentProcessor();
+    },
+    () => {
+      articleProcessor ??= createArticleExtractionProcessor();
+      return articleProcessor();
     },
     async () => {
       // Inbound email is optional configuration. A deployment that has not set it up must
