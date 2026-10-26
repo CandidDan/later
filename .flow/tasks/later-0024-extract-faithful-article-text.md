@@ -31,6 +31,7 @@ labels: ["backend", "narration", "security"]
 notes:
   - "2026-10-26 (orchestrator): independent of the iOS track; can run in parallel with later-0023 and later-0025 (touches checked disjoint). later-0026 consumes the table this creates."
   - "2026-10-26 (worker): branch flow/later-0024-extract-faithful-article-text pushed. DONE: migration 20261026090000_article_extraction.sql (job type, trigger enqueue + not_an_article rows, claim/finish RPCs, exposure-gated RLS, immutable) + pgTAP (31, green via src/lib/resolution/article/database.test.ts using the revisit docker fixture); deps @mozilla/readability 0.6.0, jsdom 30.1.3, @types/jsdom pinned. NEXT: TS extractor/processor under src/lib/resolution/article/, store RPC mapping, route rotation, launch-readiness BACKGROUND_QUEUES + README."
+  - "2026-10-26 (worker): PR #51 marked ready (branch flow/later-0024-extract-faithful-article-text). All 9 criteria have proving tests; local build/lint/test/coverage green (694 tests, pgTAP 31/31 via src/lib/resolution/article/database.test.ts). Decisions: one extraction per source analysis (not per capture); failed source attempts write no row; lease-exhausted jobs record failed/extraction_failed; undecodable bytes -> extraction_failed. Scar: next dev (browser proofs) rewrites AGENTS.md - revert it, it is outside touches. NEXT: await PR checks; address kickbacks on the same branch."
 ---
 
 ## Context
