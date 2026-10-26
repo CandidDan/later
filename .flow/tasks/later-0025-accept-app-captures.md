@@ -23,6 +23,7 @@ touches:
 labels: ["backend", "capture", "security"]
 notes:
   - "2026-10-26 (orchestrator): backend half of iOS share capture; later-0034 (share extension) consumes it. Parallel-safe with later-0023 and later-0024 (touches checked disjoint)."
+  - "2026-10-26 (worker): handler src/lib/capture/app-share.ts, wiring app-share-server.ts, route src/app/api/app/captures/route.ts + route.test.ts and app-share.test.ts all pushed on flow/later-0025-accept-app-captures. Build, lint, targeted vitest green. Decision: url and text joined with a newline (WhatsApp has no joiner; the normaliser extracts urls from one string). Next: full pnpm test + coverage, then open PR and gh pr ready."
 ---
 
 ## Context
