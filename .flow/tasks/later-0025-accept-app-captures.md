@@ -1,12 +1,12 @@
 ---
 id: "later-0025"
 title: "Accept authenticated captures from the iPhone app"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "later"
-owner: ""
+owner: "claude-worker-later-0025"
 created: "2026-10-26"
-started: ""
+started: "2026-10-26T05:30:17Z"
 branch: ""
 pr: ""
 issue: ""
