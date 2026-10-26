@@ -1,6 +1,6 @@
 # Vision — Later
 
-Later is for people who encounter content they genuinely want to consume but lack the time or attention for it at that moment. It should preserve that interest so it can return usefully and become actual reading, watching or listening rather than another forgotten save. Later begins as a solo tool for its creator, while future use by individual customers and teams is deliberately preserved as a product possibility, not built into the initial experiment. Preserving multi-user use means maintaining clear ownership and avoiding permanently single-user assumptions; it does not justify building accounts, collaboration or team workflows yet.
+Later turns things people save into things they actually read, watch or listen to. It preserves the interest that prompted a save and makes that content useful when time and attention become available. **V1 is a working daily-use product for its creator, not a research-only experiment:** a clean iPhone experience for saving, returning and listening, including hands-free playback through Siri while running. Future use by individual customers and teams remains deliberately preserved, not built into v1; maintain clear ownership without adding collaboration or team workflows.
 
 ## Goals
 
@@ -16,30 +16,41 @@ Saved interests lead to genuine return behaviour rather than becoming an inert a
 
 Later increases the likelihood that relevant saved content is actually used, read, watched or heard. Opening an item or saving it again is not the outcome. *Progress looks like:* resurfaced material is started and meaningfully consumed.
 
+### G4 — Make listening fit everyday life
+
+Playback is a first-class part of Later. The user can choose something from their saves that fits the time available, listen to faithful article narration, and start listening hands-free through Siri. The iPhone experience must support real use while running: background and offline playback, headphone controls and resuming where the user stopped. *Progress looks like:* the user saves content, starts a suitable listen without managing a backlog, and continues with the phone locked or connectivity unavailable.
+
 ## Non-goals
 
 ### NG1 — No passive graveyard
 
 Later must not become a visible, accumulating pile of saved links. Storage without useful return and consumption contradicts the product's purpose and reproduces the failure mode it exists to solve.
 
+### NG3 — No unproven AI substitutes
+
+Later is neither an AI recommendation feed nor a generic summariser. Mediocre recommendations or summaries would dilute the user's expressed interest and damage trust. Faithful narration changes the delivery format, not the source's meaning; generated summaries or substitutes still require separate evidence and a reviewed vision amendment.
+
+## Product boundary
+
+Research supports the product; it is not a prerequisite the user must complete before everyday consumption. Preserve the existing unaided-recall safeguards in the separate research experience, including exposure enforcement when content is revealed or made available offline. Playback must honestly distinguish source content from narration and unavailable content; time-fit selection must not invent material or silently truncate it to fill a slot. A working v1 means an installable app and verified end-to-end saving and listening, not only designs, research screens or passing backend tests.
+
+## Retired
+
 ### NG2 — No podcast player
 
 Later connects people back to relevant original content; it does not compete with the services designed to play or present that content. Building playback would distract from understanding, preserving and returning the user's interest.
 
-### NG3 — No unproven AI substitutes
-
-The initial product is neither an AI recommendation feed nor a generic summariser. Mediocre recommendations or summaries would dilute the user's expressed interest and damage trust. Either capability requires separate evidence that its quality is genuinely additive and a reviewed vision amendment before it becomes a goal.
+*Retired 2026-10-26:* the creator explicitly requested playback in an actual v1 product, including Siri use while running. G4 replaces the playback prohibition; this does not by itself commit v1 to a general podcast catalogue or subscription platform.
 
 ### NG4 — No silent departure from the v0 experiment
 
 The first six weeks remain bounded by the approved **Later — Capture & Intent v0** specification. Material departure is evidence of drift unless new evidence first produces an explicit, reviewed change to this vision.
 
-## Retired
-
-*None yet.*
+*Retired 2026-10-26:* the creator requested a daily-use v1 rather than continuing the research-only phase. This reviewed amendment records that change; existing research evidence and safeguards remain intact.
 
 ## Change log
 
 | Date | Change | Why |
 |---|---|---|
-| 2026-09-02 | Initial vision. | Flow adoption required a human-owned drift anchor before the first product tasks are written. |
+| 2026-09-02 | Initial vision. | Flow adoption required a human-owned drift anchor before the first product tasks were written. |
+| 2026-10-26 | Reframed the purpose around a daily-use iPhone v1; added G4; retired NG2 and NG4; clarified NG3 and the research boundary. G1–G3 retain their ids and meaning. | The creator requested a clean product for daily use, explicitly included playback and Siri while running, and confirmed that the vision must reflect an actual v1 product. |
