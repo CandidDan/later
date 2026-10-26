@@ -1,12 +1,12 @@
 ---
 id: "later-0023"
 title: "Create the native iPhone app foundation, gated in hosted macOS and Linux CI"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "later"
-owner: ""
+owner: "claude-worker-later-0023"
 created: "2026-10-26"
-started: ""
+started: "2026-10-26T03:35:15Z"
 branch: ""
 pr: ""
 issue: ""
