@@ -76,6 +76,15 @@ test("done is a legal status (lifecycle end is reachable)", () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("flow-0108: cancelled is a legal status for a board edit", () => {
+  assert.ok(STATUSES.has("cancelled"));
+  const dir = fixture({ "0001-a.md": task("PROJ-0001", { status: "blocked" }) });
+  const { applied } = applyEdits({ tasksDir: dir, updates: [{ id: "PROJ-0001", status: "cancelled" }] });
+  assert.equal(applied, 1);
+  assert.match(readFileSync(join(dir, "0001-a.md"), "utf8"), /^status: "cancelled"$/m);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("patches owner, branch and pr (the flow-status fields)", () => {
   const dir = fixture({ "0001-a.md": "---\nid: \"PROJ-0001\"\ntitle: \"x\"\nstatus: \"in_progress\"\npriority: 3\nowner: \"sess-1\"\nbranch: \"\"\npr: \"\"\n---\nbody\n" });
   const { applied, problems } = applyEdits({ tasksDir: dir, updates: [

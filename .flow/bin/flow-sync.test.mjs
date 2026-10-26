@@ -613,3 +613,118 @@ test("prContent omits the kept section entirely when nothing was kept", () => {
     local: "1.3.0", canonical: "2.0.0", files: "M\t.flow/VERSION", kept: "",
   }).body, /Kept: customised callers/);
 });
+
+// ── pinCallers / pin-callers (flow-0158) ──
+//
+// The copy loop delivers the template's callers, which are pinned `@v3`. Synced at `v3.4.0`, a
+// canary used to run 3.4.0's callers against whatever `v3` still pointed at, and every Flow workflow
+// failed at startup on an input the old reusables did not declare. `pinCallers` moves the pin to the
+// ref the sync adopted from. Fixture owner is `OWNER/flow` for the same reason
+// `sync-customised-caller.test.mjs` gives: the match is owner-agnostic, so nothing here needs the
+// real one.
+
+import { pinCallers, assertPinRef } from "./flow-sync.mjs";
+
+const SYNC_CLI = join(BIN, "flow-sync.mjs");
+
+const PIN_CALLER = [
+  "name: flow-gates",
+  "on:",
+  "  pull_request:",
+  "",
+  "jobs:",
+  "  gate:",
+  "    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v3",
+  "    with:",
+  "      runner: ${{ vars.FLOW_RUNNER }}",
+  "  doctor:",
+  "    uses: some-release-org/flow-release/.github/workflows/_flow-doctor.yml@v3",
+  "",
+].join("\n");
+
+test("flow-0158: pinCallers rewrites @v3 to @v3.4.0 on every reusable uses: and nothing else", () => {
+  const out = pinCallers(PIN_CALLER, "v3.4.0");
+  const before = PIN_CALLER.split("\n");
+  const after = out.split("\n");
+  assert.equal(after.length, before.length, "no line is added or removed");
+  assert.equal(after[6], "    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v3.4.0");
+  assert.equal(after[10], "    uses: some-release-org/flow-release/.github/workflows/_flow-doctor.yml@v3.4.0",
+    "any owner/repo: flow-0030 repins the fleet at a release repo, and a hard-coded owner would stop pinning there");
+  for (let i = 0; i < before.length; i++) {
+    if (i === 6 || i === 10) continue;
+    assert.equal(after[i], before[i], `line ${i + 1} must be byte-identical`);
+  }
+});
+
+test("flow-0158: pinCallers leaves a commented-out uses:, a sha-pinned action and a trailing comment alone", () => {
+  const text = [
+    "jobs:",
+    "  # uses: OWNER/flow/.github/workflows/_flow-sync.yml@v3",
+    "  gate:",
+    "    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v3   # the alias moves after the canary",
+    "  own:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.1",
+    "      - uses: ./.github/workflows/_flow-local.yml",
+    "",
+  ].join("\n");
+  const after = pinCallers(text, "v3.4.0").split("\n");
+  const before = text.split("\n");
+  assert.equal(after[1], before[1], "a commented-out caller is not a live pin and is not rewritten");
+  assert.equal(after[7], before[7], "a non-Flow action keeps its sha pin and its comment");
+  assert.equal(after[8], before[8], "a local reusable carries no ref and is not touched");
+  assert.equal(after[3],
+    "    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v3.4.0   # the alias moves after the canary",
+    "the ref moves and the trailing comment, with its spacing, is kept");
+});
+
+test("flow-0158: pinCallers keeps quoting and CRLF endings, and is idempotent", () => {
+  const text = "jobs:\r\n  gate:\r\n    uses: 'OWNER/flow/.github/workflows/_flow-gates.yaml@v3'\r\n";
+  const once = pinCallers(text, "v3.4.0");
+  assert.equal(once, "jobs:\r\n  gate:\r\n    uses: 'OWNER/flow/.github/workflows/_flow-gates.yaml@v3.4.0'\r\n");
+  assert.equal(pinCallers(once, "v3.4.0"), once, "pinning twice to one ref is pinning once");
+  assert.equal(pinCallers(PIN_CALLER, "v3"), PIN_CALLER, "pinning to the ref already there changes nothing");
+});
+
+test("flow-0158: pinCallers and assertPinRef reject an empty ref, a leading '-', and whitespace", () => {
+  for (const bad of ["", "-v3", "--upload-pack=x", "v3 4", "v3\t", "v3\n", undefined, null]) {
+    assert.throws(() => pinCallers(PIN_CALLER, bad), /pin-callers: the ref/, `ref ${JSON.stringify(bad)}`);
+    assert.throws(() => assertPinRef(bad), /pin-callers: the ref/);
+  }
+  assert.equal(assertPinRef("v3.4.0"), "v3.4.0");
+});
+
+test("flow-0158: pin-callers rewrites the file in place, and a refused ref exits non-zero leaving it unchanged", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "flow-0158-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "flow-gates.yml");
+  writeFileSync(file, PIN_CALLER);
+
+  for (const bad of ["", "-v3", "v3 .4"]) {
+    assert.throws(
+      () => execFileSync("node", [SYNC_CLI, "pin-callers", "--file", file, "--ref", bad],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+      (err) => {
+        assert.notEqual(err.status, 0, `ref ${JSON.stringify(bad)} must be refused`);
+        assert.match(String(err.stderr), /pin-callers: the ref/);
+        return true;
+      });
+    assert.equal(readFileSync(file, "utf8"), PIN_CALLER, `the file is untouched after refusing ${JSON.stringify(bad)}`);
+  }
+
+  // A missing flag is a usage error, not a silent no-op.
+  assert.throws(
+    () => execFileSync("node", [SYNC_CLI, "pin-callers", "--file", file],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+    (err) => { assert.equal(err.status, 2); assert.match(String(err.stderr), /usage: flow-sync\.mjs pin-callers/); return true; });
+
+  execFileSync("node", [SYNC_CLI, "pin-callers", "--file", file, "--ref", "v3.4.0"], { encoding: "utf8" });
+  assert.equal(readFileSync(file, "utf8"), pinCallers(PIN_CALLER, "v3.4.0"));
+
+  // An unreadable file stops the run rather than reading as "nothing to pin".
+  assert.throws(
+    () => execFileSync("node", [SYNC_CLI, "pin-callers", "--file", join(dir, "nope.yml"), "--ref", "v3.4.0"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+    (err) => { assert.notEqual(err.status, 0); assert.match(String(err.stderr), /ENOENT/); return true; });
+});

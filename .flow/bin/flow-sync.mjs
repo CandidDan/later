@@ -12,6 +12,7 @@
 //        --head-canonical-sha abc123 --canonical-sha def456                 # -> "refresh"
 //   node .flow/bin/flow-sync.mjs extra-jobs --local .github/workflows/flow-gates.yml \
 //        --incoming "$CANON_TPL/.github/workflows/flow-gates.yml"       # -> "edge-parse\nmcp-build"
+//   node .flow/bin/flow-sync.mjs pin-callers --file .github/workflows/flow-gates.yml --ref v3.4.0
 //   node .flow/bin/flow-sync.mjs pr-title --local 1.0.0 --canonical 1.2.0
 //   node .flow/bin/flow-sync.mjs pr-body  --local 1.0.0 --canonical 1.2.0 --files "$CHANGED" \
 //        --kept "$KEPT"
@@ -33,7 +34,7 @@
 import { compareVersions } from "./flow-doctor.mjs";
 
 
-import { readFileSync as __readFileSync, realpathSync as __realpathSync } from "node:fs";
+import { readFileSync as __readFileSync, realpathSync as __realpathSync, writeFileSync as __writeFileSync } from "node:fs";
 import { fileURLToPath as __fileURLToPath } from "node:url";
 
 // --- main-module detection (do not simplify back to a string compare) -------------------
@@ -245,6 +246,47 @@ export function parseKept(kept = []) {
     .filter((entry) => entry.path);
 }
 
+// ── pinning the copied callers to the adopted ref (flow-0158) ───────────────────────────
+//
+// The template's callers are pinned `@v3`, and the copy loop used to deliver them verbatim. So
+// after any sync an adopter ran `@v3`'s reusables whatever ref it had adopted `.flow/bin/` and the
+// protocol from. Found in the 3.4.0 rollout: the canary was synced at `v3.4.0`, got 3.4.0's
+// callers passing the new `runner` input (flow-0149), and ran them against what `v3` still pointed
+// at — 3.3.2, whose reusables do not declare `runner`. Every Flow workflow failed at startup, no
+// Flow check reported, and the PR merged on the host's checks alone. The canary was testing NEW
+// callers against OLD reusables, a combination no repo runs once the release ships.
+//
+// So the loop rewrites the ref of each reusable `uses:` in a caller it copies to the ref the sync
+// adopted from. Byte-preserving by construction: only the ref substring of a matching line moves.
+
+// A LIVE `uses:` naming a Flow reusable: any owner/repo (flow-0030 repins at a release repo), a
+// `/.github/workflows/_flow-*.yml` path, an `@ref`, then nothing but whitespace or a comment. The
+// anchor at `^[ \t]*` (optionally a `- ` list item) is what keeps a commented-out caller out, the
+// same rule the `Resolve canonical ref` step's pin scan applies. A local `./.github/…` reference
+// carries no `@` and never matches. `\r?` keeps a CRLF line's ending where it was.
+const REUSABLE_USES_LINE =
+  /^([ \t]*(?:-[ \t]+)?uses:[ \t]*(["']?)[^\s"'#@]+\/\.github\/workflows\/_flow-[^\s"'#@/]+\.ya?ml@)([^\s"'#]+)(\2(?:[ \t]+#.*|[ \t]*)\r?)$/;
+
+/** Throws unless `ref` is a usable pin: non-empty, no leading `-`, no whitespace. */
+export function assertPinRef(ref) {
+  if (typeof ref !== "string" || ref === "") throw new Error("pin-callers: the ref is empty");
+  if (ref.startsWith("-")) throw new Error(`pin-callers: the ref '${ref}' starts with '-'`);
+  if (/\s/.test(ref)) throw new Error(`pin-callers: the ref ${JSON.stringify(ref)} contains whitespace`);
+  return ref;
+}
+
+/**
+ * `text` with every live Flow-reusable `uses:` pinned `@<ref>`. Every other line — and every other
+ * byte of a rewritten one, its indentation, quoting and trailing comment included — is unchanged.
+ * Idempotent: pinning twice to the same ref is pinning once.
+ */
+export function pinCallers(text, ref) {
+  assertPinRef(ref);
+  return String(text).split("\n")
+    .map((line) => line.replace(REUSABLE_USES_LINE, (_, head, _q, _old, tail) => head + ref + tail))
+    .join("\n");
+}
+
 // The version stamp is reported on its own line above the file list, so it is deliberately NOT
 // counted as an "infra file" when deciding whether anything differed. Without that exclusion the
 // one true stamp-only case is unreachable: `_flow-sync.yml` rewrites this file on every sync, so
@@ -387,6 +429,27 @@ if (__isMain) {
       if (extra.length) process.stdout.write(extra.join("\n") + "\n");
       break;
     }
+    case "pin-callers": {
+      // Rewrites --file in place. The ref is validated BEFORE the file is read, so a refused ref
+      // exits non-zero with the file untouched; an unreadable file throws, and `set -e` stops the
+      // sync rather than shipping a caller pinned to the wrong release.
+      const file = arg(rest, "file");
+      const ref = arg(rest, "ref");
+      if (!file || ref === undefined) {
+        console.error("usage: flow-sync.mjs pin-callers --file FILE --ref REF");
+        process.exit(2);
+      }
+      try {
+        assertPinRef(ref);
+      } catch (err) {
+        console.error(err.message);
+        process.exit(2);
+      }
+      const before = __readFileSync(file, "utf8");
+      const after = pinCallers(before, ref);
+      if (after !== before) __writeFileSync(file, after);
+      break;
+    }
     case "pr-title":
       process.stdout.write(prContent({ local, canonical }).title + "\n");
       break;
@@ -403,7 +466,7 @@ if (__isMain) {
       break;
     }
     default:
-      console.error("usage: flow-sync.mjs <decide|branch|existing|extra-jobs|pr-title|pr-body> --local X --canonical Y [--files ...] [--kept ...]\n" +
+      console.error("usage: flow-sync.mjs <decide|branch|existing|extra-jobs|pin-callers|pr-title|pr-body> --local X --canonical Y [--files ...] [--kept ...]\n" +
         "       flow-sync.mjs extra-jobs --local <workflow file> --incoming <workflow file>\n" +
         "       flow-sync.mjs existing --branch-exists <yes|no> --open-pr <number|''> --head-canonical-sha <sha|''> --canonical-sha <sha>");
       process.exit(2);

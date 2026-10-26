@@ -31,7 +31,7 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { parseAsks } from "./asks.mjs";
-import { parseListField } from "./flow-doctor.mjs";
+import { parseListField, parseVisionGoals, MAINTENANCE_SERVES } from "./flow-doctor.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -99,6 +99,9 @@ export function parseTask(text) {
     pr: get("pr"),
     blocked_reason: get("blocked_reason"),
     issue: get("issue"),
+    // flow-0113. The intent this task derives from, empty if none. An intent's status is computed
+    // by scanning tasks for this field; the intent itself never lists its tasks.
+    intent: get("intent"),
     // flow-0119. Only the asks that PARSE: a malformed one is a flow-doctor failure on `main`,
     // and this resolver is read-only — it reports the store, it does not grade it. `[]` for every
     // task written before the field, so a consumer never has to test for its absence.
@@ -165,7 +168,9 @@ export function resolveState(task, pr) {
         resolved = store; detail = "no PR"; break;
     }
   }
-  return { id: task.id, title: task.title, store, resolved, detail, disagreement, asks: task.asks ?? [] };
+  return { id: task.id, title: task.title, store, resolved, detail, disagreement, asks: task.asks ?? [],
+    // flow-0113. The PR URL the resolution rests on, else whatever the task file records.
+    pr: (pr && pr.url) || task.pr || "", intent: task.intent ?? "" };
 }
 
 // Pure: pick the PR belonging to a task from a list of PRs. Prefers an explicit `pr:` URL
@@ -190,6 +195,155 @@ export function reconcile(tasks, prs) {
     .map((t) => resolveState(t, pickPrForTask(t, prs)));
 }
 
+// ── intents and workstreams (flow-0113) ────────────────────────────────────
+// The intent layer's status is DERIVED, never stored: an intent has no `tasks` list and no
+// progress field, and a task names its intent. So the answer to "is this outcome done?" is a scan
+// of tasks, and this is the one place that scan is written. inflight imports `buildIntentReport`
+// and runs it on files it fetched, rather than restating the rule, so the rule cannot fork.
+//
+// Everything in this block is pure: raw file text in, plain data out. No git, gh or filesystem.
+
+// Bumped on ANY breaking change to the JSON shape below. Consumers across repos pinned to
+// different Flow versions branch on it.
+export const REPORT_SCHEMA = 1;
+export const INTENT_STATUSES = ["not_started", "in_progress", "blocked", "done", "superseded"];
+
+// Frontmatter and body of one file. Tolerant like parseTask: null when there is no frontmatter.
+function splitFile(text) {
+  if (!text || !text.startsWith("---")) return null;
+  const end = text.indexOf("\n---", 3);
+  if (end === -1) return null;
+  const nl = text.indexOf("\n", end + 1);
+  return { head: text.slice(3, end), body: nl === -1 ? "" : text.slice(nl + 1) };
+}
+const fmGet = (head, k) => {
+  const m = head.match(new RegExp(`^${k}:\\s*(.*)$`, "m"));
+  return m ? scalarValue(m[1]) : "";
+};
+
+// `## Heading` -> text, keyed by a snake_case slug of the heading. Fenced code is not scanned.
+function bodySections(body) {
+  const out = {};
+  let key = null, fence = false, buf = [];
+  const flush = () => { if (key !== null) out[key] = buf.join("\n").trim(); buf = []; };
+  for (const line of body.split("\n")) {
+    if (/^\s*```/.test(line)) fence = !fence;
+    const h = !fence && line.match(/^##\s+(.+?)\s*$/);
+    if (h) { flush(); key = h[1].toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""); continue; }
+    if (key !== null) buf.push(line);
+  }
+  flush();
+  return out;
+}
+
+// A line beginning `[assumption]` (a list item counts) is detail the writer supplied that the human
+// never said. `## Problem` holds only the human's words, so it is not scanned.
+function assumptionLines(sections) {
+  const out = [];
+  for (const [k, text] of Object.entries(sections)) {
+    if (k === "problem") continue;
+    for (const line of text.split("\n")) {
+      const t = line.trim().replace(/^[-*]\s+/, "");
+      if (t.startsWith("[assumption]")) out.push(t);
+    }
+  }
+  return out;
+}
+
+function resolveServes(ids, goals) {
+  return ids.map((id) => {
+    if (id === MAINTENANCE_SERVES) return { id, title: null, resolved: true, retired: false };
+    const g = goals && goals.get(id.toUpperCase());
+    return g ? { id, title: g.title, resolved: true, retired: !!g.retired } : { id, title: null, resolved: false, retired: false };
+  });
+}
+
+// Pure: an intent's status from its own `status` and the tasks that name it. `tasks` carry the
+// PR-reconciled `status` (or `resolved`) where the caller has it. A `cancelled` task is dead work
+// and counts for nothing either way: an intent whose only task was cancelled has not started.
+export function deriveIntentStatus(intent, tasks) {
+  if (intent && intent.status === "superseded") return "superseded";
+  const st = (tasks || []).map((t) => t.resolved ?? t.status).filter((s) => s !== "cancelled");
+  if (!st.length) return "not_started";
+  if (st.includes("blocked")) return "blocked";
+  if (st.every((s) => s === "done")) return "done";
+  return "in_progress";
+}
+
+const firstLine = (s) => String(s || "").split("\n")[0].trim();
+const byCreatedThenId = (a, b) => String(a.created).localeCompare(String(b.created)) || String(a.id).localeCompare(String(b.id));
+const mdEntries = (files) => Object.entries(files || {})
+  .filter(([p]) => p.endsWith(".md") && !p.endsWith("_TEMPLATE.md"));
+
+// Pure: the whole report from raw file text keyed by path. `prs` is optional (the `gh` list); with
+// none, task status is the store's. Returns exactly the fields `--json` prints for the layer.
+export function buildIntentReport({ workstreams = {}, intents = {}, tasks = {}, vision = "", prs = [] } = {}) {
+  const goals = vision ? parseVisionGoals(vision).goals : null;
+
+  const intentRows = [];
+  for (const [path, text] of mdEntries(intents)) {
+    const f = splitFile(text);
+    const id = f && fmGet(f.head, "id");
+    if (!id) continue;
+    intentRows.push({ path, head: f.head, body: f.body, id });
+  }
+  if (!intentRows.length) return { schema: REPORT_SCHEMA, intent_layer: "inactive", workstreams: [], intents: [] };
+
+  const wsRows = [];
+  for (const [, text] of mdEntries(workstreams)) {
+    const f = splitFile(text);
+    const id = f && fmGet(f.head, "id");
+    if (!id) continue;
+    const s = bodySections(f.body);
+    wsRows.push({
+      id, title: fmGet(f.head, "title"), created: fmGet(f.head, "created"),
+      status: fmGet(f.head, "status"), owner: fmGet(f.head, "owner"),
+      serves: resolveServes(parseListField(f.head, "serves"), goals),
+      purpose: s.purpose ?? "", constraints: s.constraints ?? "",
+      dependencies: s.dependencies ?? "", open_questions: s.open_questions ?? "",
+    });
+  }
+  const wsIds = new Set(wsRows.map((w) => w.id));
+
+  const parsedTasks = Object.values(tasks).map(parseTask).filter(Boolean);
+  const reasons = new Map(parsedTasks.map((t) => [t.id, t.blocked_reason]));
+  const resolvedTasks = reconcile(parsedTasks, prs);
+  const supersededBy = new Map();
+  for (const r of intentRows) {
+    const sup = fmGet(r.head, "supersedes");
+    if (sup && !supersededBy.has(sup)) supersededBy.set(sup, r.id);
+  }
+
+  const intentOut = intentRows.map((r) => {
+    const named = resolvedTasks.filter((t) => t.intent === r.id);
+    const status = deriveIntentStatus({ status: fmGet(r.head, "status") }, named);
+    const blocker = status === "blocked" ? named.find((t) => t.resolved === "blocked") : null;
+    const s = bodySections(r.body);
+    const ws = fmGet(r.head, "workstream");
+    return {
+      id: r.id, title: fmGet(r.head, "title"), created: fmGet(r.head, "created"),
+      source: fmGet(r.head, "source"),
+      workstream: ws || null, stream_resolved: !ws || wsIds.has(ws),
+      serves: resolveServes(parseListField(r.head, "serves"), goals),
+      status,
+      blocked_reason: blocker ? firstLine(reasons.get(blocker.id)) : "",
+      tasks: named.map((t) => ({ id: t.id, status: t.resolved, pr: t.pr })),
+      supersedes: fmGet(r.head, "supersedes"), superseded_by: supersededBy.get(r.id) ?? "",
+      problem: s.problem ?? "", cost_of_inaction: s.cost_of_inaction ?? "", outcome: s.outcome ?? "",
+      constraints: s.constraints ?? "", open_questions: s.open_questions ?? "",
+      assumptions: assumptionLines(s),
+    };
+  }).sort(byCreatedThenId);
+
+  const wsOut = wsRows.sort(byCreatedThenId).map((w) => {
+    const counts = Object.fromEntries(INTENT_STATUSES.map((k) => [k, 0]));
+    for (const i of intentOut) if (i.workstream === w.id) counts[i.status]++;
+    const { created, ...rest } = w;
+    return { ...rest, counts };
+  });
+  return { schema: REPORT_SCHEMA, intent_layer: "active", workstreams: wsOut, intents: intentOut };
+}
+
 // ── impure: thin shells over git + gh (stay out of the pure core above) ────
 function sh(cmd, args, opts = {}) {
   return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], ...opts });
@@ -207,32 +361,51 @@ function trySh(cmd, args, opts = {}) {
 // project whose resolver fell back to it. Two implementations of that could drift apart
 // silently, so there is one.
 export function readTasksFromOrigin(repoRoot) {
+  const git = readTextsFromOrigin(repoRoot, ".flow/tasks");
+  const tasks = [];
+  for (const text of Object.values(git.files)) {
+    const t = parseTask(text);
+    if (t) tasks.push(t);
+  }
+  if (git.fromGit) {
+    const commit = (trySh("git", ["-C", repoRoot, "log", "-1", "--format=%h %cd", "--date=short", "origin/main"]) || "").trim();
+    return { tasks, texts: git.files, source: `origin/main${commit ? ` @ ${commit}` : ""}` };
+  }
+  return { tasks, texts: git.files, source: "WORKING TREE (origin/main unreadable — may be STALE)" };
+}
+
+// Every `.md` under `dir` as { path: text }, from origin/main when it is readable and from the
+// working tree only when it is not (`fromGit: false`, the same loud fallback as tasks). A
+// directory that does not exist on origin/main is `{}`: the layer is simply absent.
+export function readTextsFromOrigin(repoRoot, dir) {
   const inGit = trySh("git", ["-C", repoRoot, "rev-parse", "--is-inside-work-tree"]);
   if (inGit && inGit.trim() === "true") {
-    const listing = trySh("git", ["-C", repoRoot, "ls-tree", "-r", "--name-only", "origin/main", ".flow/tasks"]);
+    const listing = trySh("git", ["-C", repoRoot, "ls-tree", "-r", "--name-only", "origin/main", dir]);
     if (listing !== null) {
-      const tasks = [];
+      const files = {};
       for (const path of listing.split("\n").map((s) => s.trim()).filter(Boolean)) {
         if (!path.endsWith(".md") || path.endsWith("_TEMPLATE.md")) continue;
         const text = trySh("git", ["-C", repoRoot, "show", `origin/main:${path}`]);
-        const t = parseTask(text);
-        if (t) tasks.push(t);
+        if (text !== null) files[path] = text;
       }
-      const commit = (trySh("git", ["-C", repoRoot, "log", "-1", "--format=%h %cd", "--date=short", "origin/main"]) || "").trim();
-      return { tasks, source: `origin/main${commit ? ` @ ${commit}` : ""}` };
+      return { files, fromGit: true };
     }
   }
-  // Fallback — read the working tree, but flag it as NOT authoritative.
-  const dir = join(repoRoot, ".flow", "tasks");
-  const tasks = [];
-  if (existsSync(dir)) {
-    for (const name of readdirSync(dir).sort()) {
+  const abs = join(repoRoot, dir);
+  const files = {};
+  if (existsSync(abs)) {
+    for (const name of readdirSync(abs).sort()) {
       if (!name.endsWith(".md") || name === "_TEMPLATE.md") continue;
-      const t = parseTask(readFileSync(join(dir, name), "utf8"));
-      if (t) tasks.push(t);
+      files[`${dir}/${name}`] = readFileSync(join(abs, name), "utf8");
     }
   }
-  return { tasks, source: "WORKING TREE (origin/main unreadable — may be STALE)" };
+  return { files, fromGit: false };
+}
+
+function readVision(repoRoot, fromGit) {
+  if (fromGit) return trySh("git", ["-C", repoRoot, "show", "origin/main:VISION.md"]) ?? "";
+  const p = join(repoRoot, "VISION.md");
+  return existsSync(p) ? readFileSync(p, "utf8") : "";
 }
 
 // Pull every PR via one gh call. Returns [] and a note if gh is unavailable/unauthed.
@@ -244,6 +417,29 @@ export function readPrs(repoRoot) {
   if (out === null) return { prs: [], ok: false, why: "gh not authed / no PR access" };
   try { return { prs: JSON.parse(out), ok: true }; }
   catch { return { prs: [], ok: false, why: "could not parse gh output" }; }
+}
+
+// Human-readable intents: one line per workstream with its counts, one per ungrouped intent.
+// An intent naming an undeclared workstream is ungrouped here too, flagged, so it is not lost.
+function writeIntentSummary(out, report) {
+  if (report.intent_layer !== "active") return;
+  const pad = (s, n) => (s + " ".repeat(n)).slice(0, n);
+  out.write("\nintents:\n");
+  for (const w of report.workstreams) {
+    const c = w.counts;
+    out.write(`  ${pad(w.id, 28)} [${w.status || "?"}] ${c.done} done · ${c.in_progress} in progress · ${c.blocked} blocked · ${c.not_started} not started` +
+      `${c.superseded ? ` · ${c.superseded} superseded` : ""}\n`);
+  }
+  for (const i of report.intents.filter((x) => !x.workstream || !x.stream_resolved)) {
+    out.write(`  ${pad(i.id, 28)} ${i.status}${i.stream_resolved ? "" : ` (workstream '${i.workstream}' not declared)`}\n`);
+  }
+}
+
+function writeIntent(out, i) {
+  out.write(`${i.id} — ${i.title}\nstatus: ${i.status}${i.blocked_reason ? ` (${i.blocked_reason})` : ""}\n`);
+  out.write(`workstream: ${i.workstream ?? "(none)"}${i.stream_resolved ? "" : " — not declared"}\n`);
+  out.write(i.tasks.length ? "tasks:\n" : "tasks: none name this intent\n");
+  for (const t of i.tasks) out.write(`  ${t.id}  ${t.status}  ${t.pr || "(no PR)"}\n`);
 }
 
 // ── the CLI shell, as a function ───────────────────────────────────────────
@@ -263,19 +459,32 @@ export function runStateCli({ repoRoot, argv = [], out = process.stdout } = {}) 
 
   if (doFetch) trySh("git", ["-C", repoRoot, "fetch", "origin", "main", "--quiet"]);
 
-  const { tasks, source } = readTasksFromOrigin(repoRoot);
+  const { tasks, texts, source } = readTasksFromOrigin(repoRoot);
   const { prs, ok: prOk, why: prWhy } = noPr ? { prs: [], ok: false, why: "skipped (--no-pr)" } : readPrs(repoRoot);
 
+  const fromGit = !source.startsWith("WORKING TREE");
+  const report = buildIntentReport({
+    workstreams: readTextsFromOrigin(repoRoot, ".flow/workstreams").files,
+    intents: readTextsFromOrigin(repoRoot, ".flow/intents").files,
+    tasks: texts, vision: readVision(repoRoot, fromGit), prs,
+  });
+
   let rows = reconcile(tasks, prs);
-  if (idArg) rows = rows.filter((r) => r.id.toLowerCase() === idArg.toLowerCase() || String(idNum(r.id)) === idArg.replace(/\D/g, ""));
+  const intent = idArg && report.intents.find((i) => i.id.toLowerCase() === idArg.toLowerCase());
+  if (intent) rows = [];
+  else if (idArg) rows = rows.filter((r) => r.id.toLowerCase() === idArg.toLowerCase() || String(idNum(r.id)) === idArg.replace(/\D/g, ""));
 
   if (asJson) {
-    out.write(JSON.stringify({ source, prReconciled: prOk, prNote: prOk ? undefined : prWhy, tasks: rows }, null, 2) + "\n");
+    out.write(JSON.stringify({
+      schema: report.schema, source, prReconciled: prOk, prNote: prOk ? undefined : prWhy, tasks: rows,
+      intent_layer: report.intent_layer, workstreams: report.workstreams, intents: report.intents,
+    }, null, 2) + "\n");
     return 0;
   }
 
   out.write(`state source: ${source}\n`);
   out.write(`PR reconcile: ${prOk ? `${prs.length} PRs` : `off — ${prWhy}`}\n\n`);
+  if (intent) { writeIntent(out, intent); return 0; }
   if (!rows.length) { out.write(idArg ? `No task '${idArg}' found on ${source}.\n` : "No tasks found.\n"); return 0; }
 
   const pad = (s, n) => (s + " ".repeat(n)).slice(0, n);
@@ -285,6 +494,7 @@ export function runStateCli({ repoRoot, argv = [], out = process.stdout } = {}) 
     if (r.disagreement) warns.push(`  ⚠ ${r.id}: ${r.disagreement}`);
   }
   if (warns.length) { out.write("\n" + warns.join("\n") + "\n"); }
+  if (!idArg) writeIntentSummary(out, report);
   return 0;
 }
 

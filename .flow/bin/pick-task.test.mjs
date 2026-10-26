@@ -37,6 +37,15 @@ test("only `ready` tasks are eligible — others are skipped", () => {
   assert.equal(id, "CAN-5");
 });
 
+test("flow-0108: a cancelled task is never eligible, even at the same priority as a ready one", () => {
+  const id = pickTask([
+    T("CAN-1", { priority: 2, status: "cancelled", touches: ["a/**"] }),
+    T("CAN-2", { priority: 2, status: "ready", touches: ["b/**"] }),
+  ]);
+  assert.equal(id, "CAN-2");
+  assert.equal(pickTask([T("CAN-1", { priority: 1, status: "cancelled" })]), null);
+});
+
 test("returns null when there are no ready tasks", () => {
   assert.equal(pickTask([T("CAN-1", { status: "done" }), T("CAN-2", { status: "blocked" })]), null);
   assert.equal(pickTask([]), null);
