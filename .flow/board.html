@@ -98,325 +98,43 @@
    The board never writes task files directly and never round-trips JSON through the clipboard.
    ───────────────────────────────────────────────────────────────────────────── */
 const TASKS = [
-  {
-    "id": "later-0001",
-    "title": "Normalize inbound content without losing capture context",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-later-0001-01a05aa4",
-    "pr": "https://github.com/CandidDan/later/pull/3",
-    "blocked_reason": "",
-    "labels": [
-      "capture",
-      "domain"
-    ]
-  },
-  {
-    "id": "later-0002",
-    "title": "Create the secure Supabase capture schema",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-later-0002-01a0628b",
-    "pr": "https://github.com/CandidDan/later/pull/4",
-    "blocked_reason": "",
-    "labels": [
-      "database",
-      "security"
-    ]
-  },
-  {
-    "id": "later-0003",
-    "title": "Persist captures and enqueue intent work atomically",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-later-0003-01a064e0",
-    "pr": "https://github.com/CandidDan/later/pull/5",
-    "blocked_reason": "",
-    "labels": [
-      "capture",
-      "database"
-    ]
-  },
-  {
-    "id": "later-0004",
-    "title": "Accept authenticated WhatsApp captures immediately",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-later-0004-01a064fe",
-    "pr": "https://github.com/CandidDan/later/pull/6",
-    "blocked_reason": "",
-    "labels": [
-      "capture",
-      "whatsapp",
-      "security"
-    ]
-  },
-  {
-    "id": "later-0005",
-    "title": "Analyse capture intent in Anthropic shadow mode",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "claude-code-1788419549",
-    "pr": "https://github.com/CandidDan/later/pull/7",
-    "blocked_reason": "Work is complete, pushed and gate-green on flow/later-0005-analyse-intent-in-shadow-mode, but the worker cannot open the PR: gh pr create and POST /repos/CandidDan/later/pulls both return 403 'GitHub Actions is not permitted to create or approve pull requests'. flow-open-pr holds FLOW_PAT but is push-triggered, and a push made with the Actions GITHUB_TOKEN does not trigger push workflows, so the safety net cannot fire for a flow-queue-runner worker. Needs a human to open the PR titled [later-0005] Analyse capture intent in Anthropic shadow mode (body ready to paste in Notes below), or a repo/infra fix. Issue creation is also barred for this token, so this task file is the only surface the worker could reach.",
-    "labels": [
-      "intent",
-      "anthropic",
-      "experiment"
-    ]
-  },
-  {
-    "id": "later-0006",
-    "title": "Process pending intent jobs automatically",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-01a076ff-34b2-79b1-b891-59f8f632bd0b",
-    "pr": "https://github.com/CandidDan/later/pull/8",
-    "blocked_reason": "",
-    "labels": [
-      "intent",
-      "jobs",
-      "operations"
-    ]
-  },
-  {
-    "id": "later-0007",
-    "title": "Store WhatsApp media privately and enrich intent analysis",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-01a07a71-31a3-7642-9e99-cf1cf53c6add",
-    "pr": "https://github.com/CandidDan/later/pull/9",
-    "blocked_reason": "",
-    "labels": [
-      "capture",
-      "whatsapp",
-      "media",
-      "security"
-    ]
-  },
-  {
-    "id": "later-0008",
-    "title": "Accept lossless inbound email captures",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "claude-code-later-0008",
-    "pr": "https://github.com/CandidDan/later/pull/10",
-    "blocked_reason": "",
-    "labels": [
-      "capture",
-      "email",
-      "resend",
-      "security"
-    ]
-  },
-  {
-    "id": "later-0009",
-    "title": "Evaluate captured intent without hindsight",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "claude-code-20260914T072107Z",
-    "pr": "https://github.com/CandidDan/later/pull/12",
-    "blocked_reason": "",
-    "labels": [
-      "research",
-      "evaluation",
-      "intent",
-      "security"
-    ]
-  },
-  {
-    "id": "later-0010",
-    "title": "Resolve the underlying source of a capture",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-01a0a00d-6a7d-71c2-a910-e2100d2f0b22",
-    "pr": "https://github.com/CandidDan/later/pull/13",
-    "blocked_reason": "",
-    "labels": [
-      "resolution",
-      "sources",
-      "anthropic",
-      "security"
-    ]
-  },
-  {
-    "id": "later-0011",
-    "title": "Resolve the relevant segment from available source material",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-01a0a55e-191e-7290-a889-a647e52bd32b",
-    "pr": "https://github.com/CandidDan/later/pull/15",
-    "blocked_reason": "",
-    "labels": [
-      "resolution",
-      "segments",
-      "anthropic",
-      "experiment"
-    ]
-  },
-  {
-    "id": "later-0012",
-    "title": "Prepare and validate the v0 production launch",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "01a0a876-8578-7991-8832-937d3b2a29e7",
-    "pr": "https://github.com/CandidDan/later/pull/16",
-    "blocked_reason": "",
-    "labels": [
-      "operations",
-      "launch",
-      "documentation",
-      "maintenance"
-    ]
-  },
-  {
-    "id": "later-0013",
-    "title": "Send Anthropic-compatible structured-output schemas",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-01a0d0e0-d8ac-7222-be12-4c2c529f371a",
-    "pr": "https://github.com/CandidDan/later/pull/18",
-    "blocked_reason": "",
-    "labels": [
-      "bug",
-      "anthropic",
-      "intent",
-      "production"
-    ]
-  },
-  {
-    "id": "later-0014",
-    "title": "Record safe Anthropic failure diagnostics",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "claude-worker-later-0014",
-    "pr": "https://github.com/CandidDan/later/pull/22",
-    "blocked_reason": "",
-    "labels": [
-      "observability",
-      "anthropic",
-      "intent",
-      "production"
-    ]
-  },
-  {
-    "id": "later-0015",
-    "title": "Verify the Flow v2 pull-request lifecycle",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-flow-v2-proof-20260925",
-    "pr": "https://github.com/CandidDan/later/pull/23",
-    "blocked_reason": "",
-    "labels": [
-      "maintenance",
-      "flow",
-      "proof"
-    ]
-  },
-  {
-    "id": "later-0016",
-    "title": "Use platform-aware metadata retrieval for captured links",
-    "status": "in_review",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-cloud-later-0016",
-    "pr": "https://github.com/CandidDan/later/pull/43",
-    "blocked_reason": "",
-    "labels": [
-      "resolution",
-      "metadata",
-      "youtube",
-      "instagram",
-      "security"
-    ]
-  },
-  {
-    "id": "later-0017",
-    "title": "Use magic-link authentication for the research console",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "01a05aa4-6d8d-7920-8c9e-1f2140442ba4",
-    "pr": "https://github.com/CandidDan/later/pull/27",
-    "blocked_reason": "",
-    "labels": [
-      "research",
-      "authentication",
-      "supabase",
-      "security"
-    ]
-  },
-  {
-    "id": "later-0018",
-    "title": "Provide trusted capture cards and private attachment previews",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-01a10e26-8728-79f0-a50d-23c63645783e",
-    "pr": "https://github.com/CandidDan/later/pull/31",
-    "blocked_reason": "",
-    "labels": [
-      "revisit",
-      "capture"
-    ]
-  },
-  {
-    "id": "later-0019",
-    "title": "Persist revisit choices and protect unaided recall",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-01a10ef2-903e-7303-bc73-bdd67d2065a5",
-    "pr": "https://github.com/CandidDan/later/pull/37",
-    "blocked_reason": "",
-    "labels": [
-      "revisit",
-      "capture"
-    ]
-  },
-  {
-    "id": "later-0020",
-    "title": "Add a private page for coming back to saved items",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-cloud-2be27cbbae31",
-    "pr": "https://github.com/CandidDan/later/pull/38",
-    "blocked_reason": "",
-    "labels": [
-      "revisit",
-      "capture"
-    ]
-  },
-  {
-    "id": "later-0021",
-    "title": "Render readable research results after recall",
-    "status": "done",
-    "priority": 3,
-    "project": "later",
-    "owner": "codex-cloud-6d52f881b078",
-    "pr": "https://github.com/CandidDan/later/pull/40",
-    "blocked_reason": "",
-    "labels": [
-      "revisit",
-      "research"
-    ]
-  }
+  {id:"later-0001",title:"Normalize inbound content without losing capture context",status:"done",priority:3,project:"later",owner:"codex-later-0001-01a05aa4",pr:"https://github.com/CandidDan/later/pull/3",blocked_reason:"",labels:["capture","domain"]},
+  {id:"later-0002",title:"Create the secure Supabase capture schema",status:"done",priority:3,project:"later",owner:"codex-later-0002-01a0628b",pr:"https://github.com/CandidDan/later/pull/4",blocked_reason:"",labels:["database","security"]},
+  {id:"later-0003",title:"Persist captures and enqueue intent work atomically",status:"done",priority:3,project:"later",owner:"codex-later-0003-01a064e0",pr:"https://github.com/CandidDan/later/pull/5",blocked_reason:"",labels:["capture","database"]},
+  {id:"later-0004",title:"Accept authenticated WhatsApp captures immediately",status:"done",priority:3,project:"later",owner:"codex-later-0004-01a064fe",pr:"https://github.com/CandidDan/later/pull/6",blocked_reason:"",labels:["capture","whatsapp","security"]},
+  {id:"later-0005",title:"Analyse capture intent in Anthropic shadow mode",status:"done",priority:3,project:"later",owner:"claude-code-1788419549",pr:"https://github.com/CandidDan/later/pull/7",blocked_reason:"Work is complete, pushed and gate-green on flow/later-0005-analyse-intent-in-shadow-mode, but the worker cannot open the PR: gh pr create and POST /repos/CandidDan/later/pulls both return 403 'GitHub Actions is not permitted to create or approve pull requests'. flow-open-pr holds FLOW_PAT but is push-triggered, and a push made with the Actions GITHUB_TOKEN does not trigger push workflows, so the safety net cannot fire for a flow-queue-runner worker. Needs a human to open the PR titled [later-0005] Analyse capture intent in Anthropic shadow mode (body ready to paste in Notes below), or a repo/infra fix. Issue creation is also barred for this token, so this task file is the only surface the worker could reach.",labels:["intent","anthropic","experiment"]},
+  {id:"later-0006",title:"Process pending intent jobs automatically",status:"done",priority:3,project:"later",owner:"codex-01a076ff-34b2-79b1-b891-59f8f632bd0b",pr:"https://github.com/CandidDan/later/pull/8",blocked_reason:"",labels:["intent","jobs","operations"]},
+  {id:"later-0007",title:"Store WhatsApp media privately and enrich intent analysis",status:"done",priority:3,project:"later",owner:"codex-01a07a71-31a3-7642-9e99-cf1cf53c6add",pr:"https://github.com/CandidDan/later/pull/9",blocked_reason:"",labels:["capture","whatsapp","media","security"]},
+  {id:"later-0008",title:"Accept lossless inbound email captures",status:"done",priority:3,project:"later",owner:"claude-code-later-0008",pr:"https://github.com/CandidDan/later/pull/10",blocked_reason:"",labels:["capture","email","resend","security"]},
+  {id:"later-0009",title:"Evaluate captured intent without hindsight",status:"done",priority:3,project:"later",owner:"claude-code-20260914T072107Z",pr:"https://github.com/CandidDan/later/pull/12",blocked_reason:"",labels:["research","evaluation","intent","security"]},
+  {id:"later-0010",title:"Resolve the underlying source of a capture",status:"done",priority:3,project:"later",owner:"codex-01a0a00d-6a7d-71c2-a910-e2100d2f0b22",pr:"https://github.com/CandidDan/later/pull/13",blocked_reason:"",labels:["resolution","sources","anthropic","security"]},
+  {id:"later-0011",title:"Resolve the relevant segment from available source material",status:"done",priority:3,project:"later",owner:"codex-01a0a55e-191e-7290-a889-a647e52bd32b",pr:"https://github.com/CandidDan/later/pull/15",blocked_reason:"",labels:["resolution","segments","anthropic","experiment"]},
+  {id:"later-0012",title:"Prepare and validate the v0 production launch",status:"done",priority:3,project:"later",owner:"01a0a876-8578-7991-8832-937d3b2a29e7",pr:"https://github.com/CandidDan/later/pull/16",blocked_reason:"",labels:["operations","launch","documentation","maintenance"]},
+  {id:"later-0013",title:"Send Anthropic-compatible structured-output schemas",status:"done",priority:3,project:"later",owner:"codex-01a0d0e0-d8ac-7222-be12-4c2c529f371a",pr:"https://github.com/CandidDan/later/pull/18",blocked_reason:"",labels:["bug","anthropic","intent","production"]},
+  {id:"later-0014",title:"Record safe Anthropic failure diagnostics",status:"done",priority:3,project:"later",owner:"claude-worker-later-0014",pr:"https://github.com/CandidDan/later/pull/22",blocked_reason:"",labels:["observability","anthropic","intent","production"]},
+  {id:"later-0015",title:"Verify the Flow v2 pull-request lifecycle",status:"done",priority:3,project:"later",owner:"codex-flow-v2-proof-20260925",pr:"https://github.com/CandidDan/later/pull/23",blocked_reason:"",labels:["maintenance","flow","proof"]},
+  {id:"later-0016",title:"Use platform-aware metadata retrieval for captured links",status:"done",priority:3,project:"later",owner:"codex-cloud-later-0016",pr:"https://github.com/CandidDan/later/pull/43",blocked_reason:"",labels:["resolution","metadata","youtube","instagram","security"]},
+  {id:"later-0017",title:"Use magic-link authentication for the research console",status:"done",priority:3,project:"later",owner:"01a05aa4-6d8d-7920-8c9e-1f2140442ba4",pr:"https://github.com/CandidDan/later/pull/27",blocked_reason:"",labels:["research","authentication","supabase","security"]},
+  {id:"later-0018",title:"Provide trusted capture cards and private attachment previews",status:"done",priority:3,project:"later",owner:"codex-01a10e26-8728-79f0-a50d-23c63645783e",pr:"https://github.com/CandidDan/later/pull/31",blocked_reason:"",labels:["revisit","capture"]},
+  {id:"later-0019",title:"Persist revisit choices and protect unaided recall",status:"done",priority:3,project:"later",owner:"codex-01a10ef2-903e-7303-bc73-bdd67d2065a5",pr:"https://github.com/CandidDan/later/pull/37",blocked_reason:"",labels:["revisit","capture"]},
+  {id:"later-0020",title:"Add a private page for coming back to saved items",status:"done",priority:3,project:"later",owner:"codex-cloud-2be27cbbae31",pr:"https://github.com/CandidDan/later/pull/38",blocked_reason:"",labels:["revisit","capture"]},
+  {id:"later-0021",title:"Render readable research results after recall",status:"done",priority:3,project:"later",owner:"codex-cloud-6d52f881b078",pr:"https://github.com/CandidDan/later/pull/40",blocked_reason:"",labels:["revisit","research"]},
+  {id:"later-0022",title:"Reviewer models come from canonical Flow: drop this repo's review model pins",status:"done",priority:2,project:"later",owner:"claude-session-012CTneThg94vo5drhs7QSEY",pr:"https://github.com/CandidDan/later/pull/45",blocked_reason:"",labels:[]},
+  {id:"later-0023",title:"Create the native iPhone app foundation, gated in hosted macOS and Linux CI",status:"ready",priority:1,project:"later",owner:"",pr:"",blocked_reason:"",labels:["ios","ci","foundation"]},
+  {id:"later-0024",title:"Extract faithful full article text safely, or record honestly why it cannot be narrated",status:"ready",priority:2,project:"later",owner:"",pr:"",blocked_reason:"",labels:["backend","narration","security"]},
+  {id:"later-0025",title:"Accept authenticated captures from the iPhone app",status:"ready",priority:2,project:"later",owner:"",pr:"",blocked_reason:"",labels:["backend","capture","security"]},
+  {id:"later-0026",title:"Serve the app's private library and narration text, recording exposure before release",status:"blocked",priority:2,project:"later",owner:"",pr:"",blocked_reason:"Waits for later-0024 (the article extraction table this serves) and later-0023 (which adds src/lib/app/** to the security review paths).",labels:["backend","narration","security","research-safeguard"]},
+  {id:"later-0027",title:"Sign in to Later on iPhone with a magic link and keep the session safely",status:"blocked",priority:2,project:"later",owner:"",pr:"",blocked_reason:"Waits for later-0023 (the iOS project, CI and layout this builds on).",labels:["ios","auth","security"]},
+  {id:"later-0028",title:"Plan a listen that fits 10, 15 or 30 minutes from actual ready audio, honestly",status:"blocked",priority:2,project:"later",owner:"",pr:"",blocked_reason:"Waits for later-0023 (the LaterKit package and its Linux/macOS gates).",labels:["ios","listen","logic"]},
+  {id:"later-0029",title:"Show Saved on iPhone from the private library, with Open original for anything not narratable",status:"blocked",priority:2,project:"later",owner:"",pr:"",blocked_reason:"Waits for later-0026 (library API) and later-0027 (signed-in session and API client).",labels:["ios","saved"]},
+  {id:"later-0030",title:"Prepare faithful narration audio on the iPhone for offline listening",status:"blocked",priority:2,project:"later",owner:"",pr:"",blocked_reason:"Waits for later-0029 (Saved, library models and the signed-in API client).",labels:["ios","narration","offline","research-safeguard"]},
+  {id:"later-0031",title:"Play narration in a full player that works locked, offline and with headphone controls, and resumes",status:"blocked",priority:2,project:"later",owner:"",pr:"",blocked_reason:"Waits for later-0030 (rendered narration audio and its manifest).",labels:["ios","player","offline"]},
+  {id:"later-0032",title:"Choose a 10, 15 or 30 minute listen on the Listen home",status:"blocked",priority:2,project:"later",owner:"",pr:"",blocked_reason:"Waits for later-0028 (time-fit planner) and later-0031 (player and queue).",labels:["ios","listen"]},
+  {id:"later-0033",title:"Start a Later listen hands-free with a named Siri App Shortcut, even when locked",status:"blocked",priority:2,project:"later",owner:"",pr:"",blocked_reason:"Waits for later-0032 (Listen planning) which this shortcut invokes.",labels:["ios","siri"]},
+  {id:"later-0034",title:"Save a link or text to Later from the iPhone share sheet",status:"blocked",priority:2,project:"later",owner:"",pr:"",blocked_reason:"Waits for later-0025 (capture endpoint) and later-0027 (shared Keychain session).",labels:["ios","capture","security"]},
+  {id:"later-0035",title:"Deliver signed builds to TestFlight from CI without exposing credentials",status:"blocked",priority:2,project:"later",owner:"",pr:"",blocked_reason:"Not machine-checkable: needs Dan's Apple Developer Program team and App Store Connect setup and GitHub secrets listed in the task (no worker may buy a membership or create credentials). Also needs later-0023 merged. Return to ready when the asks are answered.",labels:["ios","release","signing","security"]},
+  {id:"later-0036",title:"Release Later iOS v1 and verify saving and listening end to end on a physical iPhone",status:"blocked",priority:2,project:"later",owner:"",pr:"",blocked_reason:"Waits for the last build tasks: later-0033 (Siri), later-0034 (share extension) and later-0035 (TestFlight delivery).",labels:["release","ios","verification"]},
+  {id:"later-0037",title:"Apply the approved Later colour palette to the iPhone theme tokens",status:"blocked",priority:4,project:"later",owner:"",pr:"",blocked_reason:"Not machine-checkable: the palette is not approved. Dan rejected the cool/blue Coolors palette; Claude Design is exploring warm neutral/charcoal with restrained coral or olive/citron. Return to ready with the approved hex values written into this task.",labels:["ios","design"]},
 ];
 
 // Set to "owner/repo" (or have board-builder inject it) to light up the per-task
