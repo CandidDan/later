@@ -1,19 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CaptureJobStore } from "@/lib/jobs/types";
 
-const factories = vi.hoisted(() => ({ store: vi.fn(), analyser: vi.fn(), media: vi.fn(() => async () => ({ status: "idle" })), email: vi.fn(() => async () => ({ status: "idle" })), source: vi.fn(() => async () => ({ status: "idle" })), segment: vi.fn(() => async () => ({ status: "idle" })), reader: vi.fn() }));
+const factories = vi.hoisted(() => ({ store: vi.fn(), analyser: vi.fn(), media: vi.fn(() => async () => ({ status: "idle" })), email: vi.fn(() => async () => ({ status: "idle" })), source: vi.fn(() => async () => ({ status: "idle" })), segment: vi.fn(() => async () => ({ status: "idle" })), article: vi.fn(() => async () => ({ status: "idle" })), reader: vi.fn() }));
 vi.mock("@/lib/assets/server", () => ({ createMediaProcessor: factories.media, createPrivateImageReader: factories.reader }));
 vi.mock("@/lib/email/server", () => ({ createEmailEnrichmentProcessor: factories.email }));
 vi.mock("@/lib/jobs/server", () => ({ createCaptureJobStore: factories.store }));
 vi.mock("@/lib/processing/server", () => ({ createIntentAnalyser: factories.analyser }));
 vi.mock("@/lib/resolution/server", () => ({ createSourceResolutionProcessor: factories.source }));
 vi.mock("@/lib/resolution/segment-server", () => ({ createSegmentResolutionProcessor: factories.segment }));
+vi.mock("@/lib/resolution/article/server", () => ({ createArticleExtractionProcessor: factories.article }));
 // Resolve the application's aliases locally without changing shared test configuration.
 vi.mock("@/lib/jobs/handler", () => import("../../../../lib/jobs/handler"));
 vi.mock("@/lib/processing", () => import("../../../../lib/processing"));
 const token = "TEST-ONLY-NOT-A-CREDENTIAL";
 
-beforeEach(() => { vi.resetModules(); vi.clearAllMocks(); vi.stubEnv("JOBS_PROCESS_SECRET", token); });
+beforeEach(() => { vi.resetModules(); vi.resetAllMocks(); vi.stubEnv("JOBS_PROCESS_SECRET", token); });
 
 function request(bearer = token) {
   return new Request("https://test.invalid/api/jobs/process", { method: "POST", headers: { authorization: `Bearer ${bearer}` } });
@@ -32,6 +33,7 @@ describe("scheduled processing route", () => {
     expect(factories.email).not.toHaveBeenCalled();
     expect(factories.source).not.toHaveBeenCalled();
     expect(factories.segment).not.toHaveBeenCalled();
+    expect(factories.article).not.toHaveBeenCalled();
     expect(factories.reader).not.toHaveBeenCalled();
   });
 
@@ -127,6 +129,61 @@ describe("scheduled processing route", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ claimed: 1, succeeded: 1, failed: 0 });
     expect(processSegment).toHaveBeenCalled();
+  });
+
+  it("AC8 drains article-extraction work as an independent queue and still processes at most two jobs", async () => {
+    let pending = 5;
+    const processArticle = vi.fn(async () => {
+      if (pending === 0) return { status: "idle" as const };
+      pending -= 1;
+      return { status: "succeeded" as const, jobId: `article-job-${pending}`, captureId: "capture-article",
+        extractionId: `extraction-${pending}`, extraction: "full" as const };
+    });
+    factories.article.mockReturnValue(processArticle);
+    factories.store.mockReturnValue({ claimNextJob: async () => undefined, loadCapture: async () => undefined,
+      finishAttempt: async () => undefined });
+    factories.analyser.mockReturnValue(async () => { throw new Error("unused"); });
+    const { POST } = await import("./route");
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({ claimed: 2, succeeded: 2, failed: 0 });
+    expect(pending).toBe(3);
+  });
+
+  it("AC8 the fair rotation reaches article_extraction alongside every other busy queue", async () => {
+    const served: string[] = [];
+    const busy = (queue: string) => async () => {
+      served.push(queue);
+      return { status: "succeeded" as const, jobId: `${queue}-job`, captureId: `${queue}-capture` };
+    };
+    factories.media.mockReturnValue(busy("media_download"));
+    factories.email.mockReturnValue(busy("email_enrichment"));
+    factories.source.mockReturnValue(busy("source_resolution"));
+    factories.segment.mockReturnValue(busy("segment_resolution"));
+    factories.article.mockReturnValue(busy("article_extraction"));
+    let intentJobs = 0;
+    factories.store.mockReturnValue({
+      claimNextJob: async () => {
+        served.push("intent_analysis");
+        intentJobs += 1;
+        return { id: `intent-job-${intentJobs}`, captureId: "capture-intent", jobType: "intent_analysis", attempts: 1 };
+      },
+      loadCapture: async () => undefined,
+      finishAttempt: async () => ({ analysisId: null }),
+    });
+    factories.analyser.mockReturnValue(async () => { throw new Error("unused"); });
+    const { POST } = await import("./route");
+
+    const counts = [];
+    for (let dispatch = 0; dispatch < 3; dispatch += 1) counts.push(await (await POST(request())).json());
+
+    expect(counts.every((count) => count.claimed <= 2)).toBe(true);
+    expect(new Set(served)).toStrictEqual(new Set([
+      "intent_analysis", "media_download", "source_resolution", "segment_resolution",
+      "article_extraction", "email_enrichment",
+    ]));
   });
 
   it("AC2 database/provider exceptions produce no secret-bearing output or logs", async () => {

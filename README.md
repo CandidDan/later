@@ -2,7 +2,7 @@
 
 Later is the private capture-and-intent experiment at `notfor.now`. The v0 production shape
 accepts WhatsApp text and media plus inbound email, stores the original evidence in Supabase,
-runs five durable background queues, and exposes a private recall-before-reveal research console.
+runs six durable background queues, and exposes a private recall-before-reveal research console.
 
 This is the source of truth for launch, smoke testing, pause, rollback and recovery. It is written
 for one human operator. A green local check proves that configuration is structurally complete;
@@ -10,7 +10,7 @@ it does not prove that provider credentials, DNS or production connectivity work
 
 ## Automatic intent processing
 
-The production processor now rotates across all five v0 queues rather than serving intent alone.
+The production processor now rotates across all six v0 queues rather than serving intent alone.
 The sections below replace the earlier intent-only operator guide while retaining its safe dispatch,
 retry and recovery contract.
 
@@ -19,8 +19,9 @@ retry and recovery contract.
 - Never put a credential in source control, SQL text, a command argument, a diagnostic query or
   captured command output. Enter secrets through the Vercel, Supabase, Twilio and Resend dashboards
   or an approved secret-manager integration. Keep shell tracing disabled when loading local env.
-- Never select or print `raw_text`, `raw_payload`, `input_snapshot`, `result`, object contents,
-  request headers, Vault decrypted values or provider response bodies during launch diagnostics.
+- Never select or print `raw_text`, `raw_payload`, `input_snapshot`, `result`, `paragraphs`, object
+  contents, request headers, Vault decrypted values or provider response bodies during launch
+  diagnostics.
 - Do not reset attempts, reuse a live lease, delete a failed job, mutate an analysis or overwrite a
   stored asset to make a smoke test pass. Failed jobs and immutable analyses are experiment evidence.
 - The worker and automated tests do not deploy, alter DNS, call live providers, run production
@@ -52,8 +53,8 @@ pnpm launch:check
 
 Stop if the command exits non-zero. Correct the named variables without printing their values. A
 successful result must mark WhatsApp capture, media retrieval, inbound email, intent processing,
-source processing, segment processing, scheduled job dispatch and the private research console as
-ready.
+source processing, segment processing, article extraction, scheduled job dispatch and the private
+research console as ready.
 
 ## 2. Create and migrate the production Supabase project
 
@@ -82,6 +83,7 @@ ready.
    - `20260915010000_source_resolution.sql`
    - `20260915150000_segment_resolution.sql`
    - `20261006090000_capture_revisit_state.sql`
+   - `20261026090000_article_extraction.sql`
 
 4. Confirm in the dashboard that the `capture-assets` bucket remains private, RLS is enabled, and
    the extensions `pg_cron`, `pg_net`, `pgcrypto` and Vault are installed. Do not weaken policies for
@@ -197,9 +199,21 @@ Apply the revisit migration before releasing the new server code. It adds owner-
 metadata/events, serializes exposure and recall on each owned capture, and requires committed exposure
 before direct private-object reads. It preserves existing capture evidence, analyses and evaluations.
 
-The background route rotates fairly across all five current queues:
-`intent_analysis`, `media_download`, `email_enrichment`, `source_resolution` and
-`segment_resolution`. A single `POST /api/jobs/process` processes at most **two jobs**. The route
+Apply the article-extraction migration before releasing the server code that drains its queue. It
+adds the `article_extraction` job type and the append-only `capture_article_extractions` table. Only
+a published `source_resolution` analysis that is `resolved` with `sourceType = 'article'` enqueues a
+job; every other outcome is recorded at once as `unsupported` / `not_an_article` and nothing is
+fetched. The worker fetches through the same SSRF guard as source resolution (public HTTPS only,
+`text/html` only, 2 MiB, 10 seconds, at most three redirects), extracts with Readability over an
+inert jsdom (no scripts, no subresources), and calls no model. A row is `full` only for complete,
+unpaywalled text of at least 200 words, stored verbatim in source order; otherwise it is `partial`
+(`paywalled`, `truncated`), `unsupported` (`not_html`, `too_short`, `extraction_failed`) or, after
+three fetch attempts, `failed` / `fetch_failed`, and stores no text. Owners can read a row only
+after the capture's first exposure.
+
+The background route rotates fairly across all six current queues:
+`intent_analysis`, `media_download`, `email_enrichment`, `source_resolution`,
+`segment_resolution` and `article_extraction`. A single `POST /api/jobs/process` processes at most **two jobs**. The route
 has a 300-second execution budget, responses contain only counts, and absent optional email
 configuration makes that queue appear idle without blocking the others.
 
@@ -239,6 +253,7 @@ and timestamps. Do not copy captured content or analysis results into the launch
 | Background intent processing | Authenticated dispatch returns only claimed/succeeded/failed counts | `intent_analysis` moves through pending/processing to completed and appends one immutable intent analysis | Successful intent makes the capture eligible in `/research` without revealing the result | Check the named cron run, bounded HTTP status metadata and job status |
 | Background source processing | Dispatch count response contains no analysis data | A required `source_resolution` job completes and appends an immutable source-resolution analysis | Research outcome remains tied to the exact intent run | Check only job ID/status/timestamps and analysis ID/type/status |
 | Background segment processing | Dispatch count response contains no fetched material | An eligible `segment_resolution` job completes and appends an immutable segment-resolution analysis | Research keeps intent, source and segment outcomes independent | Check only job ID/status/timestamps and analysis ID/type/status |
+| Background article extraction | Dispatch count response contains no article text | A resolved `article` source enqueues one `article_extraction` job that completes with one immutable `capture_article_extractions` row; every other source gets an `unsupported` / `not_an_article` row without a fetch | Extraction rows stay unreadable to the owner until the capture's first exposure | Check only job ID/status/timestamps and extraction ID/status/reason; never select `paragraphs` |
 | Private `/research` console | Unauthenticated or wrong-user API calls are denied; the authorized user sees one recall prompt | Recall row exists before `revealed_at`; rating later records `rated_at` for the same analysis ID | Capture-time context appears first, recall is submitted, and only then is analysis revealed | Check evaluation ID, analysis ID and recall/reveal/rating timestamps; never select remembered text or notes |
 
 Safe smoke queries (replace the UUID placeholder through the SQL editor's parameter facility, not

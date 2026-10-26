@@ -7,6 +7,7 @@ export const CAPABILITIES = [
   "intent processing",
   "source processing",
   "segment processing",
+  "article extraction",
   "scheduled job dispatch",
   "private research console",
 ];
@@ -265,6 +266,7 @@ export const BACKGROUND_QUEUES = [
   "email_enrichment",
   "source_resolution",
   "segment_resolution",
+  "article_extraction",
 ];
 
 export function evaluateLaunchReadiness(environment = process.env) {
