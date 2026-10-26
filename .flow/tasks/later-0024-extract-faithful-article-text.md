@@ -1,12 +1,12 @@
 ---
 id: "later-0024"
 title: "Extract faithful full article text safely, or record honestly why it cannot be narrated"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "later"
-owner: ""
+owner: "claude-worker-later-0024"
 created: "2026-10-26"
-started: ""
+started: "2026-10-26T04:33:20Z"
 branch: ""
 pr: ""
 issue: ""
