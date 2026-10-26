@@ -1,0 +1,55 @@
+name: ios-ci
+
+# The macOS half of iOS CI (repo-owned; not a flow-* file). Flow's gate runs on Linux only, so it
+# cannot build an iOS app: it runs ios/scripts/linux-check.sh (the `ios/` source root in
+# .flow/config.yml) and this workflow does the rest — generate the Xcode project, build for the
+# simulator with signing disabled, run unit + UI tests, enforce the app coverage floor.
+#
+# It runs on every PR to main so it can be a required check, and skips its macOS work — with a
+# log line — when the PR changes nothing under ios/ or this file. Hosted macOS minutes bill at
+# 10x on a private repo; the skip is what keeps unrelated PRs from spending them.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ios-ci:
+    name: ios-ci
+    # The newest GA hosted macOS image; macos-ci.sh pins the Xcode on it (26.6, the image default).
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # A PR checks out its merge commit; its first parent is the base tip, so HEAD^1..HEAD
+          # is exactly what the PR changes.
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: List changed paths
+        if: github.event_name == 'pull_request'
+        run: |
+          git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed-files.txt"
+          echo "IOS_CI_CHANGED_FILES=$RUNNER_TEMP/changed-files.txt" >> "$GITHUB_ENV"
+          cat "$RUNNER_TEMP/changed-files.txt"
+
+      - name: Build and test
+        run: bash ios/scripts/macos-ci.sh
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: Later-xcresult
+          path: ios/build/Later.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
