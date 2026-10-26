@@ -30,6 +30,7 @@ asks:
 notes:
   - "2026-10-26 (orchestrator): first slice of the iOS v1 queue (later-0023…later-0037). Dan approved the general UX and playback/vision; the colour palette is NOT approved, so colours are replaceable semantic tokens only. The private Claude Design link is a demo, not a spec; this task stands alone without it."
   - "2026-10-26 (orchestrator): canonical Flow integration researched — `source_roots` (.flow/bin/source-roots.mjs) runs checks on the Linux gate runner only (runtime node|deno|none, no runner field). Adding jobs to flow-gates.yml is forbidden here. Therefore: Linux half via a `source_roots` entry (Flow gate), macOS half via the repo-owned `ios-ci.yml` workflow. Confirmed 2026-10-26 that a cloud session can push files under .github/workflows/."
+  - "2026-10-26 (worker): branch flow/later-0023-ios-app-foundation pushed with LaterKit (AppInfo, ListeningDuration + tests), ios/.swift-format, ios/scripts/{check-coverage,pick-simulator}.mjs + node tests, linux-check.sh (green locally: Swift 6.4.0 pinned, sha256 from a GPG-verified swift.org download) and macos-ci.sh (stub-tested). Pins: macos-26 + Xcode 26.6 (image default; Xcode 27 is not on macos-26), XcodeGen 2.46.0 sha256-verified. NOT yet done: app target sources, project.yml, Config xcconfigs, ios-ci.yml, .flow/config.yml edits, README. Next: write those, push, open PR, iterate on the hosted ios-ci run."
 ---
 
 ## Context
