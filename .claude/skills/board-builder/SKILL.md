@@ -36,12 +36,16 @@ canonical path.
 
 ## Procedure
 1. Read all task files; build the task objects (id, title, status, priority, project, owner,
-   pr, blocked_reason, labels).
+   pr, blocked_reason, cancelled_reason, labels).
 2. Open the existing `.flow/board.html`, locate the `const TASKS = [...]` block, and replace
    it with the freshly parsed array. Leave all markup/styles/scripts intact — you are swapping
    data, not redesigning. (If `board.html` doesn't exist yet, create it from the template shape:
    columns ready · in_progress · in_review · blocked · done; draggable cards; a detail panel; the
    apply-edits / download-edits buttons.)
+   **`cancelled` tasks render in the `done` column under a "closed" heading**, visually muted and
+   showing `cancelled_reason` — not in a column of their own. Both are terminal history, neither
+   needs a person, and a sixth always-empty column would spend board width on a state that is
+   rare by design. They are never shown in `blocked`: that column means "a human must act".
 3. Keep it self-contained and offline (no external JS deps; fonts via CDN are fine). No
    localStorage — state is in-memory; persistence is via apply-board-edits.mjs, matching the
    files-are-truth rule.

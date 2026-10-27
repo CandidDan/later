@@ -68,6 +68,16 @@ test("only in_progress tasks are ever swept", () => {
   }
 });
 
+test("flow-0108: a cancelled task is never reapable, whatever the git facts say", () => {
+  for (const state of [
+    { branchExists: false, aheadOfBase: false, hasOpenPr: false, ageMinutes: 99999 },
+    { branchExists: true, aheadOfBase: true, hasOpenPr: false, ageMinutes: 99999 },
+    { branchExists: true, aheadOfBase: true, hasOpenPr: true, openPrReady: true, ageMinutes: 99999 },
+  ]) {
+    assert.equal(classifyStranded({ status: "cancelled" }, state, TH), "ok");
+  }
+});
+
 test("a branch that exists but is not ahead of base resets (no commits to recover)", () => {
   const d = classifyStranded(
     inProgress,

@@ -36,7 +36,9 @@
 //   dangling `intent` on a non-ready task, an `intent` naming a superseded intent, or a store
 //   with `intents.required_from` unset (see "tasks derive from intents" below) · a workstream
 //   with malformed frontmatter, a missing `id`/`title`/`created`, or an `id` unlike its filename,
-//   and an intent whose `workstream` names no workstream (see "workstream store" below).
+//   an intent whose `workstream` names no workstream, and a workstream that serves no goal, three
+//   or more goals or an undeclared one, whose `status` is outside the three allowed values, or
+//   whose Dependencies name an unknown workstream (see "workstream store" below).
 // NOTES (exit 0): a check that was skipped because its precondition wasn't met (e.g. not run
 //   inside a git work tree, so the uncommitted-task guard can't read `git status`).
 //
@@ -395,7 +397,7 @@ export function blockedByFindings(task) {
   // cannot redden an existing repo, and a dependency that outlived its block is data that lies:
   // it says "waiting on X" about a task nobody is waiting on. `done` is exempt — there the field
   // is the historical record of what the task waited on, and clearing it would destroy that.
-  if (entries.length && task.status !== "blocked" && task.status !== "done")
+  if (entries.length && task.status !== "blocked" && task.status !== "done" && task.status !== "cancelled")
     problems.push(`${id}: ${task.status} but blocked_by is populated (${entries.join(", ")}) — ` +
       "a dependency that outlived its block is stale data; clear blocked_by when the block clears");
 
@@ -750,15 +752,46 @@ export function intentFindings(intentsDir, { goals = null } = {}) {
 //   · An intent's `workstream:` naming an id no workstream declares → WARNING naming both. Empty
 //     or absent → nothing, ever.
 //   · `_TEMPLATE.md` is skipped, as it is for tasks and intents.
-// Not here: `serves`, `status` and dependency warnings — judgement-adjacent, and a later task.
+//
+// The keep-it-honest half (flow-0151) — the rules ADR-0009 §2, §3 and §5 state, made visible.
+// Every one is a WARNING and stays one: ADR-0007's teeth budget, and none is a hard fact about
+// the store the way a duplicate id is.
+//   · `serves` empty or absent → "not tied to a goal". Allowed while exploring, never hidden.
+//   · `serves` with three or more ids → "probably two workstreams". One or two pass silently.
+//   · A `serves` id VISION.md doesn't declare → WARNING, resolved exactly as an intent's is,
+//     reserved `maintenance` included. `goals` null (no usable VISION.md) switches it off: the
+//     repo-level finding about the vision layer already exists, per workstream would bury it.
+//   · `status` outside `active | done | retired` → WARNING naming the three. Absent → `active`.
+//   · A bullet under `## Dependencies` starting `workstream: <id>` naming an id no workstream
+//     declares → WARNING naming both. Resolved after every file is read, so order is irrelevant.
 export const WORKSTREAM_REQUIRED = ["id", "title", "created"];
+export const WORKSTREAM_STATUSES = ["active", "done", "retired"];
+export const WORKSTREAM_SERVES_MAX = 2;
+
+// The ids named by `workstream: <id>` bullets under the body's `## Dependencies` heading, up
+// to the next heading of the same or higher level. Backticks and quotes around the id are
+// dropped; anything after it on the line (a date, what slips) is prose and ignored.
+export function workstreamDependencies(body) {
+  const ids = [];
+  let inDeps = false;
+  for (const line of String(body).split("\n")) {
+    const h = line.match(/^(#{1,2})\s+(.*?)\s*$/);
+    if (h) { inDeps = /^dependencies$/i.test(h[2]); continue; }
+    if (!inDeps) continue;
+    const m = line.match(/^\s*[-*]\s+`?workstream:\s*[`"']?([^\s`"',;]+)/i);
+    if (m) ids.push(m[1]);
+  }
+  return ids;
+}
 
 // Validate `<flowDir>/workstreams/` and resolve intents' `workstream:` against it. `refs` is
-// intentFindings' `workstreamRefs`: `{ rel, workstream }` per intent that names one.
-export function workstreamFindings(workstreamsDir, refs = []) {
+// intentFindings' `workstreamRefs`: `{ rel, workstream }` per intent that names one. `goals`
+// is the VISION.md goal map, or null when the vision layer is inactive — as for intentFindings.
+export function workstreamFindings(workstreamsDir, refs = [], { goals = null } = {}) {
   const problems = [], warnings = [];
   if (!existsSync(workstreamsDir)) return { problems, warnings, count: 0, ids: null };
   const seen = new Map();
+  const deps = [];
   let count = 0;
   for (const name of readdirSync(workstreamsDir).sort()) {
     if (!name.endsWith(".md") || name === "_TEMPLATE.md") continue;
@@ -772,6 +805,8 @@ export function workstreamFindings(workstreamsDir, refs = []) {
     }
     const get = scalarReader(fm.head);
     const ws = Object.fromEntries(WORKSTREAM_REQUIRED.map((k) => [k, get(k)]));
+    goalStatusFindings(rel, fm.head, get("status"), goals, warnings);
+    for (const id of workstreamDependencies(fm.body)) deps.push({ rel, id });
     for (const k of WORKSTREAM_REQUIRED.filter((f) => !ws[f])) {
       warnings.push(`${rel}: missing required field ${k} — a workstream declares ` +
         `${WORKSTREAM_REQUIRED.join(", ")}`);
@@ -792,7 +827,38 @@ export function workstreamFindings(workstreamsDir, refs = []) {
         "declares — membership lives on the intent, so a dangling id puts it in no workstream at all");
     }
   }
+  for (const { rel, id } of deps) {
+    if (!seen.has(id)) {
+      warnings.push(`${rel}: depends on workstream "${id}", which no workstream in .flow/workstreams/ ` +
+        "declares — a dependency on a workstream that does not exist can never be met or missed");
+    }
+  }
   return { problems, warnings, count, ids: new Set(seen.keys()) };
+}
+
+// The per-file goal and status warnings of flow-0151, pushed onto `warnings`.
+function goalStatusFindings(rel, head, status, goals, warnings) {
+  const serves = parseListField(head, "serves").map((e) => e.trim()).filter(Boolean);
+  if (serves.length === 0) {
+    warnings.push(`${rel}: serves no goal — not tied to a goal; \`serves: []\` is allowed while ` +
+      "exploring, but name the VISION.md goal it serves, or add the goal in the same PR (ADR-0009 §3)");
+  } else if (serves.length > WORKSTREAM_SERVES_MAX) {
+    warnings.push(`${rel}: serves ${serves.length} goals (${serves.join(", ")}) — probably two ` +
+      "workstreams; a workstream usually serves one goal, so consider splitting it (ADR-0009 §2)");
+  }
+  if (goals) {
+    for (const entry of serves) {
+      if (entry.toLowerCase() === MAINTENANCE_SERVES) continue;
+      if (!goals.has(entry.toUpperCase())) {
+        warnings.push(`${rel}: serves "${entry}", which VISION.md does not declare — ` +
+          "goal ids are append-only and never renumbered, so this resolves to nothing");
+      }
+    }
+  }
+  if (status && !WORKSTREAM_STATUSES.includes(status)) {
+    warnings.push(`${rel}: status "${status}" is not one of ${WORKSTREAM_STATUSES.join(" | ")} — ` +
+      "set by hand, and a value outside those three is read as none of them (ADR-0009 §5)");
+  }
 }
 
 // ── tasks derive from intents (flow-0074, ADR-0007 slice 2) ─────────────────────────────────
@@ -1048,7 +1114,7 @@ function parseTask(text) {
   const get = scalarReader(head);
   return { id: get("id"), title: get("title"), status: get("status"), priority: get("priority"),
            owner: get("owner"), started: get("started"), branch: get("branch"), pr: get("pr"),
-           blocked_reason: get("blocked_reason"), touches: get("touches"),
+           blocked_reason: get("blocked_reason"), cancelled_reason: get("cancelled_reason"), touches: get("touches"),
            touchesList: parseListField(head, "touches"),
            blockedByList: parseListField(head, "blocked_by"),
            servesList: parseListField(head, "serves"),
@@ -1091,6 +1157,8 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
       problems.push(`${t.id}: in_review but ${!t.pr ? "pr" : "branch"} is empty — hand-off incomplete or flow-status didn't fire`);
     if (t.status === "blocked" && !t.blocked_reason)
       problems.push(`${t.id}: blocked with no blocked_reason — undecidable AND unexplained`);
+    if (t.status === "cancelled" && !t.cancelled_reason)
+      problems.push(`${t.id}: cancelled with no cancelled_reason — a terminal state must say why the work will never ship`);
     {
       const b = blockedByFindings(t);
       problems.push(...b.problems);
@@ -1228,6 +1296,8 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
     } else {
       visionGoals = goals;
       for (const t of tasks) {
+        // `cancelled` is history like `done`: never-shipped work is not re-anchored or re-warned.
+        if (t.status === "cancelled") continue;
         const ready = t.status === "ready";
         const entries = (t.servesList ?? []).map((e) => e.trim()).filter(Boolean);
         if (entries.length === 0) {
@@ -1279,7 +1349,7 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
     problems.push(...d.problems);
     warnings.push(...d.warnings);
     // Workstream store: optional, so an absent one is no finding at all — see its block above.
-    const w = workstreamFindings(join(flowDir, "workstreams"), f.workstreamRefs ?? []);
+    const w = workstreamFindings(join(flowDir, "workstreams"), f.workstreamRefs ?? [], { goals: visionGoals });
     problems.push(...w.problems);
     warnings.push(...w.warnings);
   }

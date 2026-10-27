@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync, lstatSync,
 import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runDoctor, parseSourceRootsIgnore, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, asksFindings, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES, taskIntentFindings, parseIntentsRequiredFrom, INTENTS_REQUIRED_FROM_KEY, workstreamFindings, WORKSTREAM_REQUIRED } from "./flow-doctor.mjs";
+import { runDoctor, parseSourceRootsIgnore, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, asksFindings, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES, taskIntentFindings, parseIntentsRequiredFrom, INTENTS_REQUIRED_FROM_KEY, workstreamFindings, WORKSTREAM_REQUIRED, WORKSTREAM_STATUSES, workstreamDependencies } from "./flow-doctor.mjs";
 
 // The vision every fixture gets unless it asks for none: two live goals, one non-goal, one
 // retired goal. Written in the shape flow-doctor's line regex reads, deliberately mixing the
@@ -119,7 +119,7 @@ started: "${f.started ?? ""}"
 branch: "${f.branch ?? ""}"
 pr: "${f.pr ?? ""}"
 blocked_reason: "${f.blocked_reason ?? ""}"
-${f.created === undefined ? "" : `created: "${f.created}"\n`}${f.intent === undefined ? "" : `intent: "${f.intent}"\n`}${f.blocked_by === undefined ? "" : `blocked_by: ${f.blocked_by}\n`}${f.asks === undefined ? "" : `asks:\n${f.asks.map((a) => `  - ${JSON.stringify(a)}`).join("\n")}\n`}serves: ${f.serves ?? '["G1"]'}
+${f.cancelled_reason === undefined ? "" : `cancelled_reason: "${f.cancelled_reason}"\n`}${f.created === undefined ? "" : `created: "${f.created}"\n`}${f.intent === undefined ? "" : `intent: "${f.intent}"\n`}${f.blocked_by === undefined ? "" : `blocked_by: ${f.blocked_by}\n`}${f.asks === undefined ? "" : `asks:\n${f.asks.map((a) => `  - ${JSON.stringify(a)}`).join("\n")}\n`}serves: ${f.serves ?? '["G1"]'}
 touches: ${f.touches ?? '["src/**"]'}
 ---
 ${f.body ?? READY_BODY}`;
@@ -834,6 +834,28 @@ test("a DONE task serving a retired goal is silent — the warning has no remedy
   assert.deepEqual(r.problems, []);
   assert.ok(!r.warnings.some((w) => w.includes("P-0001") && w.includes("Retired")),
     "a done task serving a retired goal should not warn");
+  cleanup(d);
+});
+
+test("flow-0108: cancelled with a cancelled_reason is accepted", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { status: "cancelled", cancelled_reason: "superseded by P-0002" }) });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  cleanup(d);
+});
+
+test("flow-0108: cancelled with an empty cancelled_reason is a PROBLEM naming the reason", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { status: "cancelled" }) });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(r.problems.some((p) => p.includes("P-0001") && p.includes("cancelled_reason")));
+  cleanup(d);
+});
+
+test("flow-0108: a cancelled task with an unresolvable serves id does not warn", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { status: "cancelled", cancelled_reason: "moot", serves: '["G404"]' }) });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.ok(!r.warnings.some((w) => w.includes("P-0001")), "no warning for a cancelled task");
   cleanup(d);
 });
 
@@ -2315,4 +2337,123 @@ test("workstreams: a store holding only _TEMPLATE.md reports nothing", () => {
 test("workstreamFindings: an absent directory returns no findings and a null id set", () => {
   const r = workstreamFindings(join(tmpdir(), "flow-0150-no-such-dir"), [{ rel: "x", workstream: "y" }]);
   assert.deepEqual(r, { problems: [], warnings: [], count: 0, ids: null });
+});
+
+// ── workstream goal, status and dependency warnings (flow-0151, ADR-0009 §9) ──
+// All warn-only. The fixture's raw-YAML overrides replace a field's value; `body` replaces the body.
+const ws151 = (id, f = {}) => {
+  let s = workstream(id, { omit: f.omit });
+  for (const k of ["serves", "status"]) {
+    if (f[k] !== undefined) s = s.replace(new RegExp(`^${k}: .*$`, "m"), `${k}: ${f[k]}`);
+  }
+  return f.body === undefined ? s : s.replace(/\nPurpose\.\n$/, `\n${f.body}`);
+};
+// Findings about one workstream file, problems and warnings together.
+const aboutFile = (r, name) => [...r.problems, ...r.warnings].filter((m) => m.includes(`.flow/workstreams/${name}`));
+
+test("workstreams (flow-0151): serves [] warns 'not tied to a goal' and does not fail", () => {
+  const d = cliFixture({ "0001-a.md": task("P-0001") });
+  mkdirSync(join(d, "workstreams"));
+  writeFileSync(join(d, "workstreams", "explore.md"), ws151("explore", { serves: "[]" }));
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  const w = aboutFile(r, "explore.md");
+  assert.equal(w.length, 1, JSON.stringify(w));
+  assert.match(w[0], /not tied to a goal/);
+  assert.equal(runCli(d).code, 0);
+  cleanup(d);
+});
+
+test("workstreams (flow-0151): an absent serves warns the same as serves []", () => {
+  const d = wsFixture({ "a.md": ws151("a", { omit: ["serves"] }) });
+  const w = aboutFile(runDoctor({ flowDir: d }), "a.md");
+  assert.equal(w.length, 1, JSON.stringify(w));
+  assert.match(w[0], /not tied to a goal/);
+  cleanup(d);
+});
+
+test("workstreams (flow-0151): serves listing 3 goals warns 'probably two workstreams'; 2 does not", () => {
+  const d = wsFixture({
+    "wide.md": ws151("wide", { serves: '["G1", "G2", "maintenance"]' }),
+    "two.md": ws151("two", { serves: '["G1", "G2"]' }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  const w = aboutFile(r, "wide.md");
+  assert.equal(w.length, 1, JSON.stringify(w));
+  assert.match(w[0], /serves 3 goals \(G1, G2, maintenance\) — probably two workstreams/);
+  assert.deepEqual(aboutFile(r, "two.md"), []);
+  cleanup(d);
+});
+
+test("workstreams (flow-0151): serving G99 warns; serving maintenance raises nothing", () => {
+  const d = wsFixture({
+    "ghost.md": ws151("ghost", { serves: '["G99"]' }),
+    "upkeep.md": ws151("upkeep", { serves: '["maintenance"]' }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  const w = aboutFile(r, "ghost.md");
+  assert.equal(w.length, 1, JSON.stringify(w));
+  assert.match(w[0], /serves "G99", which VISION\.md does not declare/);
+  assert.deepEqual(aboutFile(r, "upkeep.md"), []);
+  cleanup(d);
+});
+
+test("workstreams (flow-0151): with no VISION.md an unknown serves id is not a per-workstream finding", () => {
+  const d = fixture({ "0001-a.md": task("P-0001") }, { vision: null });
+  mkdirSync(join(d, "workstreams"));
+  writeFileSync(join(d, "workstreams", "ghost.md"), ws151("ghost", { serves: '["G99"]' }));
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(aboutFile(r, "ghost.md"), []);
+  assert.ok(r.warnings.some((m) => /no VISION\.md/.test(m)), "the one repo-level finding stays");
+  cleanup(d);
+});
+
+test("workstreams (flow-0151): status \"paused\" warns naming active | done | retired; no status is silent", () => {
+  const d = wsFixture({
+    "paused.md": ws151("paused", { status: '"paused"' }),
+    "nostatus.md": ws151("nostatus", { omit: ["status"] }),
+    "done.md": ws151("done", { status: '"done"' }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  const w = aboutFile(r, "paused.md");
+  assert.equal(w.length, 1, JSON.stringify(w));
+  assert.match(w[0], /status "paused" is not one of active \| done \| retired/);
+  assert.deepEqual(aboutFile(r, "nostatus.md"), []);
+  assert.deepEqual(aboutFile(r, "done.md"), []);
+  assert.deepEqual(WORKSTREAM_STATUSES, ["active", "done", "retired"]);
+  cleanup(d);
+});
+
+test("workstreams (flow-0151): a Dependencies bullet `workstream: no-such-id` warns naming both", () => {
+  const body = "## Purpose\n\nShip it.\n\n## Dependencies\n\n- workstream: no-such-id — by 2026-11-01 or AU slips\n" +
+    "- workstream: `real` (forward ref, declared later in sort order)\n- Legal sign-off by 2026-11-15\n";
+  const d = wsFixture({ "a-launch.md": ws151("a-launch", { body }), "real.md": ws151("real") });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  const w = aboutFile(r, "a-launch.md");
+  assert.equal(w.length, 1, JSON.stringify(w));
+  assert.match(w[0], /a-launch\.md: depends on workstream "no-such-id"/);
+  cleanup(d);
+});
+
+test("workstreamDependencies: only `workstream:` bullets under ## Dependencies are read", () => {
+  const body = "## Purpose\n\n- workstream: not-a-dep\n\n## Dependencies\n\n- workstream: one\n" +
+    "* `workstream: \"two\"`\n- the workstream: three is prose\n  - workstream: four\n\n## Open questions\n\n- workstream: five\n";
+  assert.deepEqual(workstreamDependencies(body), ["one", "two", "four"]);
+  assert.deepEqual(workstreamDependencies(""), []);
+});
+
+test("workstreams (flow-0151): a workstream breaking none of the rules gets no finding", () => {
+  const body = "## Dependencies\n\n- workstream: other\n";
+  const d = wsFixture({
+    "clean.md": ws151("clean", { serves: '["G1", "G2"]', status: '"retired"', body }),
+    "other.md": ws151("other", { serves: '["G1"]' }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(wsFindings(r), []);
+  cleanup(d);
 });

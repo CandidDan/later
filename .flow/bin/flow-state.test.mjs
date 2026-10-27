@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   parseTask, scalarValue, idNum, branchMatchesTask, resolveState, pickPrForTask, reconcile,
-  readPrs, readTasksFromOrigin, runStateCli,
+  readPrs, readTasksFromOrigin, runStateCli, deriveIntentStatus, buildIntentReport,
 } from "./flow-state.mjs";
 import { blockedByFindings } from "./flow-doctor.mjs";
 import { askId } from "./asks.mjs";
@@ -419,4 +419,197 @@ test("an ask carrying `#` survives intact, block and inline list alike, and a tr
   const u = parseTask(inline);
   assert.deepEqual(u.asks.map((a) => [a.kind, a.text]),
     [["fyi", "see #127, it's fine"], ["follow-up", "split #9 out"]]);
+});
+
+// ── flow-0113: intents and workstreams ──
+const I = (o = {}) => ({ status: "proposed", ...o });
+const T = (...st) => st.map((status, n) => ({ id: `t-${n}`, status }));
+
+test("flow-0113: an intent no task names is not_started", () => {
+  assert.equal(deriveIntentStatus(I(), []), "not_started");
+});
+test("flow-0113: done + in_review is in_progress; all done is done", () => {
+  assert.equal(deriveIntentStatus(I(), T("done", "in_review")), "in_progress");
+  assert.equal(deriveIntentStatus(I(), T("ready")), "in_progress");
+  assert.equal(deriveIntentStatus(I(), T("in_progress", "done")), "in_progress");
+  assert.equal(deriveIntentStatus(I(), T("done", "done")), "done");
+});
+test("flow-0113: any blocked task makes the intent blocked", () => {
+  assert.equal(deriveIntentStatus(I(), T("blocked", "done")), "blocked");
+});
+test("flow-0113: a superseded intent stays superseded whatever its tasks say", () => {
+  assert.equal(deriveIntentStatus(I({ status: "superseded" }), T("done", "done")), "superseded");
+});
+test("flow-0113: cancelled tasks count for nothing; resolved status wins over store status", () => {
+  assert.equal(deriveIntentStatus(I(), T("cancelled")), "not_started");
+  assert.equal(deriveIntentStatus(I(), T("cancelled", "done")), "done");
+  assert.equal(deriveIntentStatus(I(), [{ status: "in_progress", resolved: "done" }]), "done");
+});
+
+const fmt = (o, body = "") => `---\n${Object.entries(o).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("\n")}\n---\n${body}`;
+const storeFiles = () => ({
+  workstreams: {
+    ".flow/workstreams/_TEMPLATE.md": fmt({ id: "ignored" }),
+    ".flow/workstreams/alpha.md": fmt({ id: "alpha", title: "Alpha", created: "2026-10-01", serves: ["G1", "G9"], status: "active", owner: "dan" },
+      "> note\n\n## Purpose\n\nShip alpha.\n\n## Constraints\n\n- ADR-1\n\n## Dependencies\n\n- workstream: beta\n\n## Open questions\n\nWhen?\n"),
+    ".flow/workstreams/beta.md": fmt({ id: "beta", title: "Beta", created: "2026-10-02", serves: [], status: "done" }),
+  },
+  intents: {
+    ".flow/intents/_TEMPLATE.md": fmt({ id: "ignored" }),
+    ".flow/intents/one.md": fmt({ id: "one", title: "One", created: "2026-10-01", source: "Dan", workstream: "alpha", serves: ["G1"], status: "approved" },
+      "## Problem\n\n[assumption] not scanned here\n\n## Outcome\n\nSeen.\n\n## Constraints\n\n- [assumption] a guess\n"),
+    ".flow/intents/two.md": fmt({ id: "two", title: "Two", created: "2026-10-02", workstream: "alpha", serves: ["maintenance"], supersedes: "old" }),
+    ".flow/intents/old.md": fmt({ id: "old", title: "Old", created: "2026-09-01", workstream: "ghost", serves: ["G99"], status: "superseded" }),
+    ".flow/intents/free.md": fmt({ id: "free", title: "Free", created: "2026-10-03" }),
+  },
+  tasks: {
+    "a.md": fmt({ id: "t-1", status: "done", intent: "one", pr: "https://x/pull/1" }),
+    "b.md": fmt({ id: "t-2", status: "blocked", intent: "two", blocked_reason: "waits on x" }),
+    "c.md": fmt({ id: "t-3", status: "done", intent: "old" }),
+    "d.md": fmt({ id: "t-4", status: "done", intent: "free" }),
+  },
+  vision: "## Goals\n\n### G1 — First goal\n\n### G9 — Ninth\n",
+});
+
+test("flow-0113: buildIntentReport — schema, counts, statuses, tasks, serves, unresolved workstream, assumptions", () => {
+  const r = buildIntentReport(storeFiles());
+  assert.equal(r.schema, 1);
+  assert.equal(r.intent_layer, "active");
+  assert.deepEqual(r.workstreams.map((w) => w.id), ["alpha", "beta"]);
+  const alpha = r.workstreams[0];
+  assert.deepEqual(alpha.counts, { not_started: 0, in_progress: 0, blocked: 1, done: 1, superseded: 0 });
+  assert.deepEqual(r.workstreams[1].counts, { not_started: 0, in_progress: 0, blocked: 0, done: 0, superseded: 0 });
+  assert.equal(alpha.purpose, "Ship alpha.");
+  assert.equal(alpha.constraints, "- ADR-1");
+  assert.equal(alpha.dependencies, "- workstream: beta");
+  assert.equal(alpha.open_questions, "When?");
+  assert.deepEqual(alpha.serves, [
+    { id: "G1", title: "First goal", resolved: true, retired: false },
+    { id: "G9", title: "Ninth", resolved: true, retired: false },
+  ]);
+  const by = Object.fromEntries(r.intents.map((i) => [i.id, i]));
+  assert.deepEqual(r.intents.map((i) => i.id), ["old", "one", "two", "free"]);  // by created
+  assert.equal(by.one.status, "done");
+  assert.deepEqual(by.one.tasks, [{ id: "t-1", status: "done", pr: "https://x/pull/1" }]);
+  assert.equal(by.two.status, "blocked");
+  assert.equal(by.two.blocked_reason, "waits on x");
+  assert.equal(by.old.status, "superseded");
+  assert.equal(by.old.superseded_by, "two");
+  assert.equal(by.two.supersedes, "old");
+  assert.equal(by.free.workstream, null);
+  assert.equal(by.free.stream_resolved, true);
+  assert.equal(by.old.workstream, "ghost");
+  assert.equal(by.old.stream_resolved, false);
+  assert.deepEqual(by.old.serves, [{ id: "G99", title: null, resolved: false, retired: false }]);
+  assert.deepEqual(by.two.serves, [{ id: "maintenance", title: null, resolved: true, retired: false }]);
+  assert.deepEqual(by.one.assumptions, ["[assumption] a guess"]);
+  assert.equal(by.one.outcome, "Seen.");
+});
+
+test("flow-0113: buildIntentReport — no intent files means inactive, empty, and no throw", () => {
+  const r = buildIntentReport({ workstreams: storeFiles().workstreams });
+  assert.deepEqual(r, { schema: 1, intent_layer: "inactive", workstreams: [], intents: [] });
+  assert.equal(buildIntentReport().intent_layer, "inactive");
+});
+
+test("flow-0113: buildIntentReport with no VISION.md or workstreams leaves serves unresolved and intents ungrouped", () => {
+  const s = storeFiles();
+  const r = buildIntentReport({ intents: s.intents, tasks: s.tasks });
+  assert.deepEqual(r.workstreams, []);
+  assert.equal(r.intents.find((i) => i.id === "one").serves[0].resolved, false);
+});
+
+test("flow-0113: buildIntentReport reconciles against PRs when given them", () => {
+  const s = storeFiles();
+  const prs = [{ number: 2, state: "OPEN", headRefName: "flow/t-2-x", url: "https://x/pull/2" }];
+  const r = buildIntentReport({ ...s, prs });
+  const two = r.intents.find((i) => i.id === "two");
+  assert.equal(two.status, "in_progress");
+  assert.deepEqual(two.tasks, [{ id: "t-2", status: "in_review", pr: "https://x/pull/2" }]);
+});
+
+test("flow-0113: buildIntentReport is pure — same result with fs and git unavailable", () => {
+  const before = JSON.stringify(buildIntentReport(storeFiles()));
+  const saved = process.env.PATH;
+  process.env.PATH = "";
+  try { assert.equal(JSON.stringify(buildIntentReport(storeFiles())), before); }
+  finally { process.env.PATH = saved; }
+});
+
+// A real git origin: committed state is what is read, the working tree is not.
+function intentRepo({ withIntents = true } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "flow-0113-"));
+  const git = (...a) => execFileSync("git", ["-C", dir, ...a], { stdio: "ignore" });
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "t@t"); git("config", "user.name", "t");
+  const s = storeFiles();
+  const put = (rel, text) => { mkdirSync(join(dir, rel, ".."), { recursive: true }); writeFileSync(join(dir, rel), text); };
+  for (const [p, t] of Object.entries(s.tasks)) put(`.flow/tasks/${p}`, t);
+  if (withIntents) {
+    for (const [p, t] of Object.entries(s.workstreams)) put(p, t);
+    for (const [p, t] of Object.entries(s.intents)) put(p, t);
+  }
+  put("VISION.md", s.vision);
+  git("add", "-A"); git("commit", "-qm", "init");
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  return { dir, put };
+}
+const run = (dir, argv) => {
+  let buf = "";
+  const code = runStateCli({ repoRoot: dir, argv, out: { write: (s) => { buf += s; } } });
+  return { code, buf };
+};
+
+test("flow-0113: --json carries the report, and equals buildIntentReport on the same files", () => {
+  const { dir } = intentRepo();
+  try {
+    const { code, buf } = run(dir, ["--json", "--no-pr"]);
+    assert.equal(code, 0);
+    const j = JSON.parse(buf);
+    const s = storeFiles();
+    const tasks = Object.fromEntries(Object.entries(s.tasks).map(([k, v]) => [`.flow/tasks/${k}`, v]));
+    const expect = buildIntentReport({ ...s, tasks });
+    assert.equal(j.schema, 1);
+    assert.deepEqual({ schema: j.schema, workstreams: j.workstreams, intents: j.intents },
+      { schema: expect.schema, workstreams: expect.workstreams, intents: expect.intents });
+    assert.equal(j.tasks.length, 4);   // what --json had before is still there
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0113: the report reads origin/main, not a differing working-tree intent", () => {
+  const { dir, put } = intentRepo();
+  try {
+    put(".flow/intents/one.md", fmt({ id: "one", title: "EDITED", created: "2026-10-01" }));
+    const j = JSON.parse(run(dir, ["--json", "--no-pr"]).buf);
+    assert.equal(j.intents.find((i) => i.id === "one").title, "One");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0113: a repo with no .flow/intents/ reports inactive and exits 0", () => {
+  const { dir } = intentRepo({ withIntents: false });
+  try {
+    const { code, buf } = run(dir, ["--json", "--no-pr"]);
+    assert.equal(code, 0);
+    const j = JSON.parse(buf);
+    assert.equal(j.intent_layer, "inactive");
+    assert.deepEqual([j.workstreams, j.intents], [[], []]);
+    assert.ok(!run(dir, ["--no-pr"]).buf.includes("intents:"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0113: human mode summarises workstreams and ungrouped intents; <intent-id> prints tasks and PRs", () => {
+  const { dir } = intentRepo();
+  try {
+    const all = run(dir, ["--no-pr"]).buf;
+    assert.match(all, /alpha\s+\[active\] 1 done · 0 in progress · 1 blocked/);
+    assert.match(all, /free\s+done/);
+    assert.match(all, /old\s+superseded \(workstream 'ghost' not declared\)/);
+    const one = run(dir, ["one", "--no-pr"]);
+    assert.equal(one.code, 0);
+    assert.match(one.buf, /status: done/);
+    assert.match(one.buf, /t-1 {2}done {2}https:\/\/x\/pull\/1/);
+    const two = run(dir, ["two", "--no-pr"]).buf;
+    assert.match(two, /status: blocked \(waits on x\)/);
+    assert.match(two, /t-2 {2}blocked {2}\(no PR\)/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

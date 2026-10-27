@@ -29,6 +29,13 @@ from. Its `status` (`active | done | retired`) is set by hand, because finished 
 human call; **progress is derived** by `flow-state` and never stored. A repo with no
 `.flow/workstreams/` is valid, and an intent with an empty `workstream:` is never a finding.
 
+**Intent status is derived and never stored.** An intent has no `tasks` list and no progress field;
+a task names its intent, so `flow-state` computes the intent's status by scanning the tasks that
+name it (`not_started`, `in_progress`, `blocked`, `done`, or `superseded` by the intent's own
+hand-set `status`). A workstream's progress is derived the same way. `flow-state --json` is the
+supported way for anything outside the repo to read it: `schema`, `workstreams[]` and `intents[]`,
+or import `buildIntentReport` from the pinned Flow release and run it on files you fetched.
+
 **Creating a task (orchestrator).** A Cowork/orchestrator session does **not** auto-discover
 this repo's local skills, so asking it to "create a task" will not trigger `task-writer` on its
 own. To write a new task, **read `.claude/skills/task-writer/SKILL.md` and follow it** — that is
@@ -111,6 +118,8 @@ A task's `status` field moves in one direction only:
 ```
 ready  →  in_progress  →  in_review  →  done
                 ↘  blocked  ↗
+   ready ─┬─→ cancelled   (terminal; hand-written by the orchestrator only)
+  blocked ┘
 ```
 
 - `ready` — fully specified, you may start it. Set by the orchestrator, not by you. (A PR
@@ -145,8 +154,17 @@ ready  →  in_progress  →  in_review  →  done
   populated `blocked_by` on a live non-blocked task as stale data. On a `done` task it stays, as
   the record of what the task waited on.
 
-You hand-write exactly **two** transitions: the claim (it must stay an atomic first-push-wins
-commit — see Concurrency) and `blocked` (a judgment call). Every PR-event transition is owned
+- `cancelled` — terminal: the work will never ship (superseded, obsoleted, or deliberately
+  deferred with no intent to return). **Hand-written by the orchestrator only, never the worker**
+  — a worker that concludes its task should not proceed sets `blocked` and surfaces it. Set it
+  directly from `ready` or `blocked`; a task that is `in_progress` or `in_review` must reach
+  `blocked` or `done` first. Requires **`cancelled_reason`** (a sentence; not `blocked_reason`,
+  whose `blocked_by` checks are specific to `blocked`). Nothing transitions out of it
+  automatically — `pick-task` and `flow-recover` ignore it — and only a human reverses it, by
+  editing `status` back to `ready`.
+
+You hand-write exactly **three** transitions: the claim (it must stay an atomic first-push-wins
+commit — see Concurrency), `blocked` (a judgment call), and — orchestrator only — `cancelled`. Every PR-event transition is owned
 by workflows committing to `main`.
 
 ### Which model builds a task
@@ -327,6 +345,13 @@ asks:
 - **`decision`** — a ruling that is not yours to make. It **must** carry `Recommend: <the option
   and why>`: a decision reaches the human with the recommendation you are already holding, or it
   hands back thinking that was already done. `flow-doctor` fails a `decision` without one.
+  **Check the spec before you ask.** Before writing a `decision`, read this task's body and
+  `notes`, the intent it names, and the tasks in its `blocked_by` and any task whose `blocked_by`
+  points at it. If one of them already answers the question, follow that answer and append a
+  `notes` line citing where it came from. Then it is not a decision.
+  **No open `decision` at hand-off.** A worker does not open its PR for review with an open
+  `decision` ask. Either the work does not depend on the answer, so it is a `fyi` (or a
+  `follow-up` for the task that does), or it does, so the task is `blocked`.
 - **`follow-up`** — a task that should exist and doesn't. You never create it (the orchestrator
   writes tasks); you name it in one sentence.
 - **`fyi`** — what the reviewer should know before merging.

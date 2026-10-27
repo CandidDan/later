@@ -50,7 +50,7 @@ const __isMain = (() => {
   } catch { return false; }
 })();
 // ---------------------------------------------------------------------------------------
-export const STATUSES = new Set(["ready", "in_progress", "in_review", "done", "blocked"]);
+export const STATUSES = new Set(["ready", "in_progress", "in_review", "done", "blocked", "cancelled"]);
 
 // Patch a single frontmatter field in a task-file's text, touching nothing else.
 function replaceField(block, key, value) {
