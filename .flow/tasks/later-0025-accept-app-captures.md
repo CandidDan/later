@@ -1,7 +1,7 @@
 ---
 id: "later-0025"
 title: "Accept authenticated captures from the iPhone app"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "later"
 owner: "claude-worker-later-0025"
@@ -10,8 +10,8 @@ started: "2026-10-26T05:30:17Z"
 branch: "flow/later-0025-accept-app-captures"
 pr: "https://github.com/CandidDan/later/pull/52"
 issue: ""
-blocked_reason: "Adding POST /api/app/captures fails src/lib/operations/launch-readiness.test.ts (AC3): the route must be listed in PRODUCTION_ENDPOINTS in src/lib/operations/launch-readiness.mjs and documented in README.md. Both paths are outside this task's touches, and both are being edited by open PR #51 (later-0024, in_review). Needs touches widened on main and #51 merged first."
-blocked_by: ["https://github.com/CandidDan/later/pull/51"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G1", "G4"]
 intent: ""
 model: "opus"
