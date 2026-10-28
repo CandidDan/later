@@ -113,6 +113,30 @@ describe("createSupabaseCaptureJobStore", () => {
     expect(calls).toEqual([{ table: "claim_segment_resolution_job", operation: "rpc", values: {}, filters: [] }]);
   });
 
+  it("claims article extraction through its independent RPC with the exact source analysis id", async () => {
+    const { client, calls } = createFakeClient([{ data: [{
+      id: "article-job-1", capture_id: "capture-1", attempts: 1, source_analysis_id: "source-1",
+    }] }]);
+    expect(await createSupabaseCaptureJobStore(client).claimNextJob("article_extraction")).toEqual({
+      id: "article-job-1", captureId: "capture-1", jobType: "article_extraction", attempts: 1,
+      sourceAnalysisId: "source-1",
+    });
+    expect(calls).toEqual([{ table: "claim_article_extraction_job", operation: "rpc", values: {}, filters: [] }]);
+  });
+
+  it("finalizes article extraction through the fenced dedicated RPC", async () => {
+    const { client, calls } = createFakeClient([{ data: [{ extraction_id: "extraction-1" }] }, { data: [] }]);
+    const store = createSupabaseCaptureJobStore(client);
+    const job = { id: "article-job-1", captureId: "capture-1", jobType: "article_extraction" as const,
+      attempts: 2, sourceAnalysisId: "source-1" };
+    expect(await store.finishArticleExtractionAttempt(job, null, "fetch_failed"))
+      .toStrictEqual({ extractionId: "extraction-1" });
+    expect(await store.finishArticleExtractionAttempt(job, null, "fetch_failed")).toBeUndefined();
+    expect(calls[0]).toEqual({ table: "finish_article_extraction_attempt", operation: "rpc", values: {
+      p_job_id: "article-job-1", p_attempt: 2, p_record: null, p_error_code: "fetch_failed",
+    }, filters: [] });
+  });
+
   it("sends the lease fence and safe failure in one finalization RPC", async () => {
     const { client, calls } = createFakeClient([{ data: [{ analysis_id: null, resolution_job_id: null }] }]);
     const store = createSupabaseCaptureJobStore(client);

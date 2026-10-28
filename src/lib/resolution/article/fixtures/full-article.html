@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <title>Why durable queues outlive their workers | Example Engineering</title>
+  <meta property="og:site_name" content="Example Engineering">
+  <meta name="author" content="Ada Example">
+  <script>document.title = "rewritten by a script"; window.ran = true;</script>
+  <link rel="stylesheet" href="https://example.com/should-never-load.css">
+</head>
+<body>
+  <header class="site-header"><nav><a href="/">Home</a> <a href="/archive">Archive</a> <a href="/about">About</a></nav></header>
+  <main>
+    <article>
+      <h1>Why durable queues outlive their workers</h1>
+      <p class="byline">By Ada Example</p>
+      <p>Every background system eventually loses a worker in the middle of a job. The process is
+        killed, the machine is recycled, or a deploy lands at exactly the wrong moment. What matters
+        is not whether this happens, but what the system remembers when it does.</p>
+      <p>A durable queue stores the job before anyone starts it. The claim is a row update with a
+        lease, and the lease has an expiry. If the worker vanishes, the lease runs out and another
+        worker can pick the job up again. Nothing is lost, because nothing was ever only in memory.</p>
+      <h2>Fencing the second attempt</h2>
+      <p>The subtle part is the <em>late</em> worker. A worker that was merely slow, not dead, may
+        come back after its lease expired and try to publish a result. Each claim therefore carries
+        an attempt number, and finishing requires presenting the same number. A stale attempt is
+        quietly refused, so two workers can never both publish an answer for one job.</p>
+      <blockquote>Retries are cheap; duplicate side effects are not.</blockquote>
+      <p>Bounded retries keep failures honest. After three attempts the job is marked terminal and
+        the reason is recorded from a closed list, so an operator can tell a network outage from a
+        page that was simply never going to work. A failed row is evidence, and it should be kept
+        rather than deleted to make a dashboard look green.</p>
+      <p>None of this is new. It is the same discipline that payment systems and mail servers have
+        used for decades, and it remains the simplest way to make background work trustworthy when
+        the machines underneath it are not. Start with the queue, and the rest follows from there.</p>
+    </article>
+  </main>
+  <aside class="related"><h3>Related</h3><ul><li><a href="/a">Lease design in practice</a></li><li><a href="/b">A short history of mail queues</a></li></ul></aside>
+  <footer><p>© 2026 Example Engineering. All rights reserved. Subscribe to our newsletter for more.</p></footer>
+</body>
+</html>

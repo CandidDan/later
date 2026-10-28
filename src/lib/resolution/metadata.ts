@@ -78,6 +78,8 @@ export interface PublicDocument {
   requestedUrl: string;
   finalUrl: string;
   contentType: string;
+  /** The transport `charset` parameter, when the server declared one. */
+  charset?: string;
   body: Uint8Array;
 }
 
@@ -324,10 +326,12 @@ export async function fetchPublicDocument(
     response.headers["content-type"],
     new Set(supportedContentTypes),
   );
+  const charset = /;\s*charset\s*=\s*"?([^";\s]+)"?/iu.exec(response.headers["content-type"] ?? "")?.[1];
   return {
     requestedUrl: rawUrl,
     finalUrl: resolved.url.href,
     contentType,
+    ...(charset === undefined ? {} : { charset: charset.toLowerCase() }),
     body: response.body,
   };
 }

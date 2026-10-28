@@ -176,6 +176,8 @@ describe("v0 launch readiness", () => {
     const union = typeSource.split("export type CaptureJobType =")[1].split(";")[0];
     const actualQueues = [...union.matchAll(/"([a-z_]+)"/gu)].map((match) => match[1]);
     expect(actualQueues.sort()).toEqual([...BACKGROUND_QUEUES].sort());
+    expect(BACKGROUND_QUEUES).toContain("article_extraction");
+    expect(BACKGROUND_QUEUES).toHaveLength(6);
     for (const queue of BACKGROUND_QUEUES) expect(readme).toContain(`\`${queue}\``);
     expect(readFileSync("src/app/api/jobs/process/route.ts", "utf8")).toMatch(/maxJobs:\s*2/u);
     expect(readme).toContain("at most **two jobs**");
@@ -231,6 +233,7 @@ describe("v0 launch readiness", () => {
       "Background intent processing",
       "Background source processing",
       "Background segment processing",
+      "Background article extraction",
       "Private `/research` console",
     ]) {
       expect(matrix).toContain(`| ${path} |`);

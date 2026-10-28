@@ -11,6 +11,8 @@ describe("intent operator guide", () => {
   it("AC6 identifies every Vault name, environment setting, verification query and lifecycle", () => {
     for (const name of ["later_jobs_process_url", "later_jobs_process_secret", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_INTENT_MODEL", "JOBS_PROCESS_SECRET", "JOBS_PROCESS_URL"]) expect(guide).toContain(name);
     for (const step of ["Vault interface", "supabase db push", "cron.job_run_details", "net._http_response", "public.capture_jobs", "available_at", "ten minutes", "terminal", "active := false"]) expect(guide.replace(/\s+/gu, " ")).toContain(step);
+    expect(guide).toContain("all six v0 queues");
+    for (const queue of ["intent_analysis", "media_download", "email_enrichment", "source_resolution", "segment_resolution", "article_extraction"]) expect(guide).toContain(`\`${queue}\``);
     const queries = [...guide.matchAll(/```sql\n([\s\S]*?)```/g)].map(m => m[1]);
     expect(queries.length).toBeGreaterThan(0);
     expect(queries.join("\n")).not.toMatch(/decrypted_secret|select \*|headers|content|create_secret/iu);
