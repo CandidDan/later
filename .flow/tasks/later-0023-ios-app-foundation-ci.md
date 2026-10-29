@@ -1,7 +1,7 @@
 ---
 id: "later-0023"
 title: "Create the native iPhone app foundation, gated in hosted macOS and Linux CI"
-status: "in_progress"
+status: "blocked"
 priority: 1
 project: "later"
 owner: "codex-later-0023-takeover"
@@ -10,7 +10,7 @@ started: "2026-10-29T22:49:32Z"
 branch: "flow/later-0023-ios-app-foundation"
 pr: "https://github.com/CandidDan/later/pull/50"
 issue: ""
-blocked_reason: ""
+blocked_reason: "Not machine-checkable: this session has no attached cloud executor and shell GitHub access fails. Required Linux/web gates and rebase remain unrun; hosted ios-ci is validating commit 395da87e24d00a2fc15ac4c90f87cf9277e04408."
 blocked_by: []
 serves: ["G4"]
 intent: ""
@@ -24,10 +24,12 @@ touches:
   - ".gitignore"
 labels: ["ios", "ci", "foundation"]
 asks:
+  - "decision: resume this task in a cloud coding environment with GitHub access. Recommend: use the existing Later cloud environment to run Linux/web gates and rebase without using Dan’s Mac for builds."
   - "decision: once later-0023 merges, add the `ios-ci` check as a required status check on `main` (GitHub → Settings → Branches)? Recommend: yes — Flow's own gate cannot run macOS, so this is the only thing that makes a red iOS build block a merge."
   - "follow-up: canonical Flow (CandidDan/flow) `source_roots` cannot choose a runner, so a macOS check cannot be declared in .flow/config.yml; a `runs_on` field upstream would let ios-ci move inside the Flow gate."
   - "fyi: GitHub bills hosted macOS minutes at 10x against the account's included Actions minutes on a private repo; ios-ci skips its macOS work on PRs that do not touch iOS paths to stay inside the included allowance."
 notes:
+  - "2026-10-30 Codex handoff: claimed with Dan’s authorization. Fixed ColorToken.onAccent to black in dark appearance, white in light, on existing branch; commit 395da87e24d00a2fc15ac4c90f87cf9277e04408. Existing contrast test remains unchanged. Hosted ios-ci run 40968884959 started; result not yet verified. PR #50 remains draft. Next: inspect that run, fix any remaining failures, run linux-check.sh and configured web gates in cloud, rebase latest main and repeat gates as necessary, update PR checklist, gh pr ready, regenerate board. No attached cloud executor here; shell gh cannot connect to api.github.com. Board regeneration is outstanding. No merge or deployment performed."
   - "2026-10-30: Dan explicitly authorized Codex to take over PR #50 from Claude. Hosted run 40265652494 built and passed UI tests but failed ThemeTests.testTokenContrast: onAccent/accent dark contrast 3.513 < 4.5. Preserve the test and correct semantic token pairing."
   - "2026-10-26 (orchestrator): first slice of the iOS v1 queue (later-0023…later-0037). Dan approved the general UX and playback/vision; the colour palette is NOT approved, so colours are replaceable semantic tokens only. The private Claude Design link is a demo, not a spec; this task stands alone without it."
   - "2026-10-26 (orchestrator): canonical Flow integration researched — `source_roots` (.flow/bin/source-roots.mjs) runs checks on the Linux gate runner only (runtime node|deno|none, no runner field). Adding jobs to flow-gates.yml is forbidden here. Therefore: Linux half via a `source_roots` entry (Flow gate), macOS half via the repo-owned `ios-ci.yml` workflow. Confirmed 2026-10-26 that a cloud session can push files under .github/workflows/."
