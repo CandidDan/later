@@ -1,16 +1,16 @@
 ---
 id: "later-0025"
 title: "Accept authenticated captures from the iPhone app"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "later"
-owner: "claude-worker-later-0025"
+owner: ""
 created: "2026-10-26"
-started: "2026-10-28T11:27:02Z"
+started: ""
 branch: "flow/later-0025-accept-app-captures"
 pr: "https://github.com/CandidDan/later/pull/52"
 issue: ""
-blocked_reason: "Waiting on a human to widen touches (not machine-checkable): launch-readiness.test.ts AC3 requires POST /api/app/captures in PRODUCTION_ENDPOINTS (src/lib/operations/launch-readiness.mjs) and in README.md, and neither path is in touches. PR #51 has merged, so nothing else is in the way."
+blocked_reason: ""
 blocked_by: []
 serves: ["G1", "G4"]
 intent: ""
@@ -20,10 +20,12 @@ model_reason: "New authenticated write endpoint that persists through the servic
 touches:
   - "src/app/api/app/captures/**"
   - "src/lib/capture/**"
+  - "src/lib/operations/launch-readiness.mjs"
+  - "README.md"
 labels: ["backend", "capture", "security"]
-asks:
-  - "decision: widen touches to add src/lib/operations/launch-readiness.mjs and README.md so the new endpoint can join the production endpoint contract? Recommend: yes, widen both. It is a one-line list entry plus one README row, and the contract test exists to stop an undocumented production endpoint shipping. PR #51 has merged, so both files are free to edit now."
+asks: []
 notes:
+  - "2026-10-29 (orchestrator): Resolved the routine endpoint-registration scope omission under Dan\'s standing authorization to complete v1 and merge green PRs. Added only src/lib/operations/launch-readiness.mjs and README.md to touches; returned to ready, retaining branch and PR. Resume PR #52, rebase latest main and check live touches overlaps before claiming; register POST /api/app/captures in both places, then run all gates and independent reviews before merge. No new product scope. This session has no cloud executor: flow-doctor and board snapshot regeneration remain for the next cloud worker; no build or worker dispatch is claimed."
   - "2026-10-26 (orchestrator): backend half of iOS share capture; later-0034 (share extension) consumes it. Parallel-safe with later-0023 and later-0024 (touches checked disjoint)."
   - "2026-10-26 (worker): handler src/lib/capture/app-share.ts, wiring app-share-server.ts, route src/app/api/app/captures/route.ts + route.test.ts and app-share.test.ts all pushed on flow/later-0025-accept-app-captures. Build, lint, targeted vitest green. Decision: url and text joined with a newline (WhatsApp has no joiner; the normaliser extracts urls from one string). Next: full pnpm test + coverage, then open PR and gh pr ready."
   - "2026-10-26 (worker): BLOCKED. Branch flow/later-0025-accept-app-captures is pushed and complete for every acceptance criterion: route.test.ts (21 tests) and app-share.test.ts (11) pass, build and lint are clean, and the Docker DB test passes once Docker is up. The only red is launch-readiness.test.ts AC3: PRODUCTION_ENDPOINTS and the README must list POST /api/app/captures, and both files are outside touches. Draft PR #52 was opened by flow-open-pr; leave it as a draft. flow-unblock will release this task when #51 merges, but if touches still lacks launch-readiness.mjs and README.md at that point, block it again rather than editing them. Next action, once #51 merges and touches are widened: rebase the branch on main; add 'POST /api/app/captures' to PRODUCTION_ENDPOINTS in launch-readiness.mjs; add the endpoint to the README endpoint list in the same style as its neighbours; run pnpm test:coverage; push; make sure PR #52 is titled [later-0025] Accept authenticated captures from the iPhone app and has the criteria checklist in its body; then gh pr ready."
