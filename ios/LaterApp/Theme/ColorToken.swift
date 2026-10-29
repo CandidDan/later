@@ -29,9 +29,10 @@ enum ColorToken: String, CaseIterable, Sendable {
     // text is the primary label at a higher opacity.
     case .textSecondary:
       UIColor { traits in UIColor.label.resolvedColor(with: traits).withAlphaComponent(0.72) }
-    // `.systemBlue` with white text is under 4.5:1; indigo clears it in both appearances.
+    // Indigo becomes lighter in dark appearance, so its foreground switches to black.
     case .accent: .systemIndigo
-    case .onAccent: .white
+    case .onAccent:
+      UIColor { traits in traits.userInterfaceStyle == .dark ? .black : .white }
     case .divider: .separator
     case .destructive: .systemRed
     }
