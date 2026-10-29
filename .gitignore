@@ -42,3 +42,11 @@ next-env.d.ts
 
 # --- Flow ---
 .flow/board-edits.json
+
+# --- iOS (ios/) ---
+# The Xcode project is generated from ios/project.yml by XcodeGen and never committed.
+*.xcodeproj
+DerivedData/
+.build/
+*.xcresult
+/ios/build/

@@ -1,0 +1,79 @@
+# XcodeGen spec for the Later iPhone app. The .xcodeproj is generated from this file and never
+# committed: `xcodegen generate --spec ios/project.yml` (ios/scripts/macos-ci.sh pins the version).
+name: Later
+options:
+  deploymentTarget:
+    iOS: "18.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+# The xcconfigs are attached to each TARGET as well as the project: XcodeGen's project-level
+# presets (SWIFT_VERSION 5.0 among them) outrank a project xcconfig, but a target xcconfig
+# outranks them. Its platform preset (TARGETED_DEVICE_FAMILY "1,2") is target-level, so that one
+# key is restated per target below.
+configFiles: &configFiles
+  Debug: Config/Debug.xcconfig
+  Release: Config/Release.xcconfig
+packages:
+  LaterKit:
+    path: LaterKit
+targets:
+  Later:
+    type: application
+    configFiles: *configFiles
+    platform: iOS
+    sources:
+      - path: LaterApp
+        excludes:
+          - Info.plist
+    dependencies:
+      - package: LaterKit
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1"
+        PRODUCT_NAME: Later
+        PRODUCT_MODULE_NAME: Later
+        PRODUCT_BUNDLE_IDENTIFIER: $(LATER_BUNDLE_ID)
+        INFOPLIST_FILE: LaterApp/Info.plist
+  LaterAppTests:
+    type: bundle.unit-test
+    configFiles: *configFiles
+    platform: iOS
+    sources:
+      - LaterAppTests
+    dependencies:
+      - target: Later
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1"
+        PRODUCT_BUNDLE_IDENTIFIER: $(LATER_BUNDLE_ID).tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Later.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Later
+        BUNDLE_LOADER: $(TEST_HOST)
+  LaterAppUITests:
+    type: bundle.ui-testing
+    configFiles: *configFiles
+    platform: iOS
+    sources:
+      - LaterAppUITests
+    dependencies:
+      - target: Later
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1"
+        PRODUCT_BUNDLE_IDENTIFIER: $(LATER_BUNDLE_ID).uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Later
+schemes:
+  Later:
+    build:
+      targets:
+        Later: all
+    test:
+      config: Debug
+      gatherCoverageData: true
+      coverageTargets:
+        - Later
+      targets:
+        - LaterAppTests
+        - LaterAppUITests
