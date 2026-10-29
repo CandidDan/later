@@ -4,9 +4,9 @@ title: "Create the native iPhone app foundation, gated in hosted macOS and Linux
 status: "in_progress"
 priority: 1
 project: "later"
-owner: "claude-worker-later-0023"
+owner: "codex-later-0023-takeover"
 created: "2026-10-26"
-started: "2026-10-26T03:35:15Z"
+started: "2026-10-29T22:49:32Z"
 branch: "flow/later-0023-ios-app-foundation"
 pr: "https://github.com/CandidDan/later/pull/50"
 issue: ""
@@ -28,6 +28,7 @@ asks:
   - "follow-up: canonical Flow (CandidDan/flow) `source_roots` cannot choose a runner, so a macOS check cannot be declared in .flow/config.yml; a `runs_on` field upstream would let ios-ci move inside the Flow gate."
   - "fyi: GitHub bills hosted macOS minutes at 10x against the account's included Actions minutes on a private repo; ios-ci skips its macOS work on PRs that do not touch iOS paths to stay inside the included allowance."
 notes:
+  - "2026-10-30: Dan explicitly authorized Codex to take over PR #50 from Claude. Hosted run 40265652494 built and passed UI tests but failed ThemeTests.testTokenContrast: onAccent/accent dark contrast 3.513 < 4.5. Preserve the test and correct semantic token pairing."
   - "2026-10-26 (orchestrator): first slice of the iOS v1 queue (later-0023…later-0037). Dan approved the general UX and playback/vision; the colour palette is NOT approved, so colours are replaceable semantic tokens only. The private Claude Design link is a demo, not a spec; this task stands alone without it."
   - "2026-10-26 (orchestrator): canonical Flow integration researched — `source_roots` (.flow/bin/source-roots.mjs) runs checks on the Linux gate runner only (runtime node|deno|none, no runner field). Adding jobs to flow-gates.yml is forbidden here. Therefore: Linux half via a `source_roots` entry (Flow gate), macOS half via the repo-owned `ios-ci.yml` workflow. Confirmed 2026-10-26 that a cloud session can push files under .github/workflows/."
   - "2026-10-26 (worker): branch flow/later-0023-ios-app-foundation pushed with LaterKit (AppInfo, ListeningDuration + tests), ios/.swift-format, ios/scripts/{check-coverage,pick-simulator}.mjs + node tests, linux-check.sh (green locally: Swift 6.4.0 pinned, sha256 from a GPG-verified swift.org download) and macos-ci.sh (stub-tested). Pins: macos-26 + Xcode 26.6 (image default; Xcode 27 is not on macos-26), XcodeGen 2.46.0 sha256-verified. NOT yet done: app target sources, project.yml, Config xcconfigs, ios-ci.yml, .flow/config.yml edits, README. Next: write those, push, open PR, iterate on the hosted ios-ci run."
