@@ -177,6 +177,7 @@ Production endpoints are deliberately narrow:
 | --- | --- |
 | `POST /api/inbound/whatsapp` | Validates Twilio signature, persists, then returns `Saved for Later ✓`; invalid signatures are rejected |
 | `POST /api/inbound/email` | Validates Resend signature, persists addressed mail, then returns `Accepted`; unaddressed signed mail receives the same acknowledgement |
+| `POST /api/app/captures` | Requires the evaluator's verified Supabase bearer session; accepts `requestId` (UUID) with `url` and/or `text` and an optional `note`, saves one `ios_share` capture owned by the session user, and returns only its id; retries with the same `requestId` save once |
 | `POST /api/jobs/process` | Requires bearer `JOBS_PROCESS_SECRET`; responds only with claimed/succeeded/failed counts |
 | `GET /api/research/next` | Authenticated evaluator receives capture-time recall material only |
 | `POST /api/research/recall` | Atomically stores immutable unaided recall before reveal; rejects fresh recall after revisit exposure while preserving existing recall |

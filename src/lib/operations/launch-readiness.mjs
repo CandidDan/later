@@ -247,6 +247,7 @@ export const ENVIRONMENT_CONTRACT = [
 export const PRODUCTION_ENDPOINTS = [
   "POST /api/inbound/whatsapp",
   "POST /api/inbound/email",
+  "POST /api/app/captures",
   "POST /api/jobs/process",
   "GET /api/research/next",
   "POST /api/research/recall",
