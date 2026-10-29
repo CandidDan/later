@@ -1,12 +1,12 @@
 ---
 id: "later-0025"
 title: "Accept authenticated captures from the iPhone app"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "later"
-owner: ""
+owner: "claude-worker-2026-10-29T02:26:28Z"
 created: "2026-10-26"
-started: ""
+started: "2026-10-29T02:26:28Z"
 branch: "flow/later-0025-accept-app-captures"
 pr: "https://github.com/CandidDan/later/pull/52"
 issue: ""
