@@ -1,23 +1,23 @@
 #!/usr/bin/env node
 // task-model.mjs — which model, at which effort, builds a task; and moving a failed task up a tier.
 //
-// THE PROBLEM IT SOLVES (flow-0083). The queue runner ran every worker on one literal model,
-// whatever the task needed. Most tasks — tight criteria, small `touches`, an existing pattern to
+// THE PROBLEM IT SOLVES (flow-0083). The worker used to run on one literal model, whatever the
+// task needed. Most tasks — tight criteria, small `touches`, an existing pattern to
 // follow — are Sonnet work; a few need Opus or Fable. The orchestrator who writes the task makes
 // that call once, with a reason, in the task's own frontmatter:
 //
 //   model: "opus"                 # haiku | sonnet | opus | fable    (unset: sonnet)
 //   effort: "high"                # low | medium | high | max         (unset: medium)
-//   model_reason: "edits the queue runner and the store's state transitions"
+//   model_reason: "edits the recover sweep and the store's state transitions"
 //
 // And because a model rarely knows when it is out of its depth, a failed attempt moves the task
 // up a tier ON ITS OWN (`escalate`), rather than waiting for the weaker model to ask for help:
 //
 //   haiku → sonnet → opus → fable → (a `decision` ask: split the task)
 //
-// Three triggers call `escalate`: a queue-runner run that ends without a PR, a PR closed unmerged,
-// and the worker itself, which blocks with `Recommend: re-run on <tier>` (that one is protocol,
-// not code). Every escalation is a TASK-STATE change, so it is a commit to the task file on
+// Three triggers call `escalate`: flow-recover resetting a stranded claim that pushed nothing
+// (flow-0174, which took this over from the retired queue-runner), a PR closed unmerged, and the
+// worker itself, which blocks with `Recommend: re-run on <tier>` (that one is protocol, not code). Every escalation is a TASK-STATE change, so it is a commit to the task file on
 // `main`, never on a branch.
 //
 // FOUR DECISIONS, MADE ONCE:
@@ -247,22 +247,6 @@ export function escalate(text, event, { once = false } = {}) {
   return writeAsks(text, [...kept, ask]);
 }
 
-/**
- * Trigger 1's decision, from the facts the queue runner's verify step derives on `origin`: did
- * this run end without a PR? A run escalates when no PR is open for the task, the task on `main`
- * is not `blocked`/`in_review`/`done` (a block is the worker's own, legitimate outcome — trigger
- * 3 — and the other two mean a PR got there), and EITHER the worker step failed (`error_max_turns`
- * and every other non-zero end) OR it pushed no branch ahead of `main`.
- */
-export function decideRunEscalation({ workerFailed = false, branchAhead = false, hasOpenPr = false, status = "" } = {}) {
-  if (hasOpenPr) return { escalate: false, why: "a PR is open for the task" };
-  if (["blocked", "in_review", "done"].includes(status)) return { escalate: false, why: `the task is ${status} on main` };
-  if (status === "") return { escalate: false, why: "the task was not found on main" };
-  if (workerFailed) return { escalate: true, why: "the worker step failed and no PR is open" };
-  if (!branchAhead) return { escalate: true, why: "no branch was pushed ahead of main and no PR is open" };
-  return { escalate: false, why: "a branch was pushed; flow-open-pr / flow-recover carry it to a PR" };
-}
-
 // ── store I/O ──────────────────────────────────────────────────────────────
 
 /** The path of the task file whose frontmatter id is `id`, or null. */
@@ -298,8 +282,6 @@ const truthy = (v) => v === "1" || v === "true";
  *   escalate --task-id X --event "..." [--once]
  *                                         rewrite the task file one tier up (--once: unless
  *                                         the task already records this event)
- *   decide   --task-id X --worker-failed 0|1 --branch-ahead 0|1 --has-open-pr 0|1
- *                                         print escalate=true|false (+ $GITHUB_OUTPUT)
  */
 export function runCli(argv, tasksDir, io = {}) {
   const { log = console.log, error = console.error, env = process.env } = io;
@@ -310,13 +292,12 @@ export function runCli(argv, tasksDir, io = {}) {
     for (const [k, v] of Object.entries(pairs)) log(`${k}=${v}`);
     if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, Object.entries(pairs).map(([k, v]) => `${k}=${v}\n`).join(""));
   };
-  if (!["resolve", "escalate", "decide"].includes(mode)) {
-    error("usage: task-model.mjs resolve|escalate|decide --task-id <id> [...]");
+  if (!["resolve", "escalate"].includes(mode)) {
+    error("usage: task-model.mjs resolve|escalate --task-id <id> [...]");
     return 2;
   }
   const file = findTaskFile(tasksDir, taskId);
   if (!file) {
-    if (mode === "decide") { output({ escalate: "false", why: `no task ${taskId} on main` }); return 0; }
     error(`::error::task-model: no task with id "${taskId}" in ${tasksDir}`);
     return 1;
   }
@@ -328,30 +309,20 @@ export function runCli(argv, tasksDir, io = {}) {
       if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, summaryLine(taskId, r) + "\n");
       return 0;
     }
-    if (mode === "escalate") {
-      const event = String(flags.event ?? "").trim();
-      if (!event) { error("::error::task-model escalate: --event is required"); return 2; }
-      const once = truthy(flags.once);
-      if (once && recordsEvent(text, event)) {
-        log(`${taskId}: already escalated after ${event} — nothing to do`);
-        return 0;
-      }
-      const before = resolve(text).tier;
-      const after = escalate(text, event, { once });
-      writeFileSync(file, after);
-      const now = readField(after, "model") || before;
-      log(now === before
-        ? `${taskId}: already at the top tier (${before}) — added a decision ask recommending a split`
-        : `${taskId}: escalated ${before} -> ${now} after ${event}`);
+    const event = String(flags.event ?? "").trim();
+    if (!event) { error("::error::task-model escalate: --event is required"); return 2; }
+    const once = truthy(flags.once);
+    if (once && recordsEvent(text, event)) {
+      log(`${taskId}: already escalated after ${event} — nothing to do`);
       return 0;
     }
-    const d = decideRunEscalation({
-      workerFailed: truthy(flags["worker-failed"]),
-      branchAhead: truthy(flags["branch-ahead"]),
-      hasOpenPr: truthy(flags["has-open-pr"]),
-      status: readField(text, "status"),
-    });
-    output({ escalate: String(d.escalate), why: d.why });
+    const before = resolve(text).tier;
+    const after = escalate(text, event, { once });
+    writeFileSync(file, after);
+    const now = readField(after, "model") || before;
+    log(now === before
+      ? `${taskId}: already at the top tier (${before}) — added a decision ask recommending a split`
+      : `${taskId}: escalated ${before} -> ${now} after ${event}`);
     return 0;
   } catch (e) {
     error(`::error::task-model (${taskId}): ${e.message}`);

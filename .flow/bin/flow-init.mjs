@@ -12,7 +12,7 @@
 // enforcement is not, and nobody finds out until something ships broken.
 //
 // So the deterministic steps move here (copy the tree, re-pin the callers, stamp the version,
-// write the config, set the board's repo) and the judgement stays with the caller: this tool
+// write the config) and the judgement stays with the caller: this tool
 // NEVER invents a config value. Every input it needs and cannot derive is REQUIRED, and a
 // missing one is a non-zero exit naming the field — not a default.
 //
@@ -27,9 +27,8 @@
 //
 //   · The template's sample task (`.flow/tasks/0001-*.md`) is NOT copied. It is a reference for
 //     reading canonical's template, not content for a new repo — copied in, it becomes a `ready`
-//     task a queue-runner can genuinely dispatch, against files that do not exist. Only
-//     `_TEMPLATE.md` travels. The board's snapshot is emptied to match, so the store and the
-//     board agree from the first commit.
+//     task a worker can genuinely pick, against files that do not exist. Only
+//     `_TEMPLATE.md` travels.
 //   · `VISION.md` is NOT copied. It ships as a shape with placeholder goals, and a placeholder
 //     vision is worse than none: `serves:` would resolve against slots nobody wrote. The
 //     `vision-writer` skill interviews a human for it — judgement, not a copy.
@@ -308,7 +307,7 @@ export function validateInputs(inputs, { targetDir, exists = existsSync } = {}) 
   need(inputs.project.language, "project.language");
   need(inputs.project.description, "project.description", "one line");
   if (!OWNER_REPO.test(String(inputs.repo || "")))
-    errors.push(`repo must be "owner/repo" (got ${JSON.stringify(inputs.repo)}) — it targets the board's "Work this" link`);
+    errors.push(`repo must be "owner/repo" (got ${JSON.stringify(inputs.repo)}) — it names the repo being adopted`);
 
   for (const k of COMMAND_KEYS) {
     need(inputs.commands[k], `commands.${k}`,
@@ -441,15 +440,6 @@ export function repin(text, { repo, ref }) {
       (_m, head, tail) => `${head}${ref}${tail}`);
 }
 
-// Point the board at this repo, and empty its task snapshot. The snapshot ships holding the
-// template's sample task, which flow-init does not copy — leaving it would make the board
-// disagree with the store on the repo's very first commit, and flow-doctor say so.
-export function prepareBoard(text, repo) {
-  return text
-    .replace(/^const REPO = "[^"]*";/m, `const REPO = ${yamlStr(repo)};`)
-    .replace(/^const TASKS = \[[\s\S]*?\n\];/m, "const TASKS = [\n];");
-}
-
 // `.gitignore` is MERGED, never clobbered — a new repo may already have one, and replacing it
 // would silently un-ignore whatever it protected. Appends only the lines the target lacks, so a
 // second run finds nothing missing and returns the file byte-identical (that is what makes the
@@ -493,16 +483,14 @@ export function buildPlan({ canonicalRoot, inputs, targetDir }) {
   const add = (path, contents, kind = "copy") =>
     files.push({ path, kind, contents: Buffer.isBuffer(contents) ? contents : Buffer.from(contents, "utf8") });
 
-  // .flow/ — everything except the three files this tool owns, and the sample task.
+  // .flow/ — everything except the two files this tool owns, and the sample task.
   for (const rel of walkFiles(join(template, ".flow"))) {
-    if (rel === "config.yml" || rel === "VERSION" || rel === "board.html") continue;
+    if (rel === "config.yml" || rel === "VERSION") continue;
     if (rel.startsWith("tasks/") && rel !== "tasks/_TEMPLATE.md") continue;
     add(`.flow/${rel}`, readFileSync(join(template, ".flow", rel)));
   }
   add(".flow/config.yml", renderConfig(inputs));
   add(".flow/VERSION", readFileSync(versionPath));
-  const boardPath = join(template, ".flow", "board.html");
-  if (existsSync(boardPath)) add(".flow/board.html", prepareBoard(readFileSync(boardPath, "utf8"), inputs.repo));
 
   // .claude/ — skills, agents and the committed settings, verbatim.
   const claudeDir = join(template, ".claude");
@@ -593,7 +581,7 @@ export function renderUsage({ ref = "", stamp = "" } = {}) {
 
 Inputs (flags override --config; the JSON is shaped like .flow/config.yml):
   --name --language --description   project identity                       REQUIRED
-  --repo owner/repo                 this repo, for the board's link        REQUIRED
+  --repo owner/repo                 this repo (owner/repo)                REQUIRED
   --install --build --lint --test --coverage   the five gate commands      REQUIRED
   --coverage-min N                  measured floor, never a round guess    REQUIRED
   --source-root "src/=npm run lint" repeatable; must exist in the target   REQUIRED

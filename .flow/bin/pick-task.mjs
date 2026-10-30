@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// pick-task.mjs — the queue-runner's task selector. Pure, zero-dependency (Node >= 18).
+// pick-task.mjs — the worker's task selector. Pure, zero-dependency (Node >= 18).
 //
 // Implements step 1 of the Flow loop (.flow/PROTOCOL.md): pick the highest-priority `ready`
 // task whose declared `touches` blast radius does NOT overlap any task currently IN FLIGHT —
@@ -16,13 +16,14 @@
 //   node .flow/bin/pick-task.mjs        # prints e.g. "CAN-42" or nothing
 //
 // Two callers:
-//   - the scheduled queue-runner workflow reads this id to dispatch a fresh worker;
-//   - a human runs it at the repo root to sanity-check "what's next" against the board.
+//   - a worker started without a task id (a routine with an empty trigger) reads this id and
+//     claims it — the job the queue-runner did until flow-0174 retired it;
+//   - a human runs it at the repo root to sanity-check "what's next".
 //
 // Selection order: lowest `priority` NUMBER wins — P1 is most urgent, matching the
 // board's ascending sort and the PRI palette. Ties break by the task id's numeric
 // suffix ascending (older sequential ids first), then lexically by id. Determinism is
-// the point: two queue-runner ticks racing on the same store must agree on the same
+// the point: two workers racing on the same store must agree on the same
 // next task, or the first-push-wins claim degenerates into churn.
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -64,7 +65,7 @@ export function parseTask(text) {
     return m ? yamlScalar(m[1]) : "";   // flow-0131: a quoted `#` is data, not a comment
   };
   // flow-0111: this used to be an inline-array-only regex, which read every block-form
-  // `touches:` as [] and made the overlap filter below inert — the queue runner dispatched
+  // `touches:` as [] and made the overlap filter below inert — workers were dispatched
   // straight into collisions, in every repo.
   const touches = parseListField(head, "touches");
   const id = get("id");

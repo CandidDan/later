@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync, lstatSync,
 import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runDoctor, parseSourceRootsIgnore, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, asksFindings, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES, taskIntentFindings, parseIntentsRequiredFrom, INTENTS_REQUIRED_FROM_KEY, workstreamFindings, WORKSTREAM_REQUIRED, WORKSTREAM_STATUSES, workstreamDependencies } from "./flow-doctor.mjs";
+import { runDoctor, parseSourceRootsIgnore, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, asksFindings, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES, taskIntentFindings, parseIntentsRequiredFrom, INTENTS_REQUIRED_FROM_KEY, workstreamFindings, WORKSTREAM_REQUIRED, WORKSTREAM_STATUSES, workstreamDependencies, globsOverlap } from "./flow-doctor.mjs";
 
 // The vision every fixture gets unless it asks for none: two live goals, one non-goal, one
 // retired goal. Written in the shape flow-doctor's line regex reads, deliberately mixing the
@@ -167,14 +167,14 @@ test("ready with stale owner or empty touches — warnings, not problems", () =>
   cleanup(d);
 });
 
-test("board snapshot drift is a warning", () => {
+// flow-0164: the board is retired, so a stale snapshot left behind in an adopter is not drift.
+test("a stale board snapshot beside the store raises no board warning", () => {
   const d = fixture({ "0001-a.md": task("P-0001", { status: "in_progress", owner: "s", started: "2026-06-05" }) });
-  writeFileSync(join(d, "board.html"),
+  writeFileSync(join(d, "board" + ".html"),
     `<script>\nconst TASKS = [\n  {id:"P-0001", title:"x", status:"ready", priority:3},\n  {id:"P-9999", title:"ghost", status:"done", priority:3},\n];\n</script>`);
   const r = runDoctor({ flowDir: d });
   assert.deepEqual(r.problems, []);
-  assert.ok(r.warnings.some((w) => w.includes("P-0001=ready, files say in_progress")));
-  assert.ok(r.warnings.some((w) => w.includes("P-9999 but no task file")));
+  assert.deepEqual(r.warnings.filter((w) => /board/i.test(w)), []);
   cleanup(d);
 });
 
@@ -218,6 +218,57 @@ test("disjoint touches → no overlap warning (different trees are genuinely par
     "0002-b.md": task("P-0002", { touches: '["app/meetings/**"]' }),
   });
   const r = runDoctor({ flowDir: d });
+  assert.ok(!r.warnings.some((w) => w.includes("overlapping touches")));
+  cleanup(d);
+});
+
+// flow-0180: a wildcard in a file name no longer collapses the glob to its whole folder.
+test("globsOverlap: a file-name glob does not overlap a different file in its folder", () => {
+  assert.equal(globsOverlap(".flow/bin/status-transition*.mjs", ".flow/bin/plane-guard.mjs"), false);
+  assert.equal(globsOverlap(".flow/bin/plane-guard.mjs", ".flow/bin/status-transition*.mjs"), false);
+  assert.equal(globsOverlap("project-template/.flow/bin/status-transition*.mjs", "project-template/.flow/bin/flow-review.mjs"), false);
+});
+
+test("globsOverlap: a file-name glob overlaps a file it matches", () => {
+  assert.equal(globsOverlap(".flow/bin/status-transition*.mjs", ".flow/bin/status-transition.test.mjs"), true);
+  assert.equal(globsOverlap("changes/flow-*.md", "changes/flow-0177.md"), true);
+  assert.equal(globsOverlap("changes/flow-0177.md", "changes/flow-*.md"), true);
+});
+
+test("globsOverlap: ** and a wildcard folder keep the conservative prefix rule", () => {
+  assert.equal(globsOverlap("a/**", "a/b/c.mjs"), true);
+  assert.equal(globsOverlap("a/*/x.mjs", "a/b/x.mjs"), true);
+  assert.equal(globsOverlap("a/**", "a/b/x*.mjs"), true);
+});
+
+test("globsOverlap: segment-aware containment and identical globs", () => {
+  assert.equal(globsOverlap("app/foo", "app/foobar"), false);
+  assert.equal(globsOverlap("app/foo*.ts", "app/foo*.ts"), true);
+  assert.equal(globsOverlap(".flow/bin/status-transition*.mjs", ".flow/bin/status-transition*.mjs"), true);
+});
+
+test("globsOverlap: two file-name globs in one folder overlap only when their names can agree", () => {
+  assert.equal(globsOverlap("a/x*.mjs", "a/y*.mjs"), false);
+  assert.equal(globsOverlap("a/x*.mjs", "a/x*.md"), false);
+  assert.equal(globsOverlap("a/x*.mjs", "a/xy*.mjs"), true);
+  assert.equal(globsOverlap("a/*.mjs", "a/x*"), true);
+  assert.equal(globsOverlap("a/x*.mjs", "b/x*.mjs"), false);
+});
+
+test("globsOverlap: a literal folder still overlaps a file-name glob inside it", () => {
+  assert.equal(globsOverlap("a/b", "a/b/x*.mjs"), true);
+  assert.equal(globsOverlap("a", "a/b/x*.mjs"), true);
+  assert.equal(globsOverlap("a/c", "a/b/x*.mjs"), false);
+  assert.equal(globsOverlap("a/b/x*.mjs", "a/b/sub/x1.mjs"), false);
+});
+
+test("two in_progress tasks sharing only .flow/bin/ with names that cannot collide → no FAIL", () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", { status: "in_progress", owner: "s1", started: "2026-06-05", touches: '[".flow/bin/plane-guard.mjs"]' }),
+    "0002-b.md": task("P-0002", { status: "in_progress", owner: "s2", started: "2026-06-05", touches: '[".flow/bin/status-transition*.mjs"]' }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(!r.problems.some((p) => p.includes("overlapping touches")), r.problems.join("\n"));
   assert.ok(!r.warnings.some((w) => w.includes("overlapping touches")));
   cleanup(d);
 });
@@ -1742,13 +1793,13 @@ test("criterion 9: changes/flow-0073.md exists and describes the additions",
 test("criterion 1: two files, one id → a problem naming the id AND both paths", () => {
   const d = fixture({
     "flow-0049-ceiling.md": task("flow-0049"),
-    "flow-0049-queue-runner.md": task("flow-0049"),
+    "flow-0049-second-slug.md": task("flow-0049"),
   });
   const r = runDoctor({ flowDir: d });
   const dup = r.problems.filter((p) => p.includes("duplicate id flow-0049"));
   assert.equal(dup.length, 1, `expected exactly one grouped message, got:\n${r.problems.join("\n")}`);
   assert.match(dup[0], /\.flow\/tasks\/flow-0049-ceiling\.md/);
-  assert.match(dup[0], /\.flow\/tasks\/flow-0049-queue-runner\.md/,
+  assert.match(dup[0], /\.flow\/tasks\/flow-0049-second-slug\.md/,
     "naming only one side leaves the reader to go find the other — the fix is choosing between them");
   cleanup(d);
 });
@@ -1756,7 +1807,7 @@ test("criterion 1: two files, one id → a problem naming the id AND both paths"
 test("criterion 1: the CLI exits NON-ZERO on a duplicate id — the half CI actually reads", () => {
   const d = cliFixture({
     "flow-0049-ceiling.md": task("flow-0049"),
-    "flow-0049-queue-runner.md": task("flow-0049"),
+    "flow-0049-second-slug.md": task("flow-0049"),
   });
   const { code, out } = runCli(d);
   assert.equal(code, 1, out);
@@ -1783,7 +1834,7 @@ test("criterion 2: three files, one id → EVERY offending path is named, not th
 test("criterion 3: two DISTINCT ids whose files sort adjacently pass — not a proximity heuristic", () => {
   const d = fixture({
     "flow-0049-ceiling.md": task("flow-0049"),
-    "flow-0050-queue-runner.md": task("flow-0050"),
+    "flow-0050-second-slug.md": task("flow-0050"),
   });
   const r = runDoctor({ flowDir: d });
   assert.deepEqual(r.problems, [], "adjacent filenames sharing a slug prefix are not a collision");
@@ -1795,17 +1846,17 @@ test("criterion 4: frontmatter id disagreeing with the filename id is a problem 
   // The 2026-09-15 collision was cleared by a rename. A rename that forgets the frontmatter
   // re-creates the same ambiguity one layer down: findable under one id, self-describing as
   // another. The store then has no single answer to "which file is flow-0050?".
-  const d = fixture({ "flow-0050-queue-runner.md": task("flow-0049") });
+  const d = fixture({ "flow-0050-second-slug.md": task("flow-0049") });
   const r = runDoctor({ flowDir: d });
   assert.equal(r.problems.length, 1, r.problems.join("\n"));
-  assert.match(r.problems[0], /flow-0050-queue-runner\.md/, "the filename must be named");
+  assert.match(r.problems[0], /flow-0050-second-slug\.md/, "the filename must be named");
   assert.match(r.problems[0], /"flow-0049"/, "the frontmatter id must be named");
   assert.match(r.problems[0], /"flow-0050"/, "the filename's id must be named");
   cleanup(d);
 });
 
 test("criterion 4: the CLI exits NON-ZERO on a filename/frontmatter disagreement", () => {
-  const d = cliFixture({ "flow-0050-queue-runner.md": task("flow-0049") });
+  const d = cliFixture({ "flow-0050-second-slug.md": task("flow-0049") });
   const { code, out } = runCli(d);
   assert.equal(code, 1, out);
   assert.match(out, /FAIL.*disagrees with the id in its own filename/);

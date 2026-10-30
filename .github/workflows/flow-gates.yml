@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   flow-gates:
-    uses: CandidDan/flow/.github/workflows/_flow-gates.yml@v3
+    uses: CandidDan/flow/.github/workflows/_flow-gates.yml@v4
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
     # Node 22 is the default. Non-Node stack? Pass setup_node_version: "" and provision the

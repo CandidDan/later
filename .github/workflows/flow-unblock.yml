@@ -4,15 +4,15 @@ name: flow-unblock
 # reusable workflow, adopted here by reference. See docs/flow-reusable-workflows.md in the flow repo.
 #
 # Releases every `blocked` task whose `blocked_by` entries have ALL resolved (a task `done` on
-# main, a PR merged) back to `ready`, then dispatches flow-queue-runner.yml with no task_id when
-# there is ready work, no runner active, and FLOW_QUEUE_RUNNER is not `paused`. No model in the
+# main, a PR merged) back to `ready`, and stops there: it starts no worker (flow-0173) — the next
+# worker run, on the worker routine's own schedule, picks the released task. No model in the
 # loop. A block with no machine-readable `blocked_by` entry is never released — only a human may
 # lift it.
 #
 # Three triggers, one job: flow-done completing (fast), hourly (the backstop), and on demand.
 # NOT gated on FLOW_AI: a repo worked entirely by humans still has blocks whose dependencies land.
-# No secrets — the reusable uses GITHUB_TOKEN only. If your queue runner's workflow file is named
-# differently, pass it with `with: queue_runner_workflow: <file>.yml`.
+# No secrets — the reusable uses GITHUB_TOKEN only. The reusable still declares an ignored
+# `queue_runner_workflow` input (the retired queue-runner) so an older caller passing it keeps working.
 
 on:
   workflow_run:
@@ -30,7 +30,7 @@ jobs:
   flow-unblock:
     permissions:
       contents: write          # the release commit to main
-      actions: write           # dispatch the queue runner, list its runs
-    uses: CandidDan/flow/.github/workflows/_flow-unblock.yml@v3
+      pull-requests: read      # the blocked_by PR lookup, so a PR-url block releases on merge
+    uses: CandidDan/flow/.github/workflows/_flow-unblock.yml@v4
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}

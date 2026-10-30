@@ -1,4 +1,4 @@
-// Tests for pick-task — the queue-runner's selector grades its own homework.
+// Tests for pick-task — the worker's selector grades its own homework.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
@@ -87,12 +87,12 @@ test("globsOverlap: identical paths, enclosing dir, and ** all overlap", () => {
 test("globsOverlap: sibling files and disjoint trees do not overlap", () => {
   assert.equal(globsOverlap(".flow/bin/pick-task.mjs", ".flow/bin/pick-task.test.mjs"), false);
   assert.equal(globsOverlap("src/a/**", "src/b/**"), false);
-  assert.equal(globsOverlap("app/api/**", ".flow/board.html"), false);
+  assert.equal(globsOverlap("app/api/**", ".flow/config.yml"), false);
 });
 
 test("touchesOverlap: true iff any glob pair across the lists overlaps", () => {
   assert.ok(touchesOverlap(["app/api/**", "src/x.ts"], ["src/**"]));
-  assert.equal(touchesOverlap(["app/api/**"], [".flow/board.html", "docs/x.md"]), false);
+  assert.equal(touchesOverlap(["app/api/**"], [".flow/config.yml", "docs/x.md"]), false);
 });
 
 // ── parseTask + readTasks (file IO) ──
@@ -237,8 +237,8 @@ test("flow-0111: pick-task has one list parser, flow-doctor's, and no touches re
 // ── flow-0118: `in_review` is still in flight ──────────────────────────────────────────
 //
 // Observed on 2026-10-01 in CandidDan/inflight: `inflight-0015` was `in_review` (PR #30 open,
-// unmerged) and `inflight-0016` was `ready` with four overlapping paths. The queue runner
-// dispatched 0016 anyway, because this selector only excluded overlap against `in_progress`.
+// unmerged) and `inflight-0016` was `ready` with four overlapping paths. The (since retired)
+// queue-runner dispatched 0016 anyway, because this selector only excluded overlap against `in_progress`.
 // The worker noticed and blocked itself by hand; nothing in the code made it. A review-stage PR
 // has a live branch about to rewrite `main` in exactly the files it declared, so for collision
 // purposes it has not landed. `blocked` is the deliberate exception — no live branch, and
@@ -327,7 +327,7 @@ test("flow-0118: both statements of the claim rule in PROTOCOL.md name in_review
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
   const CANON = existsSync(join(root, ".flow", "bin", "changelog-entry.mjs")) ? root : null;
 
-  test("flow-0118 has a changelog entry naming the queue runner's new skip",
+  test("flow-0118 has a changelog entry naming the selector's new skip",
     { skip: CANON ? false : "canonical-only: `changes/` and CHANGELOG.md are not synced to adopting repos" },
     async () => {
       const { changelogEntry } = await import(pathToFileURL(join(CANON, ".flow", "bin", "changelog-entry.mjs")).href);

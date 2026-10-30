@@ -728,3 +728,48 @@ test("flow-0158: pin-callers rewrites the file in place, and a refused ref exits
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
     (err) => { assert.notEqual(err.status, 0); assert.match(String(err.stderr), /ENOENT/); return true; });
 });
+
+// ── flow-0174: the retired queue-runner's caller is deleted downstream ──
+//
+// The worker moved to a Claude Code routine and `_flow-queue-runner.yml` is gone, so a caller left
+// in an adopting repo fails on every tick. flow-sync removes it through the ONE retired-paths step
+// flow-0164 added — the region is lifted out of the shipped reusable and executed, then the shipped
+// stage-then-list shell reports the deletion the way the sync PR body will.
+const RETIRED_REGION = /^[ \t]*# THE RETIRED PATHS \(flow-0164\)[\s\S]*?^[ \t]*done[ \t]*$/m;
+
+test("flow-0174: an adopter's flow-queue-runner.yml is deleted in the sync PR, and nothing beside it", { skip: skipReusable }, (t) => {
+  const text = readFileSync(REUSABLE, "utf8");
+  const region = text.match(RETIRED_REGION)?.[0];
+  assert.ok(region, "the retired-paths step was not found in _flow-sync.yml");
+  assert.equal(text.match(/for RETIRED in /g)?.length, 1, "one retired-paths mechanism, not a second");
+  assert.match(region, /"\.github\/workflows\/flow-queue-runner\.yml"/, "the caller is on the literal list");
+
+  const repo = fixtureRepo(t, {
+    ".flow/VERSION": "3.5.0\n",
+    ".github/workflows/flow-queue-runner.yml": "name: flow-queue-runner\n",   // retired by flow-0174
+    ".github/workflows/flow-recover.yml": "name: flow-recover\n",
+    ".github/workflows/flow-unblock.yml": "name: flow-unblock\n",
+  });
+  write(repo, ".flow/VERSION", "4.0.0\n");
+  execFileSync("bash", ["-euo", "pipefail", "-c", region], { cwd: repo, encoding: "utf8", env: { PATH: process.env.PATH } });
+
+  assert.ok(!existsSync(join(repo, ".github/workflows/flow-queue-runner.yml")), "the retired caller must be gone");
+  for (const kept of ["flow-recover.yml", "flow-unblock.yml"]) {
+    assert.ok(existsSync(join(repo, ".github/workflows", kept)), `${kept} is a sibling and must stay`);
+  }
+  const changed = runStageAndList(repo);
+  // The staged tree is the retired caller's deletion plus the stamp, and nothing else.
+  assert.deepEqual(changed.trim().split("\n").sort(),
+    ["D\t.github/workflows/flow-queue-runner.yml", "M\t.flow/VERSION"]);
+  const { body } = prContent({ local: "3.5.0", canonical: "4.0.0", files: changed });
+  assert.ok(body.indexOf("**Removed** (1)") >= 0 &&
+    body.indexOf("**Removed**") < body.indexOf("- `.github/workflows/flow-queue-runner.yml`"),
+    `the retired caller's deletion must be listed under Removed in the sync PR body. Got:\n${body}`);
+});
+
+test("flow-0174: an adopter that never had the caller is untouched by the step", { skip: skipReusable }, (t) => {
+  const region = readFileSync(REUSABLE, "utf8").match(RETIRED_REGION)[0];
+  const repo = fixtureRepo(t, { ".github/workflows/flow-recover.yml": "name: flow-recover\n" });
+  execFileSync("bash", ["-euo", "pipefail", "-c", region], { cwd: repo, encoding: "utf8", env: { PATH: process.env.PATH } });
+  assert.equal(git(repo, "status", "--porcelain"), "", "nothing to retire is a no-op");
+});

@@ -21,6 +21,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ignoreLine } from "./pr-of-record.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -61,6 +62,9 @@ export function idFromBranch(branch) {
 // for it already. Every "no" path returns null so the workflow no-ops rather than opening a
 // malformed or duplicate PR.
 //
+// `recordPr` (flow-0162) is the number of the task's OPEN PR of record, when it is on a different
+// branch than this one: the task keeps that PR and a second branch gets none.
+//
 // `id` is an optional OVERRIDE for callers that already know which task the branch belongs to.
 // Push-time (`_flow-open-pr.yml`) never passes it — there the branch name is the only evidence
 // available, and widening that path would open PRs for any branch pushed to the repo. Recovery
@@ -68,9 +72,10 @@ export function idFromBranch(branch) {
 // the branch is a platform-assigned `claude/…` that `idFromBranch` cannot parse. Without this,
 // fixing recovery's branch DISCOVERY would still have dead-ended here — the reopen-pr path would
 // find the branch, call this, get null from `idFromBranch`, and silently open nothing.
-export function decideOpenPr({ branch, baseBranch = "main", hasOpenPr, aheadOfBase, taskTitle, id: idOverride }) {
+export function decideOpenPr({ branch, baseBranch = "main", hasOpenPr, aheadOfBase, taskTitle, id: idOverride, recordPr }) {
   if (!branch || branch === baseBranch) return null;   // never a PR for the base branch
   if (hasOpenPr) return null;                           // idempotent — re-pushes don't dup
+  if (recordPr) return null;                            // flow-0162: the task already has an open PR of record on another branch
   if (!aheadOfBase) return null;                        // nothing to propose
   const id = idOverride || idFromBranch(branch);
   if (!id) return null;                                 // unparseable -> no malformed PR
@@ -116,7 +121,12 @@ if (__isMain) {
   const id = flags.id || idFromBranch(branch);
   const taskTitle = id ? readTaskTitle(join(flowDir, "tasks"), id) : "";
 
-  const decision = decideOpenPr({ branch, baseBranch, hasOpenPr, aheadOfBase, taskTitle, id });
+  const recordPr = Number(flags["record-pr"] || 0) || null;
+
+  const decision = decideOpenPr({ branch, baseBranch, hasOpenPr, aheadOfBase, taskTitle, id, recordPr });
+  if (recordPr && !hasOpenPr && aheadOfBase && id) {
+    process.stderr.write(ignoreLine({ event: `push of ${branch}`, id, record: recordPr }) + "\n");
+  }
   if (decision) process.stdout.write(JSON.stringify(decision) + "\n");
   process.exit(0);
 }

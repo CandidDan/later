@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // apply-board-edits.mjs — the ONLY writer of task frontmatter from a board edit.
 //
-// The board (.flow/board.html) never edits task files. When the human drags or
-// reprioritises cards and hits "Apply edits", the board writes .flow/board-edits.json:
+// It is the store writer: no view edits task files directly. A caller that changes a
+// task's status or priority (a workflow, or a person) writes .flow/board-edits.json:
 //
 //   { "generated": "<iso>", "updates": [ { "id": "PROJ-0001", "status": "in_progress", "priority": 2 }, ... ] }
 //
@@ -172,7 +172,7 @@ function main(argv) {
 
   if (!keep && problems.length === 0) unlinkSync(editsPath);   // consume it so it can't reapply
 
-  console.log("Next: regenerate the board (board-builder) so the view matches the files.");
+  console.log("The task files are the source of truth; view state in inflight.");
   process.exit(problems.length ? 1 : 0);
 }
 

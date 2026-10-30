@@ -160,3 +160,46 @@ test("PROTOCOL.md carries the rule", () => {
   assert.match(p, /\.flow\/bin\/only-flow-changed\.mjs/);
   assert.match(p, /any doubt builds/i);
 });
+
+// ── flow-0181: a rename into a Flow-only path builds ────────────────────────────────────
+// Without a pathspec, git's default rename detection lists `git mv src/x.mjs .flow/x.mjs` at
+// `.flow/x.mjs` only, which is all Flow-only. The decision diff here was already safe: git applies
+// its `:(exclude)` pathspecs BEFORE it pairs renames, so the source survives as a deletion of
+// `src/x.mjs` and the helper builds with or without `--no-renames`. The first test proves the
+// outcome; the second is the one that fails if the flag is removed. Real repositories, because
+// both behaviours live in git's output, not in `decide`.
+test("flow-0181: a source file renamed into .flow/ does not skip", () => {
+  const d = repo();
+  mkdirSync(join(d, "src"));
+  writeFileSync(join(d, "src", "x.mjs"), "export const answer = 42;\n".repeat(20));
+  g(d, "add", "-A"); g(d, "commit", "-qm", "code");
+  const base = g(d, "rev-parse", "HEAD");
+  mkdirSync(join(d, ".flow"));
+  g(d, "mv", "src/x.mjs", ".flow/x.mjs");
+  g(d, "commit", "-qm", "move");
+
+  // The precondition, so this test cannot pass for the wrong reason.
+  assert.equal(g(d, "diff", "--name-only", base, "HEAD"), ".flow/x.mjs");
+
+  const r = cli(d, ["--base", base]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /^only-flow-changed: build — 1 file changed outside/);
+});
+
+test("flow-0181: a rename inside the Flow paths counts both of its paths in the skip line", () => {
+  const d = repo();
+  write(d, ".flow/a.md", "Task body line.\n".repeat(20));
+  g(d, "add", "-A"); g(d, "commit", "-qm", "flow file");
+  const base = g(d, "rev-parse", "HEAD");
+  mkdirSync(join(d, "changes"));
+  g(d, "mv", ".flow/a.md", "changes/a.md");
+  g(d, "commit", "-qm", "move");
+
+  // The precondition: with rename detection on, the scope diff lists the move as one path.
+  assert.equal(g(d, "diff", "--name-only", base, "HEAD", "--", "."), "changes/a.md");
+
+  const r = cli(d, ["--base", base]);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /^only-flow-changed: skip — 2 files changed, all under /,
+    "both sides of the rename are counted: the scope diff runs with --no-renames");
+});
