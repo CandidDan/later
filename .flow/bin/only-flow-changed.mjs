@@ -79,8 +79,12 @@ export function decide({ argv = [], env = process.env, cwd = process.cwd(), git 
         : `base ${sha.slice(0, 7)} not in checkout (shallow clone)`);
     }
     const scope = [".", ...args.extra];
-    const inScope = lines(git(["diff", "--name-only", sha, "HEAD", "--", ...scope], cwd));
-    const other = lines(git(["diff", "--name-only", sha, "HEAD", "--", ...scope,
+    // `--no-renames` (flow-0181), so a rename always lists its source and its destination, as every
+    // other guard's changed-path diff does. The decision diff below did not depend on it: git applies
+    // the `:(exclude)` pathspecs before it pairs renames, so `git mv src/x.mjs .flow/x.mjs` already
+    // showed `src/x.mjs` as deleted and built. What it changes is the count in the skip line.
+    const inScope = lines(git(["diff", "--name-only", "--no-renames", sha, "HEAD", "--", ...scope], cwd));
+    const other = lines(git(["diff", "--name-only", "--no-renames", sha, "HEAD", "--", ...scope,
       ...FLOW_PATHS.map((p) => `:(top,exclude)${p}`)], cwd));
     if (other.length) return build(`${other.length} file${other.length === 1 ? "" : "s"} changed outside ${FLOW_PATHS.join(" ")}`);
     return {

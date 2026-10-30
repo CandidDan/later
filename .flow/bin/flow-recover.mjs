@@ -24,14 +24,16 @@
 //     | node .flow/bin/flow-recover.mjs ready-pr CAN-51 <branch>   # "<number>\t<url>", non-draft
 //   node .flow/bin/flow-recover.mjs reset CAN-51        # prints the board-edits JSON to reset it
 //   node .flow/bin/flow-recover.mjs promote CAN-51 <pr-url> <branch>   # the in_review board edit
+//   node .flow/bin/flow-recover.mjs escalate CAN-51 reset-to-ready "<event>"   # one tier up, on reset
 //
-// Zero dependencies (Node >= 18).
+// Depends only on its sibling helpers in `.flow/bin/` (Node >= 18).
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { idFromTitle } from "./parse-task-id.mjs";
 import { yamlScalar } from "./flow-doctor.mjs";
+import { escalate, findTaskFile, readField, recordsEvent } from "./task-model.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -204,6 +206,45 @@ export function buildPromoteEdit(id, prUrl = "", branch = "") {
   return edit;
 }
 
+// ── Escalation on reset (flow-0174) ──────────────────────────────────────────────────────
+//
+// A failed attempt moves a task up a tier (`haiku → sonnet → opus → fable`). The retired
+// queue-runner applied that bump when its own run ended without a PR. With the worker now a
+// Claude Code routine there is no run to watch, but the outcome that bump answered is still
+// precisely visible here: a claim that strands with NOTHING pushed is reset to `ready`, and that
+// reset is the "attempt that produced nothing". So the reset path, and only the reset path,
+// escalates. `reopen-pr` and `promote-in-review` mean work was pushed — the attempt is still
+// alive, it just lost its PR or its status — and bumping the model there would charge a bigger
+// model for work that is already on a branch.
+//
+// The decision lives here, not in the workflow, so a test exercises it rather than a grep.
+export function escalatesOnRecover(decision) {
+  return decision === "reset-to-ready";
+}
+
+// Apply that bump to the task file in `tasksDir`, through task-model.mjs's own `escalate` with
+// `once` — so a sweep whose push is retried, or a step re-run on the same event, moves the task
+// ONE tier. Returns a one-line account of what happened; never throws, because a sweep must
+// degrade to "left alone" rather than fail the run over one unreadable task.
+export function escalateOnRecover(tasksDir, id, decision, event) {
+  if (!escalatesOnRecover(decision)) return `${id}: ${decision} keeps the model — work was pushed`;
+  const file = findTaskFile(tasksDir, id);
+  if (!file) return `${id}: not found — no escalation`;
+  const text = readFileSync(file, "utf8");
+  if (recordsEvent(text, event)) return `${id}: already escalated after ${event}`;
+  try {
+    const before = readField(text, "model") || "sonnet";
+    const after = escalate(text, event, { once: true });
+    writeFileSync(file, after);
+    const now = readField(after, "model") || before;
+    return now === before
+      ? `${id}: already at the top tier (${before}) — model unchanged, decision ask recommends a split`
+      : `${id}: escalated ${before} -> ${now} after ${event}`;
+  } catch (e) {
+    return `${id}: model left unchanged — ${e.message}`;
+  }
+}
+
 // Whole minutes elapsed between a timestamp (ISO datetime, or a date-only `started` like
 // "2026-06-18") and `now`. Negative clamps to 0. Returns null for an unparseable/empty value
 // so the caller can decide (a task with no `started` shouldn't be aged out on a bad parse).
@@ -212,7 +253,7 @@ export function buildPromoteEdit(id, prUrl = "", branch = "") {
 // `Date.parse("2026-06-18")` gives 00:00Z, which makes a task claimed at 09:23Z read as 563
 // minutes old at the instant of the claim — already past the 75-minute strand threshold. The
 // sweep then resets a live claim back to `ready` about a minute after it is taken, the next
-// queue-runner re-picks the same task from zero, and no run's work carries forward. Anchoring
+// worker run re-picks the same task from zero, and no run's work carries forward. Anchoring
 // to end-of-day errs the only safe way for a destructive sweep: it can delay a genuine
 // recovery by up to a day, but it can never cancel a claim that is still being worked.
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -250,7 +291,7 @@ export function readTasks(tasksDir) {
   return out;
 }
 
-// ── CLI ── seven thin subcommands; the workflow supplies all git/gh facts. Always exits 0.
+// ── CLI ── eight thin subcommands; the workflow supplies all git/gh facts. Always exits 0.
 function parseFlags(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
@@ -355,10 +396,15 @@ export function runRecoverCli(argv, opts = {}) {
     if (id) {
       out.write(JSON.stringify({ updates: [buildPromoteEdit(id, prUrl, branch)] }) + "\n");
     }
+  } else if (cmd === "escalate") {
+    // The decision the sweep acted on rides along, so the reset-or-not rule stays in
+    // escalatesOnRecover and the workflow never re-states it.
+    const [id, decision, event] = rest;
+    if (id && event) out.write(escalateOnRecover(tasksDir, id, decision, event) + "\n");
   } else {
     process.stderr.write(
       "usage: flow-recover.mjs " +
-        "<classify|list-in-progress|branch-candidates|count-task-prs|ready-pr|reset|promote> …\n",
+        "<classify|list-in-progress|branch-candidates|count-task-prs|ready-pr|reset|promote|escalate> …\n",
     );
   }
   return 0;

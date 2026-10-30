@@ -54,17 +54,22 @@ implementation, that's yours to specify.
    task in one session puts authorship and approval in the same context, which is the one thing
    the touchpoint exists to separate. `serves: ["maintenance"]` work needs no intent; leave
    `intent: ""`. Never edit the intent to list this task — the link runs task → intent only.
-7. State scope boundaries explicitly — what the task does NOT touch. This is what stops scope creep.
-8. Sequence: if task B depends on A, note it and leave B at lower priority or a `blocked` note
+7. **Write the spec in plain, literal language.** Name things literally, not by metaphor — the
+   worker builds what the words say, not what you meant by them. Say what happens and where, and
+   rewrite any sentence that can be read two ways. The same test as the protocol's plain-language
+   rule (`.flow/PROTOCOL.md`, **Response style**). A product's own user-facing text keeps the
+   project's voice; the spec describing it does not.
+8. State scope boundaries explicitly — what the task does NOT touch. This is what stops scope creep.
+9. Sequence: if task B depends on A, note it and leave B at lower priority or a `blocked` note
    until A lands. Keep a queue of `ready` tasks so the worker never runs dry.
-9. **The queue has a cap, and the allocator enforces it — not this file.** Where
+10. **The queue has a cap, and the allocator enforces it — not this file.** Where
    `.flow/config.yml` sets `queue_cap`, that is the maximum number of `ready` tasks the store may
    hold, and `allocate-task-id` refuses a new `ready` task while that many already are, before it
    writes, commits or pushes anything. A refused task is therefore one of exactly two things:
    **not written yet** (the queue drains first — usually the right answer), or **written
    `blocked`** with a `blocked_reason`, which the cap never refuses. The one bypass is the draft's
    own `urgent` label, and that is the human's to apply — never yours on your own judgement, the
-   same rule as `auto-ok`. Step 8's "never runs dry" stops at the cap: a queue past it is not
+   same rule as `auto-ok`. Step 9's "never runs dry" stops at the cap: a queue past it is not
    depth, it is work planned faster than it can be done.
 
 ## Triaging the inbox (GitHub Issues -> ready tasks)
@@ -106,7 +111,7 @@ down, the anchor is in your head rather than in the store — and it dies with t
 ## Choosing the model (every task)
 A task's `model` and `effort` decide what builds it. **The default is `sonnet` / `medium`** —
 leave both unset for well-specified work. Every task that departs from the default sets `model`,
-`effort` **and** `model_reason` (one line saying why); the queue runner fails a task that sets
+`effort` **and** `model_reason` (one line saying why); `task-model.mjs` fails a task that sets
 either without a reason, or names a value outside the lists.
 
 | Tier / effort | Use it for |
@@ -116,8 +121,8 @@ either without a reason, or names a value outside the lists.
 | `sonnet` / `medium` (default) | well-specified: precise criteria, small `touches`, no design decisions, following an existing pattern |
 | `haiku` / `low` | trivial, fully mechanical |
 
-You do not have to be right first time. A queue-runner run that ends without a PR, or a PR closed
-unmerged, moves the task up a tier on its own (`haiku → sonnet → opus → fable`); at `fable` it
+You do not have to be right first time. A claim that strands with nothing pushed (flow-recover
+resets it), or a PR closed unmerged, moves the task up a tier on its own (`haiku → sonnet → opus → fable`); at `fable` it
 gets a `decision` ask recommending a split. And a worker that judges a task beyond it does not
 guess — it sets the task `blocked` with a `decision` ask carrying `Recommend: re-run on <tier>`.
 Answer that ask by raising `model` (with a new `model_reason`) and returning the task to `ready`.
@@ -180,9 +185,6 @@ writing the problem in the first place.
   to make visible. flow-doctor treats a non-`ready` task's unresolvable `serves` as a warning
   for the same reason. New tasks carry it; finished ones stay as they were.
 - Don't leave a real open decision inside a `ready` task. Decide it (or ask the human), then write it.
-
-After writing or changing tasks, regenerate the board with the **board-builder** skill so the
-human's view reflects the new state.
 
 ## This repo's additions
 

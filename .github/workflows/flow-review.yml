@@ -42,7 +42,7 @@ jobs:
       pull-requests: write
       issues: read
       id-token: write
-    uses: CandidDan/flow/.github/workflows/_flow-review.yml@v3
+    uses: CandidDan/flow/.github/workflows/_flow-review.yml@v4
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
     secrets:

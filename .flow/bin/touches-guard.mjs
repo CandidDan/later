@@ -216,7 +216,10 @@ export function runGuard({ tasksDir, env = process.env, log = console.log, err =
   }
 
   const base = env.BASE_REF || "origin/main";
-  const changedFiles = execFileSync("git", ["diff", "--name-only", `${base}...HEAD`])
+  // `--no-renames` (flow-0181): with rename detection on, `git mv src/x.mjs other/x.mjs` lists only
+  // `other/x.mjs`, so a file moved OUT of an undeclared path was an undeclared deletion the guard
+  // never saw. Off, a rename lists its source and its destination, and both are checked.
+  const changedFiles = execFileSync("git", ["diff", "--name-only", "--no-renames", `${base}...HEAD`])
     .toString().split("\n").map((s) => s.trim()).filter(Boolean);
 
   const { outside, checked } = checkTouches({ changedFiles, touches });

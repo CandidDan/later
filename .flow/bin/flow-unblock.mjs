@@ -3,7 +3,7 @@
 //
 // `blocked` is the one status with no automated exit. flow-status owns `in_review` and the return
 // to `ready`, flow-done owns `done`, flow-recover heals a stranded `in_progress` — and a blocked
-// task waited for someone to notice its dependency had merged. That failure is quiet: the queue
+// task waited for someone to notice its dependency had merged. That failure is quiet: the store
 // looks healthy, nothing turns red, and the work simply never happens. flow-0040 made the
 // dependency machine-readable (`blocked_by`); this is the half that acts on it.
 //
@@ -20,11 +20,6 @@
 //   node .flow/bin/flow-unblock.mjs pr-refs           # "<url>\t<owner>/<repo>\t<number>" to look up
 //   node .flow/bin/flow-unblock.mjs plan  --pr-facts f # "<id>\t<decision>\t<detail>" per blocked task
 //   node .flow/bin/flow-unblock.mjs edits --pr-facts f # the board-edits JSON for every release
-//   node .flow/bin/flow-unblock.mjs count-ready        # how many tasks are `ready` now
-//   gh run list --workflow flow-queue-runner.yml --json status \
-//     | node .flow/bin/flow-unblock.mjs count-active-runs     # N, or "unknown"
-//   node .flow/bin/flow-unblock.mjs should-dispatch --ready 1 --active 0 --queue-runner ""
-//   gh api … 2>&1 | node .flow/bin/flow-unblock.mjs dispatch-outcome <exit-code> <workflow>
 //
 // The PR facts file is what the workflow learned from `gh api repos/<owner>/<repo>/pulls/<n>`,
 // one line per PR: "<url>\t<state>\t<merged>" (`open|closed`, `true|false`), or
@@ -205,68 +200,14 @@ export function planReleases(tasks, prFacts = new Map()) {
   return out;
 }
 
-// ── Starting the next worker ─────────────────────────────────────────────────────────────
-//
-// After the release, dispatch the queue runner — with NO task_id, so pick-task chooses, and
-// priority and `touches` overlap stay its rules — when all three hold:
-//   · at least one task is `ready` (a merge that released nothing may still have left one waiting
-//     for the next scheduled tick, and this is what stops it waiting a day);
-//   · no queue-runner run is queued, waiting or in progress (one worker per beat; first-push-wins
-//     would protect the store, but a second worker on the same pick is a wasted session);
-//   · `vars.FLOW_QUEUE_RUNNER` is not `paused` (the pause is a pause of AUTOMATIC starts, and
-//     this is one).
-// An unknown run count — the list could not be read — is not zero: it does not dispatch.
-
-export function shouldDispatch({ ready = 0, activeRuns = "unknown", queueRunner = "" } = {}) {
-  if (String(queueRunner ?? "").trim() === "paused") return { dispatch: false, reason: "FLOW_QUEUE_RUNNER is \"paused\"" };
-  if (!(Number.isInteger(ready) && ready > 0)) return { dispatch: false, reason: "no ready task" };
-  if (!Number.isInteger(activeRuns) || activeRuns < 0) return { dispatch: false, reason: "queue-runner runs could not be read" };
-  if (activeRuns > 0) return { dispatch: false, reason: `a queue-runner run is already active (${activeRuns})` };
-  return { dispatch: true, reason: `${ready} ready task(s), no runner active` };
-}
-
-// `gh run list --json status` output -> how many runs have not finished, or "unknown". Every
-// status other than `completed` counts — queued, waiting, in_progress, and the requested/pending
-// states GitHub also reports before a run starts. Over-counting can only delay a dispatch to the
-// next tick; under-counting would start a second worker.
-export function countActiveRuns(json) {
-  let runs;
-  try { runs = JSON.parse(String(json ?? "")); } catch { return "unknown"; }
-  if (!Array.isArray(runs)) return "unknown";
-  return runs.filter((r) => !r || r.status !== "completed").length;
-}
-
-// The HTTP status a failed `gh api` call reported, or null. gh prints `… (HTTP 403)` on stderr.
-export function httpStatusOf(text) {
-  const m = String(text ?? "").match(/\bHTTP (\d{3})\b/);
-  return m ? Number(m[1]) : null;
-}
-
-// The line the dispatch step prints for the outcome of its `gh api … /dispatches` call. NEVER a
-// failure: a repo whose caller has not yet been synced to grant `actions: write` must get a
-// warning and a green run — the release above already happened, and a red sweep would read as
-// the release having failed.
-export function dispatchOutcome(exitCode, output = "", workflow = "flow-queue-runner.yml") {
-  if (Number(exitCode) === 0) return `Dispatched ${workflow} with no task_id — pick-task chooses.`;
-  const status = httpStatusOf(output);
-  if (status === 403) {
-    return `::warning::Could not dispatch ${workflow}: HTTP 403. The caller must grant ` +
-      "`actions: write` to start the next worker — run flow-sync to get the current flow-unblock.yml " +
-      "caller. The release above is unaffected.";
-  }
-  if (status === 404) {
-    return `::warning::Could not dispatch ${workflow}: HTTP 404 — this repo has no such workflow on ` +
-      "its default branch. Set the `queue_runner_workflow` input if the runner is named differently.";
-  }
-  return `::warning::Could not dispatch ${workflow}` + (status ? `: HTTP ${status}.` : ".") +
-    " The next scheduled sweep will try again.";
-}
+// It starts no worker (flow-0173): the next worker run picks the released task. The four
+// dispatch-only helpers that used to follow here went with the queue-runner (flow-0174, retired).
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────
 //
 // ONE CLI, two callers — exported because canonical's `.flow/bin/flow-unblock.mjs` adapter runs
 // it against canonical's own store (see flow-recover.mjs's runRecoverCli for the drift a copied
-// CLI produced). `tasksDir` is the store to read; `stdin`, `readFile` and `out` are injectable so
+// CLI produced). `tasksDir` is the store to read; `readFile` and `out` are injectable so
 // a test can drive it in-process. Always returns 0: a scheduled sweep degrades to a no-op.
 
 function parseFlags(argv) {
@@ -280,9 +221,6 @@ function parseFlags(argv) {
 export function runUnblockCli(argv, opts = {}) {
   const { tasksDir } = opts;
   const out = opts.out || process.stdout;
-  const readStdin = opts.stdin || (() => {
-    try { return readFileSync(0, "utf8"); } catch { return ""; }
-  });
   const readFile = opts.readFile || ((p) => {
     try { return readFileSync(p, "utf8"); } catch { return ""; }
   });
@@ -300,23 +238,8 @@ export function runUnblockCli(argv, opts = {}) {
     const updates = planReleases(readTasks(tasksDir), facts())
       .filter((p) => p.decision === "release").map((p) => buildReleaseEdit(p.id));
     out.write(JSON.stringify({ updates }) + "\n");
-  } else if (cmd === "count-ready") {
-    out.write(String(readTasks(tasksDir).filter((t) => t.status === "ready").length) + "\n");
-  } else if (cmd === "count-active-runs") {
-    out.write(String(countActiveRuns(readStdin())) + "\n");
-  } else if (cmd === "should-dispatch") {
-    const active = /^\d+$/.test(f.active ?? "") ? Number(f.active) : "unknown";
-    const ready = /^\d+$/.test(f.ready ?? "") ? Number(f.ready) : 0;
-    const d = shouldDispatch({ ready, activeRuns: active, queueRunner: f["queue-runner"] ?? "" });
-    out.write((d.dispatch ? "dispatch" : `skip: ${d.reason}`) + "\n");
-  } else if (cmd === "dispatch-outcome") {
-    const [code, workflow] = rest;
-    out.write(dispatchOutcome(code, readStdin(), workflow || undefined) + "\n");
   } else {
-    process.stderr.write(
-      "usage: flow-unblock.mjs " +
-        "<pr-refs|plan|edits|count-ready|count-active-runs|should-dispatch|dispatch-outcome> …\n",
-    );
+    process.stderr.write("usage: flow-unblock.mjs <pr-refs|plan|edits> …\n");
   }
   return 0;
 }

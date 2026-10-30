@@ -66,6 +66,17 @@ visual — table, tree, call stack, mermaid, diff — not a paragraph. Terse is 
 words, full sentences, no unexplained jargon. Formats and examples:
 `.claude/skills/show-me/SKILL.md`.
 
+**Plain, literal, unambiguous English — in everything written about the work.** Not only replies:
+task specs, intents, design notes, code comments, commit messages and PR descriptions too. Name
+things literally, never by metaphor. Say what happens and where. A sentence that can be read two
+ways gets rewritten until it can be read one way — a worker builds whichever reading it picked.
+
+| Bad | Good |
+|---|---|
+| "Settings are sentences at the foot of the same shelf." | "The sidebar is the only extra panel; settings sit at its bottom." |
+
+Out of scope: the product's own user-facing text. Its voice is the project's decision.
+
 End a response with a one-line **TL;DR** only when it runs past about 15 lines; a short reply is
 its own summary. If the human has to act, end with a numbered **checklist of just those to-dos**,
 in order; omit it when there are none.
@@ -96,9 +107,9 @@ branch + PR.**
 coverage). Everything below that says "run the tests" means "run the command named in
 `config.yml`" — the protocol is identical across every project; only the commands differ.
 
-`.flow/board.html` is the human's view. You never hand-edit it; regenerate it with the
-**board-builder** skill when task state changes. Edits the human makes on the board flow
-back through `.flow/bin/apply-board-edits.mjs` (never by pasting JSON into a prompt).
+Task state is viewed in inflight, not in this repo — there is no board to regenerate.
+`.flow/bin/apply-board-edits.mjs` is **the store writer**: the workflows patch task frontmatter
+through it, never by hand-editing state they do not own.
 
 **GitHub Issues are the capture inbox, not the work queue.** Raw bugs and ideas get logged as
 issues (from anywhere, with whatever context exists at the time); the orchestrator triages them
@@ -147,8 +158,8 @@ ready  →  in_progress  →  in_review  →  done
   because `blocked_by` is what lets a block end on its own: **`flow-unblock`** releases a blocked
   task back to `ready` once **every** entry resolves — a task id that is `done` on `main`, a PR
   url that merged (one closed unmerged never counts) — clearing `blocked_reason` and `blocked_by`
-  as it goes, then starts the next worker. A block with no machine-readable entry still needs a
-  human: an empty `blocked_by` is never released. If the block genuinely isn't mechanical (you are
+  as it goes; the released task is picked up by the next worker run. A block with no
+  machine-readable entry still needs a human: an empty `blocked_by` is never released. If the block genuinely isn't mechanical (you are
   waiting on a phone call), say so in `blocked_reason` using the words "not machine-checkable" and
   flow-doctor stops asking. Clear `blocked_by` when you lift a block by hand: flow-doctor reports a
   populated `blocked_by` on a live non-blocked task as stale data. On a `done` task it stays, as
@@ -185,14 +196,14 @@ departs from it deliberately, by this rubric:
 either field without `model_reason`, fails the run rather than building on a guess.
 
 **A failed attempt moves the task up a tier** (`haiku → sonnet → opus → fable`), as a commit to
-the task file on `main`: a queue-runner run that ends without a PR, and a PR closed unmerged, both
-escalate it mechanically. At `fable` the task gets a `decision` ask recommending a split instead.
+the task file on `main`: a stranded claim that `flow-recover` resets because nothing was pushed, and
+a PR closed unmerged, both escalate it mechanically. At `fable` the task gets a `decision` ask recommending a split instead.
 **And you escalate yourself:** if you judge the task beyond you on the model you are running, do
 not guess — set it `blocked` with a `decision` ask carrying `Recommend: re-run on <tier>`.
 
 ## Concurrency — how parallel sessions don't collide
 
-Several Code sessions may run at once (the queue runner can dispatch more than one). The
+Several Code sessions may run at once (worker routines, and people, can start more than one). The
 store on `main` plus git's atomic push is the entire coordination mechanism — there is no
 lock file, no daemon.
 
@@ -231,11 +242,12 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
 ## The loop you run
 
 1. **Pick.** Take the highest-`priority` task in `ready` with no `touches` overlap against
-   anything `in_progress` or `in_review`. If none, stop — do not invent work.
+   anything `in_progress` or `in_review`. If none, stop — do not invent work. A worker started
+   **without a task id** (a routine run with an empty trigger, say) picks with
+   `node .flow/bin/pick-task.mjs`, and an empty result means stop.
 2. **Claim (atomic).** `git pull --rebase`; set `in_progress` + `owner` + `started` (full UTC
    ISO datetime, see *Status lifecycle*); commit
    that task file and push to `main`. If the push is rejected, rebase and go back to step 1.
-   Then regenerate the board.
 3. **Branch.** `git checkout -b flow/<task-id>-<slug>` off latest `main`. One branch per task.
    **If the platform has already put you on a branch you didn't choose** — a cloud/web session
    is handed a `claude/…` branch by its harness, and that instruction outranks this file — stay
@@ -253,13 +265,24 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
    branch first and this title second, so on a non-`flow/` branch it is the only thing standing
    between your PR and a silently skipped transition. Link the task file path in the description,
    paste the acceptance-criteria checklist with each item ticked + the test that proves it.
+   Normally `flow-open-pr` has already opened it as a draft (step 8), so you edit its title and
+   body. Only when **no PR exists for the branch yet** do you open one: `gh pr create`, or — in a
+   session without GraphQL (below) — `gh api repos/{owner}/{repo}/pulls -f title=… -f head=<branch>
+   -f base=main -F body=@<file>`, which opens it non-draft.
 8. **Hand off — `gh pr ready`.** `flow-open-pr` opens your PR as a **draft** on your first push,
    so it already exists by the time you get here; `flow-status` recorded `branch` + `pr` then, and
    left the task `in_progress`. Marking it ready is the hand-off: it flips the task to `in_review`
    and starts the qa, code-review and security checks, which do not run on a draft. You don't write
    that transition, and you don't open the PR — you finish it. If you opened the PR yourself with
-   `gh pr create` (no draft), that step already happened. Regenerate the board. Stop. The human
+   `gh pr create` or the REST route (no draft), that step already happened. Stop. The human
    validates.
+   **In a Claude Code cloud session** (a routine, or Claude Code on the web) GraphQL is blocked,
+   so `gh pr create` and `gh pr ready` fail with HTTP 403 and the message *"GitHub GraphQL is not
+   available from Claude Code sessions"*. The rule: **try the `gh pr` command first, and on that
+   exact message use REST instead** — never on any other failure. For step 8 the REST hand-off is
+   `gh api -X POST repos/{owner}/{repo}/pulls/{n}/ccr/ready_for_review`, with `{n}` the PR number
+   (`gh api "repos/{owner}/{repo}/pulls?head={owner}:<branch>" --jq '.[0].number'`). Setup for
+   routines: `docs/flow-routines.md` in canonical.
 9. **Kickback** (if the human comments) arrives as a new `notes` entry on the task or a PR
    comment. Address it on the same branch, re-run gates, re-request review.
 
@@ -472,5 +495,5 @@ buys — not a vendor-neutral reviewer.
 ## What stays out of here
 
 This file is config. It does not become HTML — none of HTML's human-facing benefits apply to a
-file the tool auto-loads and you barely read. The rich, human-facing surfaces (board, reports,
+file the tool auto-loads and you barely read. The rich, human-facing surfaces (reports,
 specs, explorations) are HTML and live elsewhere. Data stays data; views are HTML; this is config.

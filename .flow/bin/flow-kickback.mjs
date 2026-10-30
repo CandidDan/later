@@ -4,7 +4,7 @@
 // WHAT THIS IS FOR. The three Definition-of-Done reviewers run as checks on the PR
 // (`_flow-review.yml`, flow-0007). When qa or code-review fails, the protocol calls that a
 // kickback: address it on the same branch, re-run the gate, re-request review. Nothing
-// dispatched that work — the worker's session ended at `gh pr ready`, and the queue runner only
+// dispatched that work — the worker's session ended at `gh pr ready`, and the (retired) queue runner only
 // picks `ready` tasks — so an `in_review` task with a red check sat until a human noticed. The
 // human was a relay carrying a finding that already named the file, the line and the fix.
 //
@@ -22,12 +22,14 @@
 //     human;
 //   · security failures are NEVER auto-fixed;
 //   · a round that deletes a test or removes an assertion escalates instead of pushing, because
-//     the cheapest way to satisfy "criterion X has no proving test" is to weaken the test;
+//     the cheapest way to satisfy "criterion X has no proving test" is to weaken the test — with
+//     ONE disclosed exception: a REPLACEMENT, when the task's criteria were amended on the
+//     default branch after the PR opened (flow-0161, `guardDecision`);
 //   · every escalation is ONE decision card, not a label pointing at a PR to dig through.
 //
 // Zero dependencies (Node >= 18). Everything here is pure except the CLI block at the bottom.
 
-import { realpathSync as __realpathSync, appendFileSync, readFileSync } from "node:fs";
+import { realpathSync as __realpathSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath as __fileURLToPath } from "node:url";
 import { reviewBlock } from "./flow-review.mjs";
 
@@ -180,31 +182,18 @@ const ASSERTS = /\bassert|\bexpect\s*\(|\.should\b/;
 // Added markers that switch a test off or soften it.
 const SKIP_MARKER = /\.skip\b|\.only\b|\bskip\s*:|\btodo\s*:/;
 
-// Does this unified diff weaken the tests? Returns the offending lines — each with its file, the
-// line itself and a reason — so the decision card can name them. Empty means clean.
-//
-// A trip is any of:
-//   1. a test file deleted or renamed;
-//   2. a removed line, in a test file, that declares a test;
-//   3. a removed line, in a test file, that contains an assertion;
-//   4. an added `.skip` / `.only` / `skip:` / `todo:` in a test file.
-//
-// ANY REMOVED ASSERTION COUNTS, even when the same edit adds a replacement. That is conservative
-// on purpose. Adding an assertion is always allowed; a rewrite that really is stronger costs a
-// human one tap on the decision card. A loosened assertion that slipped through would cost a
-// gate that lies, which is the one failure this whole mechanism cannot afford.
-//
-// KNOWN LIMIT, STATED RATHER THAN HIDDEN: this is a line heuristic. A weakening that touches no
-// declaration and no assertion line — a changed fixture that makes an existing assertion
-// trivially true, say — is not caught here. That is qa's job on the re-review.
-export function weakensTests(diff) {
+// Walk a unified diff and yield what the guards read from TEST files only: one `file` event per
+// file-level trip (deleted, renamed), and one `line` event per added or removed content line, with
+// the line number it has in the file it belongs to (the old file for `-`, the new one for `+`).
+// `weakensTests` and `testLineBalance` both read this, so they cannot disagree about which file a
+// line is in or whether that file holds tests.
+function* testDiffEvents(diff) {
   const lines = String(diff ?? "").replace(/\r\n/g, "\n").split("\n");
-  const offenders = [];
   let file = "";
   let fileIsTest = false;
   let reportedFileLevel = false;
-
-  const trip = (reason, line) => offenders.push({ file, line, reason });
+  let oldNo = 0;
+  let newNo = 0;
 
   for (const raw of lines) {
     if (raw.startsWith("diff --git ")) {
@@ -215,11 +204,17 @@ export function weakensTests(diff) {
       continue;
     }
     if (raw.startsWith("deleted file mode")) {
-      if (fileIsTest && !reportedFileLevel) { trip("test file deleted", raw.trim()); reportedFileLevel = true; }
+      if (fileIsTest && !reportedFileLevel) {
+        yield { type: "file", file, reason: "test file deleted", line: raw.trim() };
+        reportedFileLevel = true;
+      }
       continue;
     }
     if (raw.startsWith("rename from ") || raw.startsWith("rename to ")) {
-      if (fileIsTest && !reportedFileLevel) { trip("test file renamed", raw.trim()); reportedFileLevel = true; }
+      if (fileIsTest && !reportedFileLevel) {
+        yield { type: "file", file, reason: "test file renamed", line: raw.trim() };
+        reportedFileLevel = true;
+      }
       continue;
     }
     // `--- a/x` and `+++ b/x` are headers, not content. A `/dev/null` destination is a deletion
@@ -229,19 +224,56 @@ export function weakensTests(diff) {
       const named = m ? m[1] : "";
       if (named && named !== "/dev/null" && !file) { file = named; fileIsTest = isTestPath(named); }
       if (raw.startsWith("+++ ") && named === "/dev/null" && fileIsTest && !reportedFileLevel) {
-        trip("test file deleted", raw.trim());
+        yield { type: "file", file, reason: "test file deleted", line: raw.trim() };
         reportedFileLevel = true;
       }
       continue;
     }
-    if (!fileIsTest) continue;
+    const hunk = raw.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk) { oldNo = Number(hunk[1]); newNo = Number(hunk[2]); continue; }
     if (raw.startsWith("-")) {
-      const body = raw.slice(1);
-      if (DECLARES_TEST.test(body)) trip("removed a test declaration", body.trim());
-      else if (ASSERTS.test(body)) trip("removed an assertion", body.trim());
+      if (fileIsTest) yield { type: "line", file, sign: "-", at: oldNo, body: raw.slice(1) };
+      oldNo += 1;
     } else if (raw.startsWith("+")) {
-      const body = raw.slice(1);
-      if (SKIP_MARKER.test(body)) trip("added a skip/only/todo marker", body.trim());
+      if (fileIsTest) yield { type: "line", file, sign: "+", at: newNo, body: raw.slice(1) };
+      newNo += 1;
+    } else if (raw.startsWith(" ")) {
+      oldNo += 1;
+      newNo += 1;
+    }
+  }
+}
+
+// Does this unified diff weaken the tests? Returns the offending lines — each with its file, the
+// line itself, its line number (`at`, 0 when the diff carried no hunk header) and a reason — so
+// the decision card and the disclosure comment can name them. Empty means clean.
+//
+// A trip is any of:
+//   1. a test file deleted or renamed;
+//   2. a removed line, in a test file, that declares a test;
+//   3. a removed line, in a test file, that contains an assertion;
+//   4. an added `.skip` / `.only` / `skip:` / `todo:` in a test file.
+//
+// ANY REMOVED ASSERTION COUNTS, even when the same edit adds a replacement. That is conservative
+// on purpose. Adding an assertion is always allowed; a rewrite that really is stronger costs a
+// human one tap on the decision card. A loosened assertion that slipped through would cost a
+// gate that lies, which is the one failure this whole mechanism cannot afford. The one case that
+// is not left to the card is a task whose criteria were amended after its PR opened — see
+// `guardDecision` (flow-0161).
+//
+// KNOWN LIMIT, STATED RATHER THAN HIDDEN: this is a line heuristic. A weakening that touches no
+// declaration and no assertion line — a changed fixture that makes an existing assertion
+// trivially true, say — is not caught here. That is qa's job on the re-review.
+export function weakensTests(diff) {
+  const offenders = [];
+  for (const ev of testDiffEvents(diff)) {
+    if (ev.type === "file") { offenders.push({ file: ev.file, line: ev.line, at: 0, reason: ev.reason }); continue; }
+    const trip = (reason) => offenders.push({ file: ev.file, line: ev.body.trim(), at: ev.at, reason });
+    if (ev.sign === "-") {
+      if (DECLARES_TEST.test(ev.body)) trip("removed a test declaration");
+      else if (ASSERTS.test(ev.body)) trip("removed an assertion");
+    } else if (SKIP_MARKER.test(ev.body)) {
+      trip("added a skip/only/todo marker");
     }
   }
   return offenders;
@@ -249,7 +281,146 @@ export function weakensTests(diff) {
 
 // One line per offender, for a step summary or a card.
 export const weakensReport = (offenders) =>
-  offenders.map((o) => `${o.file}: ${o.reason} — ${o.line}`).join("\n");
+  offenders.map((o) => `${o.file}: ${o.reason}${o.at ? ` (line ${o.at})` : ""} — ${o.line}`).join("\n");
+
+// ── the amended-criteria exception (flow-0161) ───────────────────────────────────────────
+//
+// WHY THERE IS AN EXCEPTION AT ALL. When a human rules on a finding after the PR opened, the
+// ruling reaches the reviewers by amending the task's acceptance criteria on the default branch
+// (flow-0085). If the amendment says the opposite of what a criterion said, the honest fix has to
+// REPLACE the assertion that proved the old wording — and a replaced assertion is a removed one,
+// so `weakensTests` threw every such round away (CandidDan/write#183). The round could never
+// succeed in a case the protocol itself creates.
+//
+// WHY THE SIGNAL IS SAFE. The fixer cannot edit the task store: its prompt forbids it, and the
+// store-guard fails any PR that touches `.flow/tasks/`. The comparison below reads the task file
+// from the DEFAULT BRANCH and from the MERGE BASE of the PR head and the default branch — both
+// commits outside the fixer's reach, fetched by `plan`, a job that runs no model. Nothing on the
+// PR branch, in a PR comment or in the hand-back is ever read. So "the criteria differ" means a
+// human or the orchestrator changed the contract, and the fixer did not.
+//
+// WHAT IT EXCUSES, AND WHAT IT NEVER DOES. An amendment excuses a REPLACEMENT: a removed
+// declaration or assertion matched, in the same file, by at least as many added. It never excuses
+// a deleted or renamed test file, an added skip/only/todo, or a file that ends the round with
+// fewer test declarations or fewer assertions than it started with. Those still discard the
+// round, exactly as before. Nothing excused is hidden: every trip is returned for disclosure, and
+// the workflow posts them on the PR ahead of the re-run review. The qa re-run, judging against the
+// amended criteria, is the backstop.
+
+const CRITERIA_HEADING = /^##\s+Acceptance criteria\s*$/i;
+
+// The `## Acceptance criteria` section of a task file, normalised so that only a change to what
+// the criteria SAY counts: line endings, trailing whitespace, blank lines and checkbox state are
+// not amendments. Frontmatter is skipped, so nothing in `notes` can pose as the heading. `null`
+// when the file has no such section.
+export function criteriaSection(text) {
+  const lines = String(text ?? "").replace(/\r\n/g, "\n").split("\n");
+  let i = 0;
+  if (lines[0]?.trim() === "---") {
+    const close = lines.findIndex((l, n) => n > 0 && l.trim() === "---");
+    i = close === -1 ? lines.length : close + 1;
+  }
+  for (; i < lines.length; i += 1) if (CRITERIA_HEADING.test(lines[i])) break;
+  if (i >= lines.length) return null;
+  const body = [];
+  for (let j = i + 1; j < lines.length && !/^#{1,2}\s/.test(lines[j]); j += 1) {
+    const line = lines[j].replace(/\s+$/, "").replace(/^(\s*[-*]\s+)\[[xX ]\]/, "$1[ ]");
+    if (line) body.push(line);
+  }
+  return body.join("\n");
+}
+
+// Were the task's acceptance criteria amended after its PR opened? `baseText` is the task file at
+// the merge base of the PR head and the default branch; `defaultText` is the same file on the
+// default branch. Only a positive difference counts: a file or a section missing on either side
+// is NOT an amendment, because the exception relaxes a guard and must be established, not assumed.
+export function criteriaAmended(baseText, defaultText) {
+  const before = criteriaSection(baseText);
+  const after = criteriaSection(defaultText);
+  if (before === null || after === null) return false;
+  return before !== after;
+}
+
+// Per test file: how many test declarations and assertions the diff removes and adds. A line that
+// declares a test is counted as a declaration only, the same split `weakensTests` makes.
+export function testLineBalance(diff) {
+  const files = {};
+  for (const ev of testDiffEvents(diff)) {
+    if (ev.type !== "line") continue;
+    const b = (files[ev.file] ??= { declRemoved: 0, declAdded: 0, assertRemoved: 0, assertAdded: 0 });
+    const side = ev.sign === "-" ? "Removed" : "Added";
+    if (DECLARES_TEST.test(ev.body)) b[`decl${side}`] += 1;
+    else if (ASSERTS.test(ev.body)) b[`assert${side}`] += 1;
+  }
+  return files;
+}
+
+// Trips an amendment never excuses: none of them is a replacement.
+export const NEVER_EXCUSED = Object.freeze(["test file deleted", "test file renamed", "added a skip/only/todo marker"]);
+
+// The guard's whole verdict on a round. `amended` must be the boolean `true` to relax anything —
+// a string, or anything truthy-looking, is not an amendment. Returns:
+//
+//   discard   true when the round must be thrown away, exactly as before flow-0161
+//   offenders every trip, plus any net loss, for the step summary and the card
+//   disclose  the trips an amendment excused; non-empty only when the round is kept, and then
+//             the workflow posts every one of them on the PR before anyone reads the re-run
+//   reason    one sentence saying which of those it was
+export function guardDecision({ diff = "", amended = false } = {}) {
+  const offenders = weakensTests(diff);
+  if (offenders.length === 0) return { discard: false, offenders, disclose: [], reason: "clean — no test weakening detected" };
+  if (amended !== true) {
+    return { discard: true, offenders, disclose: [], reason: "the round weakened the tests and the task's criteria were not amended" };
+  }
+  const netLoss = [];
+  for (const [file, b] of Object.entries(testLineBalance(diff))) {
+    if (b.declRemoved > b.declAdded) {
+      netLoss.push({ file, at: 0, reason: "net loss of test declarations", line: `${b.declRemoved} removed, ${b.declAdded} added` });
+    }
+    if (b.assertRemoved > b.assertAdded) {
+      netLoss.push({ file, at: 0, reason: "net loss of assertions", line: `${b.assertRemoved} removed, ${b.assertAdded} added` });
+    }
+  }
+  const unexcused = offenders.some((o) => NEVER_EXCUSED.includes(o.reason));
+  if (unexcused || netLoss.length > 0) {
+    return {
+      discard: true,
+      offenders: [...offenders, ...netLoss],
+      disclose: [],
+      reason: "the task's criteria were amended, but the round deleted, renamed or skipped a test, or removed more than it added",
+    };
+  }
+  return { discard: false, offenders, disclose: offenders, reason: "the task's criteria were amended, and every trip is a replacement" };
+}
+
+export const DISCLOSURE_TITLE = "### ⚠️ Flow auto-fix replaced test assertions — this task's acceptance criteria were amended";
+export const DISCLOSURE_MAX_TRIPS = 50;
+export const DISCLOSURE_MAX_LINE = 300;
+
+// The PR comment a kept round posts. Every trip is listed — file, line and reason — inside a code
+// fence longer than any backtick run in the lines, because each line is model-written test code:
+// fenced, it can neither render as markup nor @-mention anyone. Bounded at DISCLOSURE_MAX_TRIPS
+// trips of DISCLOSURE_MAX_LINE characters, so it always fits the job output that carries it.
+export function disclosureComment(trips = [], { round = "", cap = "" } = {}) {
+  const clip = (t) => (t.length > DISCLOSURE_MAX_LINE ? `${t.slice(0, DISCLOSURE_MAX_LINE - 1)}…` : t);
+  const shown = trips.slice(0, DISCLOSURE_MAX_TRIPS).map((o) => ({ ...o, line: clip(String(o.line ?? "")) }));
+  const report = weakensReport(shown);
+  const longest = Math.max(0, ...(report.match(/`+/g) ?? []).map((r) => r.length));
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  const more = trips.length > shown.length ? `\n…and ${trips.length - shown.length} more, in the run's step summary.` : "";
+  return [
+    DISCLOSURE_TITLE,
+    "",
+    `Auto-fix round ${round || "?"} of ${cap || "?"} removed or rewrote the test lines below, and the test-weakening guard would normally have thrown the round away. It was **pushed** instead, because this task's \`## Acceptance criteria\` on the default branch differ from the same section at this PR's merge base: a human or the orchestrator amended the contract after the PR opened, and the fixer cannot edit the task store.`,
+    "",
+    "**Check each line replaces an assertion the amendment made wrong.** The qa re-run judges the round against the amended criteria; the fixer was told to name every replacement in its hand-back.",
+    "",
+    fence,
+    report,
+    fence + more,
+    "",
+  ].join("\n");
+}
 
 // ── decide ───────────────────────────────────────────────────────────────────────────────
 
@@ -500,10 +671,37 @@ export function parseOutcome(text) {
   return { ok: true, reason: "", outcome, data };
 }
 
+// The change a card recommends when a round's own change never reached the PR (flow-0160).
+export const NOT_PUSHED_CHANGE =
+  "the PR head is unchanged — this round pushed nothing, so its fix must be re-applied or the round re-run.";
+
+// Did this round's change reach the PR? `pushed` is undefined when the card describes no round at
+// all (`plan` escalated before one ran), and that keeps today's behaviour. Otherwise a round that
+// did not push, or whose guard wrote an `amend`, left the PR head exactly where it was.
+export function roundNotPushed({ pushed, amend = "" } = {}) {
+  if (pushed === undefined || pushed === null) return false;
+  return pushed !== true || String(amend ?? "").trim() !== "";
+}
+
+// The fixer's hand-back was written BEFORE the guards ran, assuming its commit would be pushed —
+// so its "merge as is" is a recommendation to merge a head that still carries the finding.
+// When nothing was pushed, a `merge` becomes a kickback that says so, with the fixer's own change
+// text (if any) after it. A dispute is exempt: it pushes nothing by design, and its
+// recommendation is the fixer's judgement about the finding, not about a commit. `outcome` is the
+// PUSH job's reading of the round, never the hand-back's own field — `round-card` writes
+// `"outcome": "disputed"` for every dead round it describes.
+export function recommendationFor(rec, { pushed, amend = "", outcome = "" } = {}) {
+  if (!roundNotPushed({ pushed, amend }) || String(outcome ?? "").trim() === "disputed") return rec;
+  if (!rec || typeof rec !== "object" || String(rec.action ?? "").trim() !== "merge") return rec;
+  const own = String(rec.change ?? "").trim();
+  return { ...rec, action: "kickback", change: own ? `${NOT_PUSHED_CHANGE} ${own}` : NOT_PUSHED_CHANGE };
+}
+
 // Card input built from the round's own hand-back, amended with whatever stopped the round. The
 // worker's four fields are reused verbatim where they exist — it is the only thing that knows
 // what it tried — and `amend` is prefixed to `tried` so the guard's verdict is never buried.
-export function cardFromOutcome(data, { amend = "", check = "review", link = "", rounds = 0, cap = 0 } = {}) {
+// `pushed` and `outcome` describe the round's `push` job, and only `recommendationFor` reads them.
+export function cardFromOutcome(data, { amend = "", check = "review", link = "", rounds = 0, cap = 0, pushed, outcome = "" } = {}) {
   const d = data && typeof data === "object" && !Array.isArray(data) ? data : {};
   const tried = [amend, typeof d.tried === "string" ? d.tried.trim() : ""].filter(Boolean).join(" ");
   return {
@@ -513,7 +711,7 @@ export function cardFromOutcome(data, { amend = "", check = "review", link = "",
     cap,
     finding: typeof d.finding === "string" ? d.finding : "",
     tried,
-    recommendation: d.recommendation,
+    recommendation: recommendationFor(d.recommendation, { pushed, amend, outcome }),
     alternative: typeof d.alternative === "string" ? d.alternative : "",
   };
 }
@@ -525,8 +723,14 @@ export function cardFromOutcome(data, { amend = "", check = "review", link = "",
 //
 //   decide    reads the gathered facts from the environment, writes the verdict to GITHUB_OUTPUT
 //   rounds    counts round trailers in a NUL-delimited commit-message file
-//   weakens   runs the test-weakening guard over a diff file; exit 1 when it trips
-//   card      renders the decision card from a hand-back file (or from nothing) to stdout
+//   amended   compares the task file at the PR's merge base with the default branch's copy and
+//             writes `amended=true|false` to GITHUB_OUTPUT (flow-0161)
+//   weakens   runs the test-weakening guard over a diff file; exit 1 when the round must be
+//             discarded. With KICKBACK_CRITERIA_AMENDED=true a round whose every trip is a
+//             replacement exits 0, writes `disclose=true` and the PR comment to
+//             KICKBACK_DISCLOSURE_FILE
+//   card      renders the decision card from a hand-back file (or from nothing) to stdout;
+//             KICKBACK_ROUND_PUSHED / KICKBACK_ROUND_OUTCOME say whether a round's change landed
 
 export function runKickbackCli(argv, opts = {}) {
   const env = opts.env ?? process.env;
@@ -534,6 +738,7 @@ export function runKickbackCli(argv, opts = {}) {
   const err = opts.stderr ?? ((s) => process.stderr.write(s));
   const read = opts.readFile ?? ((p) => readFileSync(p, "utf8"));
   const append = opts.appendFile ?? ((p, s) => appendFileSync(p, s));
+  const writeFile = opts.writeFile ?? ((p, s) => writeFileSync(p, s));
   const emit = (kv) => {
     if (!env.GITHUB_OUTPUT) return;
     append(env.GITHUB_OUTPUT,
@@ -574,11 +779,34 @@ export function runKickbackCli(argv, opts = {}) {
     return 0;
   }
 
+  if (cmd === "amended") {
+    // Each side is a file `plan` fetched from a commit outside the fixer's reach. One that could
+    // not be fetched is empty, and an empty side is never an amendment.
+    const text = (p) => { try { return p ? read(p) : ""; } catch { return ""; } };
+    const amended = criteriaAmended(text(rest[0]), text(rest[1]));
+    emit({ amended: String(amended) });
+    out(amended
+      ? "amended — the task's acceptance criteria differ between the merge base and the default branch\n"
+      : "not amended — the task's acceptance criteria are unchanged since the PR's merge base\n");
+    return 0;
+  }
+
   if (cmd === "weakens") {
-    const offenders = weakensTests(read(rest[0]));
-    if (offenders.length === 0) { out("clean — no test weakening detected\n"); return 0; }
-    out(`${weakensReport(offenders)}\n`);
-    return 1;
+    const verdict = guardDecision({
+      diff: read(rest[0]),
+      // Exactly the literal `true` that `plan` outputs; anything else is today's guard.
+      amended: env.KICKBACK_CRITERIA_AMENDED === "true",
+    });
+    emit({ disclose: String(verdict.disclose.length > 0) });
+    if (verdict.offenders.length === 0) { out(`${verdict.reason}\n`); return 0; }
+    out(`${weakensReport(verdict.offenders)}\n`);
+    if (verdict.discard) return 1;
+    if (env.KICKBACK_DISCLOSURE_FILE) {
+      writeFile(env.KICKBACK_DISCLOSURE_FILE, disclosureComment(verdict.disclose, {
+        round: env.KICKBACK_ROUND ?? "", cap: env.KICKBACK_CAP ?? "",
+      }));
+    }
+    return 0;
   }
 
   if (cmd === "card") {
@@ -590,11 +818,15 @@ export function runKickbackCli(argv, opts = {}) {
       link: env.KICKBACK_LINK ?? "",
       rounds: Number(env.KICKBACK_ROUNDS_USED ?? 0),
       cap: Number(env.KICKBACK_CAP ?? 0),
+      // Unset means this card describes no round (`escalate`); set means `escalate-round` is
+      // telling us whether its round's change reached the PR.
+      pushed: env.KICKBACK_ROUND_PUSHED === undefined ? undefined : env.KICKBACK_ROUND_PUSHED === "true",
+      outcome: env.KICKBACK_ROUND_OUTCOME ?? "",
     })));
     return 0;
   }
 
-  err("usage: flow-kickback.mjs <decide|rounds|weakens|card> [file]\n");
+  err("usage: flow-kickback.mjs <decide|rounds|amended|weakens|card> [file...]\n");
   return 2;
 }
 

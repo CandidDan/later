@@ -6,8 +6,9 @@ name: flow-recover
 # name (CAN-58), not `secrets: inherit`: this job has no use for CLAUDE_CODE_OAUTH_TOKEN and
 # should not carry it. See docs/flow-reusable-workflows.md in the flow repo.
 #
-# DORMANT until repo variable FLOW_AI=true (same switch as the queue-runner — no autonomous
-# workers, nothing to strand); always runnable on demand via workflow_dispatch.
+# DORMANT until repo variable FLOW_AI=true (no autonomous workers, nothing to strand); always
+# runnable on demand via workflow_dispatch. A reset with nothing pushed also moves the task up one
+# model tier (flow-0174).
 
 on:
   schedule:
@@ -28,7 +29,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: CandidDan/flow/.github/workflows/_flow-recover.yml@v3
+    uses: CandidDan/flow/.github/workflows/_flow-recover.yml@v4
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
       threshold_minutes: ${{ inputs.threshold_minutes }}

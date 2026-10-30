@@ -1,0 +1,53 @@
+name: flow-dispatch
+
+# Thin caller — the routine dispatcher (flow-0182) lives in canonical (CandidDan/flow) as a reusable
+# workflow, adopted here by reference. See docs/flow-reusable-workflows.md and
+# docs/flow-routines.md ("Wiring the trigger") in the flow repo.
+#
+# Fires the Claude Code worker routine for the next `ready` task's model tier — at most one task a
+# run, and none while `dispatch.max_in_progress` tasks (.flow/config.yml, default 3) are already
+# `in_progress`. No model runs in this job; it costs seconds.
+#
+# Four triggers, one job:
+#   · a push to `.flow/tasks/**` on main — a task allocated `ready`, a claim, a human's edit;
+#   · flow-unblock or flow-recover completing — their commits are pushed with GITHUB_TOKEN, and
+#     GitHub starts no workflow from a GITHUB_TOKEN push, so the push trigger alone would miss a
+#     task they release or reset to `ready`;
+#   · once a day, the sweep that catches a missed event;
+#   · workflow_dispatch, on demand.
+#
+# Per tier the repo uses: the trigger id in the variable FLOW_ROUTINE_<TIER>_ID and its token in
+# the secret FLOW_ROUTINE_<TIER>_TOKEN. A tier with neither set is skipped with a visible line and
+# a green run, so a repo that has not set up routines yet loses nothing.
+
+on:
+  push:
+    branches: [main]
+    paths: [".flow/tasks/**"]
+  workflow_run:
+    workflows: [flow-unblock, flow-recover]
+    types: [completed]
+  schedule:
+    - cron: "41 6 * * *"       # daily sweep; off the top of the hour, where scheduled runs queue
+  workflow_dispatch:
+
+concurrency:
+  group: flow-dispatch
+  cancel-in-progress: false
+
+jobs:
+  flow-dispatch:
+    permissions:
+      contents: read           # checkout, and the re-read of the task from main before firing
+    uses: CandidDan/flow/.github/workflows/_flow-dispatch.yml@v4
+    with:
+      runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
+      haiku_routine_id: ${{ vars.FLOW_ROUTINE_HAIKU_ID }}
+      sonnet_routine_id: ${{ vars.FLOW_ROUTINE_SONNET_ID }}
+      opus_routine_id: ${{ vars.FLOW_ROUTINE_OPUS_ID }}
+      fable_routine_id: ${{ vars.FLOW_ROUTINE_FABLE_ID }}
+    secrets:
+      FLOW_ROUTINE_HAIKU_TOKEN: ${{ secrets.FLOW_ROUTINE_HAIKU_TOKEN }}
+      FLOW_ROUTINE_SONNET_TOKEN: ${{ secrets.FLOW_ROUTINE_SONNET_TOKEN }}
+      FLOW_ROUTINE_OPUS_TOKEN: ${{ secrets.FLOW_ROUTINE_OPUS_TOKEN }}
+      FLOW_ROUTINE_FABLE_TOKEN: ${{ secrets.FLOW_ROUTINE_FABLE_TOKEN }}

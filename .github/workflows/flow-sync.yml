@@ -30,7 +30,7 @@ on:
   workflow_dispatch:
     inputs:
       canonical_ref:
-        description: "Canonical ref to adopt from (tag/branch). Default v3."
+        description: "Canonical ref to adopt from (tag/branch). Default v4."
         required: false
         type: string
 

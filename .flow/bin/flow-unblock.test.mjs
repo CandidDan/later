@@ -8,8 +8,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   classifyBlocked, resolveEntry, parsePrUrl, buildReleaseEdit, planReleases, prRefs,
-  parsePrFacts, readTasks, shouldDispatch, countActiveRuns, httpStatusOf, dispatchOutcome,
-  runUnblockCli,
+  parsePrFacts, readTasks, runUnblockCli,
 } from "./flow-unblock.mjs";
 import { applyEdits } from "./apply-board-edits.mjs";
 
@@ -134,55 +133,6 @@ test("parsePrFacts reads state/merged lines and drops anything malformed", () =>
   assert.equal(facts.size, 2);
 });
 
-// ── the dispatch decision ───────────────────────────────────────────────────────────────
-
-test("dispatches with ready work, no active runner and FLOW_QUEUE_RUNNER unset", () => {
-  assert.equal(shouldDispatch({ ready: 1, activeRuns: 0, queueRunner: "" }).dispatch, true);
-  assert.equal(shouldDispatch({ ready: 3, activeRuns: 0 }).dispatch, true);
-});
-
-test("each of the three conditions false on its own stops the dispatch", () => {
-  const base = { ready: 1, activeRuns: 0, queueRunner: "" };
-  const cases = {
-    "no ready task": { ...base, ready: 0 },
-    "a runner already active": { ...base, activeRuns: 1 },
-    "FLOW_QUEUE_RUNNER paused": { ...base, queueRunner: "paused" },
-    "run count unknown": { ...base, activeRuns: "unknown" },
-  };
-  for (const [name, input] of Object.entries(cases)) {
-    const d = shouldDispatch(input);
-    assert.equal(d.dispatch, false, name);
-    assert.ok(d.reason, `${name} must say why`);
-  }
-  // any other value of the switch is not a pause
-  assert.equal(shouldDispatch({ ...base, queueRunner: "on" }).dispatch, true);
-});
-
-test("countActiveRuns counts every unfinished run and reports an unreadable list as unknown", () => {
-  const runs = [{ status: "queued" }, { status: "waiting" }, { status: "in_progress" },
-                { status: "pending" }, { status: "completed" }];
-  assert.equal(countActiveRuns(JSON.stringify(runs)), 4);
-  assert.equal(countActiveRuns("[]"), 0);
-  assert.equal(countActiveRuns("HTTP 403"), "unknown");
-  assert.equal(countActiveRuns('{"a":1}'), "unknown");
-});
-
-test("a 403 on dispatch is a warning naming actions: write, never a failure", () => {
-  const out = "gh: Resource not accessible by integration (HTTP 403)";
-  assert.equal(httpStatusOf(out), 403);
-  const line = dispatchOutcome(1, out, "flow-queue-runner.yml");
-  assert.match(line, /^::warning::/);
-  assert.match(line, /actions: write/);
-  assert.match(dispatchOutcome(1, "HTTP 404"), /^::warning::.*404/);
-  assert.match(dispatchOutcome(1, "network down"), /^::warning::/);
-  assert.match(dispatchOutcome(0, ""), /^Dispatched flow-queue-runner\.yml with no task_id/);
-  // The CLI that the step pipes into exits 0 on the 403 — that exit code is the step's.
-  const r = spawnSync(process.execPath, [join(BIN, "flow-unblock.mjs"), "dispatch-outcome", "1", "flow-queue-runner.yml"],
-    { input: out, encoding: "utf8" });
-  assert.equal(r.status, 0);
-  assert.match(r.stdout, /^::warning::.*actions: write/);
-});
-
 // ── the CLI, end to end over a real store ───────────────────────────────────────────────
 
 function store() {
@@ -229,24 +179,19 @@ test("CLI: pr-refs, plan and edits agree, and the edits release exactly the reso
     before.replace('status: "blocked"', 'status: "ready"')
       .replace('blocked_reason: "waits on P-0001 and #7"', 'blocked_reason: ""')
       .replace(`blocked_by:\n  - "P-0001"\n  - "${PR}"`, "blocked_by: []"));
-  assert.equal(cli(["count-ready"], { tasksDir: dir }).s, "2\n");
   // A second sweep over the released store has nothing left to release.
   assert.deepEqual(JSON.parse(cli(["edits", "--pr-facts", "f"], { tasksDir: dir, readFile }).s), { updates: [] });
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("CLI: count-active-runs, should-dispatch and dispatch-outcome", () => {
-  assert.equal(cli(["count-active-runs"], { stdin: () => '[{"status":"queued"}]' }).s, "1\n");
-  assert.equal(cli(["count-active-runs"], { stdin: () => "" }).s, "unknown\n");
-  assert.equal(cli(["should-dispatch", "--ready", "2", "--active", "0", "--queue-runner", ""]).s, "dispatch\n");
-  assert.match(cli(["should-dispatch", "--ready", "2", "--active", "unknown"]).s, /^skip: /);
-  assert.match(cli(["should-dispatch", "--ready", "2", "--active", "0", "--queue-runner", "paused"]).s, /^skip: .*paused/);
-  assert.match(cli(["should-dispatch", "--ready", "x", "--active", "0"]).s, /^skip: no ready task/);
-  assert.match(cli(["dispatch-outcome", "1", "runner.yml"], { stdin: () => "(HTTP 403)" }).s,
-    /^::warning::Could not dispatch runner\.yml: HTTP 403/);
-  const r = cli(["nope"]);
-  assert.equal(r.code, 0);
-  assert.equal(r.s, "");
+test("CLI: an unknown subcommand — the dispatch-only ones included — prints nothing and exits 0", () => {
+  // count-ready, count-active-runs, should-dispatch and dispatch-outcome went with the retired
+  // queue-runner (flow-0174); an older workflow still calling one gets the usage line, not a crash.
+  for (const cmd of ["nope", "should-dispatch"]) {
+    const r = cli([cmd]);
+    assert.equal(r.code, 0);
+    assert.equal(r.s, "");
+  }
 });
 
 test("the CLI block runs when invoked directly and reads the store beside it", () => {
@@ -255,9 +200,9 @@ test("the CLI block runs when invoked directly and reads the store beside it", (
   mkdirSync(join(root, ".flow"), { recursive: true });
   cpSync(BIN, join(root, ".flow", "bin"), { recursive: true });
   cpSync(store(), join(root, ".flow", "tasks"), { recursive: true });
-  const r = spawnSync(process.execPath, [join(root, ".flow", "bin", "flow-unblock.mjs"), "count-ready"], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, [join(root, ".flow", "bin", "flow-unblock.mjs"), "pr-refs"], { encoding: "utf8" });
   assert.equal(r.status, 0);
-  assert.equal(r.stdout, "1\n");
+  assert.equal(r.stdout, `${PR}\to/r\t7\n${PR2}\to/r\t8\n`);
   assert.equal(readTasks(join(root, ".flow", "tasks")).length, 5);
   rmSync(root, { recursive: true, force: true });
 });

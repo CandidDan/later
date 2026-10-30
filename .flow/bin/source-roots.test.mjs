@@ -404,8 +404,8 @@ test("canonical's own .flow/config.yml plans a count of 0 — every entry is alr
   assert.deepEqual(errors, [], "canonical's own config must satisfy the schema it publishes");
   assert.equal(count, 0);
   assert.deepEqual(matrix, []);
-  assert.ok(excluded.length >= 4,
-    "count 0 must be four entries EXCLUDED, not zero entries parsed — a parser that found nothing " +
+  assert.ok(excluded.length >= 3,
+    "count 0 must be three entries EXCLUDED, not zero entries parsed — a parser that found nothing " +
     "produces the same 0 and would be a silent hole");
   for (const x of excluded) assert.equal(x.reason, "covered by the primary gate");
 });

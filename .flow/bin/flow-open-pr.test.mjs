@@ -154,3 +154,22 @@ test("an explicit id overrides a DIFFERENT id parsed from the branch", () => {
   assert.equal(d.id, "CAN-51");
   assert.equal(d.title, "[CAN-51] T");
 });
+
+// ── flow-0162: a task with an open PR of record on another branch gets no second PR ──
+
+test("open PR of record on another branch -> null; without one the PR opens as before", () => {
+  const base = { branch: "flow/CAN-50-y", hasOpenPr: false, aheadOfBase: true, taskTitle: "t" };
+  assert.equal(decideOpenPr({ ...base, recordPr: 200 }), null);
+  assert.equal(decideOpenPr({ ...base, recordPr: null })?.head, "flow/CAN-50-y");
+});
+
+test("CLI prints the ignore line (stderr) and no decision when a record exists", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const run = (extra) => spawnSync(process.execPath, [new URL("./flow-open-pr.mjs", import.meta.url).pathname,
+    "--branch", "flow/CAN-50-y", "--ahead", "2", "--has-open-pr", "0", ...extra], { encoding: "utf8" });
+  const r = run(["--record-pr", "200"]);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /push of flow\/CAN-50-y ignored: CAN-50's PR of record is #200 \(open\)/);
+  assert.match(run([]).stdout, /"head":"flow\/CAN-50-y"/);
+});

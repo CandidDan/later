@@ -12,6 +12,6 @@ jobs:
   flow-done:
     permissions:
       contents: write
-    uses: CandidDan/flow/.github/workflows/_flow-done.yml@v3
+    uses: CandidDan/flow/.github/workflows/_flow-done.yml@v4
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}

@@ -1,10 +1,9 @@
 // task-model.test.mjs — proving tests for the per-task model resolver and escalation (flow-0083).
 //
-// Pure-core tests first (resolve, cliArgs, escalate, decideRunEscalation), then the CLI against a
-// throwaway store, because the CLI is what the queue runner actually runs. The workflow wiring —
-// no literal --model in the dispatch step, the escalate step executed end to end against a bare
-// origin, and the "TIERS is the only table" scan — is canonical-only and lives in
-// `.flow/bin/queue-runner-verify.test.mjs`.
+// Pure-core tests first (resolve, cliArgs, escalate), then the CLI against a throwaway store,
+// because the CLI is what the workflows run. The "TIERS is the only table" scan is canonical-only
+// and lives in `.flow/bin/model-ids.test.mjs`; the reset-path escalation (flow-0174) is proved in
+// `flow-recover.test.mjs`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -13,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  TIERS, TIER_ORDER, EFFORTS, resolve, cliArgs, summaryLine, escalate, decideRunEscalation,
+  TIERS, TIER_ORDER, EFFORTS, resolve, cliArgs, summaryLine, escalate,
   readField, writeField, readAsks, writeAsks, scalar, topTierAsk, findTaskFile, runCli,
 } from "./task-model.mjs";
 import { parseAsks } from "./asks.mjs";
@@ -155,21 +154,6 @@ test("escalate refuses a task resolve rejects, rather than guessing its tier", (
   assert.throws(() => escalate(task({ model: "gpt-5", model_reason: "x" }), "e"), /not a tier/);
 });
 
-// ── criterion 6's decision: did the run end without a PR? ──────────────
-
-test("decideRunEscalation: no PR + no branch, or a failed worker, escalates; anything else does not", () => {
-  const d = (o) => decideRunEscalation(o).escalate;
-  assert.equal(d({ status: "in_progress" }), true, "nothing pushed, nothing open");
-  assert.equal(d({ status: "in_progress", workerFailed: true, branchAhead: true }), true, "error_max_turns after a push");
-  assert.equal(d({ status: "in_progress", branchAhead: true }), false, "a clean run that pushed: flow-open-pr carries it");
-  assert.equal(d({ status: "in_progress", workerFailed: true, hasOpenPr: true }), false, "a PR is open");
-  assert.equal(d({ status: "blocked", workerFailed: true }), false, "a block is the worker's own outcome");
-  assert.equal(d({ status: "in_review" }), false);
-  assert.equal(d({ status: "done" }), false);
-  assert.equal(d({ status: "" }), false, "task not on main");
-  assert.equal(d(), false);
-});
-
 // ── the frontmatter helpers ─────────────────────────────────────────────
 
 test("scalar strips quotes and trailing comments, but not a # inside quotes", () => {
@@ -255,12 +239,9 @@ test("CLI resolve fails the run on an invalid value, naming the field", () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("CLI escalate rewrites the task file one tier up; decide reports the verdict", () => {
+test("CLI escalate rewrites the task file one tier up", () => {
   const { dir, tasks } = store({ "0001.md": task({ status: "in_progress" }) });
   try {
-    const d = cli(["decide", "--task-id", "PROJ-0001", "--worker-failed", "1", "--branch-ahead", "0", "--has-open-pr", "0"], tasks);
-    assert.equal(d.code, 0);
-    assert.match(d.out, /^escalate=true$/m);
     const e = cli(["escalate", "--task-id", "PROJ-0001", "--event", "run 5 ended without a PR"], tasks);
     assert.equal(e.code, 0, e.err);
     assert.match(e.out, /sonnet -> opus/);
@@ -273,16 +254,13 @@ test("CLI escalate rewrites the task file one tier up; decide reports the verdic
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("CLI: usage, unknown task, missing --event and an absent task in decide", () => {
+test("CLI: usage, unknown task and missing --event", () => {
   const { dir, tasks } = store({ "0001.md": task() });
   try {
     assert.equal(cli([], tasks).code, 2);
     assert.equal(cli(["resolve", "--task-id", "NOPE-1"], tasks).code, 1);
     assert.equal(cli(["escalate", "--task-id", "PROJ-0001"], tasks).code, 2);
-    const d = cli(["decide", "--task-id", "NOPE-1"], tasks);
-    assert.equal(d.code, 0);
-    assert.match(d.out, /^escalate=false$/m);
-    assert.match(cli(["decide", "--task-id", "PROJ-0001", "--branch-ahead", "true"], tasks).out, /escalate=false/);
+    assert.equal(cli(["decide", "--task-id", "PROJ-0001"], tasks).code, 2, "decide retired with queue-runner (flow-0174)");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

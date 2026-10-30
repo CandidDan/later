@@ -16,7 +16,9 @@ Humans scan pictures faster than they read paragraphs. Prose is the fallback, no
 4. **One visual per idea.** Don't follow a table with a paragraph that says the same thing.
 5. **Prose only for the why** — one or two sentences a visual can't carry.
 6. **Terse is not cryptic.** Plain words, full sentences, jargon explained or cut. Short and
-   clear beats short and puzzling.
+   clear beats short and puzzling. This is the protocol's plain-language rule (`.flow/PROTOCOL.md`,
+   **Response style**): name things literally, not by metaphor, and rewrite any sentence that can
+   be read two ways.
 
 ## Pick the format
 

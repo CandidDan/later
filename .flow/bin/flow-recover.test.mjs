@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import {
   classifyStranded, buildResetEdit, minutesSince, readTasks, DEFAULT_THRESHOLD_MINUTES,
   recoveryBranchCandidates, isTaskPrTitle, readyOpenPr, buildPromoteEdit,
+  escalatesOnRecover, escalateOnRecover, runRecoverCli,
 } from "./flow-recover.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
@@ -663,4 +664,99 @@ test("flow-0131: flow-recover still drops a trailing unquoted # comment", () => 
   assert.equal(t.id, "CAN-1");
   assert.equal(t.status, "in_progress");
   assert.equal(t.started, "2026-06-18T00:00:00Z");
+});
+
+// ── flow-0174: the reset path escalates the model; nothing else does ──────────────────────
+//
+// queue-runner is retired, and the one-tier bump it applied to a run that produced nothing now
+// rides on flow-recover's reset — the sweep's own verdict that an attempt pushed nothing.
+
+function storeWith(t, frontmatter) {
+  const dir = mkdtempSync(join(tmpdir(), "flow-recover-0174-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "x-0001-task.md");
+  writeFileSync(file, `---\nid: "X-0001"\nstatus: "in_progress"\n${frontmatter}asks: []\n---\nbody\n`);
+  return { dir, file, read: () => readFileSync(file, "utf8") };
+}
+
+/** Classify a stranded task the way the sweep does, then run the escalate step on that decision. */
+function sweep(store, facts) {
+  const decision = classifyStranded(inProgress, { ageMinutes: 200, ...facts }, TH);
+  const lines = [];
+  runRecoverCli(["escalate", "X-0001", decision, "flow-recover run 7 reset it with nothing pushed"],
+    { tasksDir: store.dir, out: { write: (s) => lines.push(s) } });
+  return { decision, said: lines.join("") };
+}
+
+test("flow-0174: a task reset to ready with nothing pushed moves up one tier", (t) => {
+  const store = storeWith(t, 'model: "sonnet"\nmodel_reason: "well specified"\n');
+  const { decision, said } = sweep(store, { branchExists: false, aheadOfBase: false, hasOpenPr: false });
+  assert.equal(decision, "reset-to-ready");
+  assert.match(store.read(), /^model: "opus"$/m, "sonnet -> opus");
+  assert.match(store.read(), /^model_reason: "escalated after flow-recover run 7 reset it with nothing pushed \(was sonnet\)"$/m);
+  assert.match(said, /escalated sonnet -> opus/);
+});
+
+test("flow-0174: an unset model is the sonnet default, and escalates to opus", (t) => {
+  const store = storeWith(t, "");
+  sweep(store, { branchExists: false, hasOpenPr: false });
+  assert.match(store.read(), /^model: "opus"$/m);
+});
+
+test("flow-0174: a top-tier task reset to ready keeps its model", (t) => {
+  const store = storeWith(t, 'model: "fable"\nmodel_reason: "hard"\n');
+  const { decision, said } = sweep(store, { branchExists: false, hasOpenPr: false });
+  assert.equal(decision, "reset-to-ready");
+  assert.match(store.read(), /^model: "fable"$/m, "fable stays fable");
+  assert.match(store.read(), /decision: this task failed on the top tier/, "a split is recommended instead");
+  assert.match(said, /top tier/);
+});
+
+test("flow-0174: the same reset event never escalates twice", (t) => {
+  const store = storeWith(t, 'model: "haiku"\nmodel_reason: "trivial"\n');
+  sweep(store, { branchExists: false, hasOpenPr: false });
+  sweep(store, { branchExists: false, hasOpenPr: false });
+  assert.match(store.read(), /^model: "sonnet"$/m, "haiku -> sonnet, once");
+});
+
+test("flow-0174: a stranded task whose branch has pushed work is not escalated", (t) => {
+  const store = storeWith(t, 'model: "sonnet"\nmodel_reason: "well specified"\n');
+  const before = store.read();
+  const { decision } = sweep(store, { branchExists: true, aheadOfBase: true, hasOpenPr: false });
+  assert.equal(decision, "reopen-pr");
+  assert.equal(store.read(), before, "work was pushed — the model is untouched");
+});
+
+test("flow-0174: a task promoted to in_review is not escalated", (t) => {
+  const store = storeWith(t, 'model: "sonnet"\nmodel_reason: "well specified"\n');
+  const before = store.read();
+  const { decision } = sweep(store, { branchExists: true, aheadOfBase: true, hasOpenPr: true, openPrReady: true });
+  assert.equal(decision, "promote-in-review");
+  assert.equal(store.read(), before);
+});
+
+test("flow-0174: only reset-to-ready escalates", () => {
+  assert.equal(escalatesOnRecover("reset-to-ready"), true);
+  for (const d of ["ok", "reopen-pr", "promote-in-review", "", undefined]) assert.equal(escalatesOnRecover(d), false, String(d));
+});
+
+test("flow-0174: an unknown task or an unreadable model is left alone, never a crash", (t) => {
+  const store = storeWith(t, 'model: "gpt"\nmodel_reason: "typo"\n');
+  const before = store.read();
+  assert.match(escalateOnRecover(store.dir, "X-0001", "reset-to-ready", "e"), /left unchanged/);
+  assert.equal(store.read(), before);
+  assert.match(escalateOnRecover(store.dir, "X-9999", "reset-to-ready", "e"), /not found/);
+});
+
+test("flow-0174: the sweep's reset arm runs the escalate step on its own decision", async (t) => {
+  if (!CANON) return t.skip(notCanonical);
+  const text = readFileSync(join(CANON, ".github", "workflows", "_flow-recover.yml"), "utf8");
+  const reset = text.match(/\n\s*reset-to-ready\)\n([\s\S]*?)\n\s*;;/);
+  assert.ok(reset, "the `case $decision` must have a reset-to-ready arm");
+  const code = reset[1].split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+  assert.match(code, /flow-recover\.mjs escalate "\$id" "\$decision" "[^"]+"/);
+  assert.ok(code.indexOf("flow-recover.mjs escalate") < code.indexOf("git add .flow/tasks/"),
+    "escalated before staging, so the bump lands in the reset's own commit");
+  const promote = text.match(/\n\s*promote-in-review\)\n([\s\S]*?)\n\s*;;/)[1];
+  assert.doesNotMatch(promote, /escalate/, "promotion never escalates");
 });
