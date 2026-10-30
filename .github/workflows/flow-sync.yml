@@ -55,7 +55,7 @@ jobs:
       # 'workflows'". A repo that adopted it got a startup failure instead of a sync — worse than
       # the push failure it was meant to fix. The scope comes from FLOW_PAT instead (see the
       # REQUIRED SETUP note at the top of this file).
-    uses: CandidDan/flow/.github/workflows/_flow-sync.yml@v3
+    uses: CandidDan/flow/.github/workflows/_flow-sync.yml@v4
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
       canonical_ref: ${{ inputs.canonical_ref }}
