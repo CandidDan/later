@@ -1,7 +1,7 @@
 ---
 id: "later-0023"
 title: "Create the native iPhone app foundation, gated in hosted macOS and Linux CI"
-status: "in_progress"
+status: "blocked"
 priority: 1
 project: "later"
 owner: "codex-later-0023-takeover"
@@ -10,7 +10,7 @@ started: "2026-11-01T05:50:17Z"
 branch: "flow/later-0023-ios-app-foundation"
 pr: "https://github.com/CandidDan/later/pull/50"
 issue: ""
-blocked_reason: ""
+blocked_reason: "Not machine-checkable: required cloud web gates fail because the pinned PostgreSQL image cannot be extracted (Docker: no space left on device), the fallback public.ecr.aws registry is forbidden, and cdn.playwright.dev is forbidden. Repair cloud resources/network or run the unchanged gates on hosted Ubuntu before handing PR #50 to review."
 blocked_by: []
 serves: ["G4"]
 intent: ""
@@ -24,10 +24,13 @@ touches:
   - ".gitignore"
 labels: ["ios", "ci", "foundation"]
 asks:
+  - "decision: provide a cloud runner that can run the unchanged web gates. Recommend: run flow-gates.yml manually on flow/later-0023-ios-app-foundation using hosted Ubuntu, or repair this cloud runner’s Docker capacity and allow cdn.playwright.dev; api.github.com is also needed for shell Actions dispatch. Do not skip database/browser tests."
   - "follow-up: once later-0023 merges, add the `ios-ci` check as a required status check on `main` (GitHub → Settings → Branches)? Recommend: yes — Flow's own gate cannot run macOS, so this is the only thing that makes a red iOS build block a merge."
   - "follow-up: canonical Flow (CandidDan/flow) `source_roots` cannot choose a runner, so a macOS check cannot be declared in .flow/config.yml; a `runs_on` field upstream would let ios-ci move inside the Flow gate."
   - "fyi: GitHub bills hosted macOS minutes at 10x against the account's included Actions minutes on a private repo; ios-ci skips its macOS work on PRs that do not touch iOS paths to stay inside the included allowance."
 notes:
+  - "2026-11-01 validation handoff: PR #50 remains draft. Rebased and lease-pushed existing branch flow/later-0023-ios-app-foundation as 3d4ac35092516bc00834033f8724a35059005024 on main d35ad44; contrast fix preserved, no implementation changes needed. Original ios-ci 40968884959 is green (5 app unit tests, 2 UI tests, app coverage 100%); fresh rebased run 41278535984 is still running. Linux linux-check.sh passes (LaterKit 6 tests, coverage 100%; 20 script tests); pnpm build passes, lint 0 errors / 4 unchanged Flow warnings; flow-doctor only warns about inactive intent layer. Both pnpm test and test:coverage finished red: 64 files / 725 tests pass, 2 database suites fail setup, 1 file / 10 tests skipped. Separate pinned-image pull proves Docker extraction fails with no space left on device; fallback registry Forbidden. Playwright install is independently forbidden at cdn.playwright.dev; browser gates and complete coverage are unproven. PR description records criterion proofs and blockers. No builds on Dan’s Mac, no merge or deployment invoked. Exact next action: repair cloud networking/capacity or dispatch hosted flow-gates.yml on the existing branch, verify ios-ci 41278535984, rerun all required gates, update PR evidence and gh pr ready (connected GitHub ready tool if shell API remains blocked). Current protocol has no generated board; old board-regeneration note is obsolete."
+  - "2026-11-01 reproducible cloud tools: pnpm 11.19.0 installed under /workspace/later-tools/node_modules/.bin; frozen install uses --store-dir /workspace/later-tools/pnpm-store. Run pnpm with --config.verify-deps-before-run=false because its automatic dependency check otherwise tries to rewrite modules into unwritable home paths. Checksum-verified Swift 6.4 is /workspace/later-tools/swift/usr/bin; set PATH accordingly, CLANG_MODULE_CACHE_PATH and SWIFT_MODULECACHE_PATH to /workspace/later-tools/clang-cache. Logs: /tmp/later-0023-{linux,build,lint,test,coverage,docker,browser-install,doctor}.log. These environment selectors change no source or gate coverage."
   - "2026-11-01 Codex resumed under Dan’s explicit takeover and main task-metadata authorization. Cloud Linux execution and git access verified; connected GitHub plugin confirms hosted ios-ci run 40968884959 succeeded for 395da87. Shell api.github.com is denied by the cloud proxy; use connected GitHub tools for Actions and PR operations. The cloud-resume decision is resolved. Branch protection remains a post-merge follow-up. Rebase onto 3821385 is clean; local Linux iOS gate, web build and lint passed. Required browser download currently blocked by network policy at cdn.playwright.dev; Dan has been asked to allow that host. Web test and coverage gates still pending. No merge or deployment authorized."
   - "2026-10-30 Codex handoff: claimed with Dan’s authorization. Fixed ColorToken.onAccent to black in dark appearance, white in light, on existing branch; commit 395da87e24d00a2fc15ac4c90f87cf9277e04408. Existing contrast test remains unchanged. Hosted ios-ci run 40968884959 started; result not yet verified. PR #50 remains draft. Next: inspect that run, fix any remaining failures, run linux-check.sh and configured web gates in cloud, rebase latest main and repeat gates as necessary, update PR checklist, gh pr ready, regenerate board. No attached cloud executor here; shell gh cannot connect to api.github.com. Board regeneration is outstanding. No merge or deployment performed."
   - "2026-10-30: Dan explicitly authorized Codex to take over PR #50 from Claude. Hosted run 40265652494 built and passed UI tests but failed ThemeTests.testTokenContrast: onAccent/accent dark contrast 3.513 < 4.5. Preserve the test and correct semantic token pairing."
