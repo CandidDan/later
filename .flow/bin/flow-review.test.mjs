@@ -40,6 +40,7 @@ import {
   ReviewError,
   SYNC_PR_PASS_LINE,
   SYNC_PR_PATHS,
+  SYNC_RETIRED_PATHS,
   SYNC_PR_SENTINEL,
   CANONICAL_SKILLS,
   skillSurfaceGlob,
@@ -69,6 +70,8 @@ import {
   oneLine,
   taskContext,
   untrustedBlock,
+  validateVerdictFile,
+  VERDICT_FILE_VALUES,
   verdictOutcome,
 } from "./flow-review.mjs";
 
@@ -1792,13 +1795,14 @@ const CANON_SHA = "a".repeat(39) + "7";
 // flow-0115. `trailers` is what `git log --format=%(trailers:…)` reports over the PR's commits,
 // and `canon` is canonical's tree at CANON_SHA, keyed by canonical path. `calls` is handed in by
 // a test that needs to assert what git was asked to do — specifically, that no fetch happened.
-function fakeGit({ files = [], diff = "", tree = {}, trailers = null, canon = {},
+function fakeGit({ files = [], deleted = [], diff = "", tree = {}, trailers = null, canon = {},
                    fetchFails = false, calls = [] } = {}) {
   const TRAILER_LOG = `log --format=%(trailers:key=${CANONICAL_SHA_TRAILER},valueonly) origin/main..HEAD`;
   return (args) => {
     const cmd = args.join(" ");
     calls.push(cmd);
     if (cmd === "diff --name-only --no-renames origin/main...HEAD") return files.join("\n");
+    if (cmd === "diff --name-only --diff-filter=D --no-renames origin/main...HEAD") return deleted.join("\n");
     if (cmd === "diff origin/main...HEAD") return diff;
     if (cmd === TRAILER_LOG) {
       if (trailers === null) throw new Error("fatal: no trailer log expected in this fixture");
@@ -1839,7 +1843,7 @@ const RELEASE_FILES = ["CHANGELOG.md", "VERSION", "project-template/.flow/VERSIO
 
 // Plan a PR against a throwaway store, and hand back both the plan and the `task.md` a reviewer
 // would actually open.
-function planPr(name, { headRef, prTitle = "Cut the release", files, tree = {},
+function planPr(name, { headRef, prTitle = "Cut the release", files, deleted = [], tree = {},
                         trailers = null, canon = {}, fetchFails = false, calls = [] }) {
   const dir = tmp(name);
   try {
@@ -1851,7 +1855,7 @@ function planPr(name, { headRef, prTitle = "Cut the release", files, tree = {},
       headRef,
       prTitle,
       tasksDir,
-      git: fakeGit({ files, tree, trailers, canon, fetchFails, calls }),
+      git: fakeGit({ files, deleted, tree, trailers, canon, fetchFails, calls }),
     });
     return { plan, md: readFileSync(join(dir, "out", "task.md"), "utf8"), calls };
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -2463,4 +2467,174 @@ test("flow-0178: classifyIntentPr accepts intent files only, fail-closed on ever
   for (const files of [[], [".flow/intents/_TEMPLATE.md"], [".flow/intents/a.md", "src/a.mjs"], [".flow/intents/x/a.md"]]) {
     assert.equal(classifyIntentPr({ changedFiles: files }).classified, false, JSON.stringify(files));
   }
+});
+
+// ── flow-0184: a sync PR that DELETES a retired path is still a sync PR ───────────────────────
+// In parts: `board-retired.test.mjs` forbids the template from naming the retired board.
+const BOARD_FILE = ".flow/board" + ".html";
+const BOARD_SKILL = ".claude/skills/board" + "-builder/SKILL.md";
+const RETIRED_DELETES = [BOARD_FILE, BOARD_SKILL];
+
+test("flow-0184: copied surface + DELETED retired paths classifies as a sync PR", () => {
+  const files = [...SYNCED_FILES, ...RETIRED_DELETES];
+  const direct = classifyPr({ headRef: "flow-sync/4.0.1", changedFiles: files, deletedFiles: RETIRED_DELETES });
+  assert.equal(direct.kind, "sync");
+  assert.equal(direct.classified, true);
+  assert.deepEqual(direct.outside, []);
+
+  // Through the plan, and with provenance still applied: canonical lacks both files, as does HEAD.
+  const { plan, md } = syncPr("sync-retired-deletes", { files, deleted: RETIRED_DELETES });
+  assert.equal(plan.prKind.classified, true);
+  assert.ok(plan.prKind.provenance.ok, "flow-0115's byte-comparison still ran, and passed");
+  assert.ok(md.startsWith(SYNC_PR_SENTINEL));
+});
+
+test("flow-0184: the same paths MODIFIED or ADDED are not classified, and are named", () => {
+  const files = [...SYNCED_FILES, BOARD_FILE];
+  // Present in the diff but not among the deletions: an add or a modification.
+  const direct = classifyPr({ headRef: "flow-sync/4.0.1", changedFiles: files, deletedFiles: [] });
+  assert.equal(direct.classified, false);
+  assert.deepEqual(direct.outside, [BOARD_FILE]);
+
+  const { plan } = syncPr("sync-retired-added", { files, deleted: [] });
+  assert.equal(plan.prKind.classified, false);
+  assert.deepEqual(plan.prKind.outside, [BOARD_FILE]);
+
+  // A deleted path that is not retired gets no exemption, and neither does a release branch.
+  assert.equal(classifyPr({ headRef: "flow-sync/4.0.1", changedFiles: ["src/x.mjs"], deletedFiles: ["src/x.mjs"] }).classified, false);
+  assert.equal(classifyPr({ headRef: "release/v4.0.1", changedFiles: ["VERSION", BOARD_FILE],
+    deletedFiles: [BOARD_FILE] }).classified, false);
+});
+
+test("flow-0184: a deleted retired path that canonical still ships fails provenance", () => {
+  const { plan } = syncPr("sync-retired-still-shipped", {
+    files: [...SYNCED_FILES, BOARD_FILE], deleted: [BOARD_FILE],
+    canon: { ...SYNCED_CANON, ["project-template/" + BOARD_FILE]: "<html>\n" },
+  });
+  assert.equal(plan.prKind.classified, false, "the sentinel is granted by evidence, not by the path list");
+  assert.deepEqual(plan.prKind.provenance.mismatched.map((m) => m.path), [BOARD_FILE]);
+});
+
+test("flow-0184: SYNC_RETIRED_PATHS is the exported single list", () => {
+  assert.ok(SYNC_RETIRED_PATHS.length >= 3 && Object.isFrozen(SYNC_RETIRED_PATHS));
+});
+
+// ── flow-0186: the vendor-neutral verdict file ────────────────────────────────────────────
+// `validateVerdictFile` is the contract any vendor's model step must meet. Every rejection comes
+// back as a FAILING verdict with a reason: the enforce step fails the check closed on it.
+
+const writeVerdict = (dir, name, body) => {
+  const f = join(dir, name);
+  writeFileSync(f, typeof body === "string" ? body : JSON.stringify(body));
+  return f;
+};
+
+test("flow-0186: the verdict validator accepts a well-formed file", () => {
+  const dir = tmp("vf-ok");
+  try {
+    const f = writeVerdict(dir, "qa.json",
+      { check: "qa", verdict: "pass", summary: "all criteria proven", unproven: [] });
+    const v = validateVerdictFile(f, { check: "qa" });
+    assert.equal(v.valid, true, v.reason);
+    assert.equal(v.verdict, "pass");
+    assert.equal(v.summary, "all criteria proven");
+    const failing = validateVerdictFile(writeVerdict(dir, "sec.json",
+      { check: "security", verdict: "fail", summary: "a secret", blocking: [{ file: "a.js", issue: "key" }] }),
+      { check: "security" });
+    assert.equal(failing.valid, true, "a well-formed FAIL is valid — it just does not pass");
+    assert.equal(failing.verdict, "fail");
+    assert.equal(failing.blocking.length, 1);
+    assert.deepEqual([...VERDICT_FILE_VALUES], ["pass", "fail"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0186: a missing file, invalid JSON, a wrong check and a verdict outside pass/fail each fail", () => {
+  const dir = tmp("vf-bad");
+  try {
+    const cases = {
+      "missing file": [join(dir, "absent.json"), /no verdict file/],
+      "invalid JSON": [writeVerdict(dir, "a.json", "{not json"), /not valid JSON/],
+      "a fenced object, which is not JSON": [writeVerdict(dir, "b.json",
+        '```json\n{"check":"qa","verdict":"pass","summary":"x"}\n```'), /not valid JSON/],
+      "an array": [writeVerdict(dir, "c.json", "[]"), /one JSON object/],
+      "a wrong check name": [writeVerdict(dir, "d.json",
+        { check: "code-review", verdict: "pass", summary: "x" }), /names check "code-review"/],
+      "no check name": [writeVerdict(dir, "e.json", { verdict: "pass", summary: "x" }), /names check null/],
+      "upper-case PASS": [writeVerdict(dir, "f.json",
+        { check: "qa", verdict: "PASS", summary: "x" }), /exactly "pass" or "fail"/],
+      "a verdict of maybe": [writeVerdict(dir, "g.json",
+        { check: "qa", verdict: "maybe", summary: "x" }), /exactly "pass" or "fail"/],
+      "no summary": [writeVerdict(dir, "h.json", { check: "qa", verdict: "pass" }), /"summary" string/],
+      "unproven not an array": [writeVerdict(dir, "i.json",
+        { check: "qa", verdict: "pass", summary: "x", unproven: "one" }), /"unproven" must be an array/],
+    };
+    for (const [name, [file, reason]] of Object.entries(cases)) {
+      const v = validateVerdictFile(file, { check: "qa" });
+      assert.equal(v.valid, false, `${name} was accepted`);
+      assert.equal(v.verdict, "fail", `${name} must read as a failing verdict, never a pass`);
+      assert.match(v.reason, reason, name);
+    }
+    assert.equal(validateVerdictFile(writeVerdict(dir, "j.json",
+      { check: "qa", verdict: "pass", summary: "x" }), {}).verdict, "fail",
+      "no check name to validate against is a failure too");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0186: CLI `enforce` passes a valid pass, and fails closed on every rejection", () => {
+  const dir = tmp("vf-cli");
+  try {
+    const flag = ["--diff-truncated", "false"];
+    const ok = writeVerdict(dir, "qa.json", { check: "qa", verdict: "pass", summary: "fine" });
+    const summary = join(dir, "summary.md");
+    assert.equal(runReviewCli(["enforce", ok, "--check", "qa", ...flag], { env: { GITHUB_STEP_SUMMARY: summary } }), 0);
+    assert.match(readFileSync(summary, "utf8"), /### qa review — PASS/);
+
+    assert.equal(runReviewCli(["enforce", ok, "--check", "qa", "--diff-truncated", "true"], { env: {} }), 1,
+      "the truncation fact still overrules a pass");
+    assert.equal(runReviewCli(["enforce", ok, "--check", "security", ...flag], { env: {} }), 1,
+      "a qa verdict must not clear the security check");
+    assert.equal(runReviewCli(["enforce", ok, ...flag], { env: {} }), 1, "--check is required");
+    assert.equal(runReviewCli(["enforce", ok, "--check", "qa"], { env: {} }), 1, "--diff-truncated is required");
+    assert.equal(runReviewCli(["enforce", join(dir, "absent.json"), "--check", "qa", ...flag], { env: {} }), 1);
+    const bad = join(dir, "bad.md");
+    const upper = writeVerdict(dir, "upper.json", { check: "qa", verdict: "PASS", summary: "x" });
+    assert.equal(runReviewCli(["enforce", upper, "--check", "qa", ...flag], { env: { GITHUB_STEP_SUMMARY: bad } }), 1);
+    assert.match(readFileSync(bad, "utf8"), /### qa review — FAIL[\s\S]*exactly "pass" or "fail"/,
+      "the reason reaches the run summary, so a red check says why");
+    const fail = writeVerdict(dir, "fail.json",
+      { check: "qa", verdict: "fail", summary: "one unproven", unproven: ["criterion 2"] });
+    assert.equal(runReviewCli(["enforce", fail, "--check", "qa", ...flag], { env: {} }), 1);
+    const contradicted = writeVerdict(dir, "contra.json",
+      { check: "code-review", verdict: "pass", summary: "x", blocking: [{ file: "a", issue: "b" }] });
+    assert.equal(runReviewCli(["enforce", contradicted, "--check", "code-review", ...flag], { env: {} }), 1,
+      "a pass that names a blocking finding is a fail, as with `verdict`");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0186: a skipped security review is recorded in the plan summary with its reason", () => {
+  const dir = tmp("plan-sec-skip");
+  try {
+    writeFileSync(join(dir, "config.yml"), CONFIG);          // security_paths: src/auth/**, package.json
+    const git = (args) => (args.includes("--name-only") ? "docs/readme.md\n" : "diff\n");
+    const summary = join(dir, "summary.md");
+    const out = join(dir, "out.txt");
+    assert.equal(runReviewCli(["plan"], {
+      env: { GITHUB_STEP_SUMMARY: summary, GITHUB_OUTPUT: out },
+      configPath: join(dir, "config.yml"), outDir: join(dir, "o"), git,
+    }), 0);
+    assert.match(readFileSync(out, "utf8"), /^security_run=false$/m);
+    const md = readFileSync(summary, "utf8");
+    const at = md.indexOf("### Security review — SKIPPED");
+    assert.ok(at >= 0, "the plan job's summary must carry the skip header");
+    const reason = readFileSync(out, "utf8").match(/^security_reason=(.*)$/m)[1];
+    assert.ok(md.slice(at).includes(reason), "…followed by the plan's security_reason");
+
+    // And a review that runs does not print the skip header.
+    const runSummary = join(dir, "run.md");
+    const touchesAuth = (args) => (args.includes("--name-only") ? "src/auth/x.ts\n" : "diff\n");
+    assert.equal(runReviewCli(["plan"], {
+      env: { GITHUB_STEP_SUMMARY: runSummary }, configPath: join(dir, "config.yml"), outDir: join(dir, "o2"), git: touchesAuth,
+    }), 0);
+    assert.doesNotMatch(readFileSync(runSummary, "utf8"), /Security review — SKIPPED/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

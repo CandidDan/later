@@ -540,9 +540,24 @@ export const SYNC_PR_PATHS = Object.freeze([
   ".flow/VERSION",
 ]);
 
+// The paths `_flow-sync.yml` DELETES downstream (flow-0164), in its `for RETIRED in …` line, in
+// that order. A trailing `/` is a directory removed wholesale. They are accepted by `classifyPr`
+// for DELETIONS ONLY (flow-0184): a sync PR that adds or modifies one is not a sync, and a
+// retired path that canonical still ships fails `syncProvenance`. `sync-retired-paths.test.mjs`
+// fails if this list and the workflow's loop differ.
+// Written in parts: `board-retired.test.mjs` forbids the template from naming the retired board.
+export const SYNC_RETIRED_PATHS = Object.freeze([
+  ".claude/skills/board" + "-builder/",
+  ".flow/board" + ".html",
+  ".github/workflows/flow-queue-runner.yml", // retired in flow-0174
+]);
+
+export const isRetiredPath = (f) =>
+  SYNC_RETIRED_PATHS.some((r) => (r.endsWith("/") ? f.startsWith(r) : f === r));
+
 export const PR_KINDS = Object.freeze([
   Object.freeze({ kind: "release", prefix: "release/", sentinel: RELEASE_PR_SENTINEL, paths: RELEASE_PR_PATHS }),
-  Object.freeze({ kind: "sync", prefix: "flow-sync/", sentinel: SYNC_PR_SENTINEL, paths: SYNC_PR_PATHS }),
+  Object.freeze({ kind: "sync", prefix: "flow-sync/", sentinel: SYNC_PR_SENTINEL, paths: SYNC_PR_PATHS, retired: true }),
 ]);
 
 // Which kind of task-less PR this is, or null when the branch matches no prefix. PURE — the
@@ -552,13 +567,19 @@ export const PR_KINDS = Object.freeze([
 // A branch that DOES match a prefix but carries a path outside its list comes back
 // `classified: false` with the offending paths, so "why was this not a release PR?" has an answer
 // instead of a shrug.
-export function classifyPr({ headRef = "", changedFiles = [] } = {}) {
+//
+// `deletedFiles` (flow-0184) is the subset of `changedFiles` the PR deletes (`git diff
+// --diff-filter=D`). On a sync PR only, a deleted retired path counts as inside the surface.
+// Omitted, nothing is deleted, so the answer is the pre-0184 one.
+export function classifyPr({ headRef = "", changedFiles = [], deletedFiles = [] } = {}) {
   const branch = String(headRef ?? "");
   const spec = PR_KINDS.find((k) => branch.startsWith(k.prefix));
   if (!spec) return null;
   const files = changedFiles.filter(Boolean);
   const res = spec.paths.map(globToRegExp);
-  const outside = files.filter((f) => !res.some((r) => r.test(f)));
+  const deleted = new Set(deletedFiles);
+  const outside = files.filter((f) => !res.some((r) => r.test(f)) &&
+    !(spec.retired && deleted.has(f) && isRetiredPath(f)));
   return {
     kind: spec.kind,
     sentinel: spec.sentinel,
@@ -1339,8 +1360,71 @@ export function verdictOutcome(parsed, {
   return { ok: !failed, code: failed ? 1 : 0, lines, summary: parsed.summary };
 }
 
+// ── the verdict file contract (flow-0186) ─────────────────────────────────────────────────
+// The shape a reviewer's verdict file must have, defined here in code rather than only inside a
+// Claude prompt, so that any vendor's model step can be held to it. Each review job deletes
+// `$RUNNER_TEMP/flow-review/<check>.json` before its model step runs and enforces it with
+// `enforce` straight after, so a stale file can never pass.
+//
+//   { "check": "<qa|code-review|security>", "verdict": "pass" | "fail", "summary": "<one line>" }
+//
+// plus, optionally, `unproven` (qa) and `blocking` (code-review, security) as arrays. Stricter
+// than `parseVerdict` on purpose: no code fence, no upper case, and `check` must name the check
+// being enforced, so a verdict written for one check cannot clear another. Every rejection is
+// returned as a FAILING verdict with a reason, never thrown past the caller and never a pass.
+export const VERDICT_FILE_VALUES = Object.freeze(["pass", "fail"]);
+
+export function validateVerdictFile(file, {
+  check,
+  exists = existsSync,
+  read = (p) => readFileSync(p, "utf8"),
+} = {}) {
+  const reject = (reason) => ({
+    valid: false, check: check ?? null, verdict: "fail", summary: "", unproven: [], blocking: [], reason,
+  });
+  if (!check) return reject("no check name was given to validate the verdict file against");
+  if (!file || !exists(file)) {
+    return reject(`no verdict file at ${file || "(no path)"} — the ${check} reviewer wrote none, ` +
+      `and a reviewer that did not report has not approved`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(read(file));
+  } catch (e) {
+    return reject(`the ${check} verdict file is not valid JSON (${e.message})`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return reject(`the ${check} verdict file must hold one JSON object`);
+  }
+  if (parsed.check !== check) {
+    return reject(`the verdict file names check ${JSON.stringify(parsed.check ?? null)}, ` +
+      `but this is the ${check} check`);
+  }
+  if (!VERDICT_FILE_VALUES.includes(parsed.verdict)) {
+    return reject(`the ${check} verdict must be exactly "pass" or "fail", got ` +
+      `${JSON.stringify(parsed.verdict ?? null)}`);
+  }
+  if (typeof parsed.summary !== "string") {
+    return reject(`the ${check} verdict file must carry a "summary" string`);
+  }
+  for (const key of ["unproven", "blocking"]) {
+    if (parsed[key] !== undefined && !Array.isArray(parsed[key])) {
+      return reject(`the ${check} verdict file's "${key}" must be an array when present`);
+    }
+  }
+  return {
+    valid: true,
+    check,
+    verdict: parsed.verdict,
+    summary: parsed.summary,
+    unproven: (parsed.unproven ?? []).filter(Boolean).map(String),
+    blocking: (parsed.blocking ?? []).filter(Boolean),
+    reason: "",
+  };
+}
+
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────
-const emit = (file, text) => { if (file) appendFileSync(file, text.endsWith("\n") ? text : `${text}\n`); };
+const emit =(file, text) => { if (file) appendFileSync(file, text.endsWith("\n") ? text : `${text}\n`); };
 
 // Every flag `verdict` takes a VALUE for. The set exists so the positional argument — the verdict
 // file — is found by skipping flag values rather than by taking the first thing that does not
@@ -1474,6 +1558,31 @@ export function runReviewCli(argv, {
       return outcome.code;
     }
 
+    // flow-0186. The vendor-neutral verdict: `validateVerdictFile`, then the same outcome rules
+    // `verdict` applies (truncation fact, findings overrule a pass). `verdict` stays for an
+    // adopter whose pinned `_flow-review.yml` predates this command and still writes the older,
+    // looser `.flow-review/<check>.json`.
+    if (cmd === "enforce") {
+      const { file, check, diffTruncated, diffBytes, diffFullBytes } = parseVerdictArgs(rest);
+      if (!rest.includes("--check")) {
+        throw new ReviewError(
+          `usage: flow-review.mjs enforce <file> --check <name> ${TRUNCATION_FLAG} true|false`);
+      }
+      const v = validateVerdictFile(file, { check });
+      const outcome = verdictOutcome(
+        { verdict: v.verdict.toUpperCase(), unproven: v.unproven, blocking: v.blocking, summary: v.summary },
+        { check, diffTruncated, diffBytes, diffFullBytes });
+      const lines = v.valid ? outcome.lines : [`${check}: ${v.reason}`, ...outcome.lines];
+      const md = [`### ${check} review — ${outcome.ok ? "PASS" : "FAIL"}`, ""]
+        .concat(v.summary ? [v.summary, ""] : [])
+        .concat(lines.map((l) => `- ${l}`))
+        .join("\n");
+      emit(env.GITHUB_STEP_SUMMARY, md);
+      for (const l of lines) console.error(`::error::${l}`);
+      console.log(`${check}: ${outcome.ok ? "PASS" : "FAIL"}${v.summary ? ` — ${v.summary}` : ""}`);
+      return outcome.code;
+    }
+
     // flow-0178. The gate's half of the intent classification: `_flow-gates.yml` runs this from
     // canonical's copy of the helper, never the PR's, and skips install/build/lint/test/coverage
     // on `intent_pr=true`. A git failure throws, which fails the step: an unclassified PR must
@@ -1540,7 +1649,14 @@ export function runPlan({
   // so it follows `REVIEW_REPO_DIR` to the PR checkout rather than to the base worktree the
   // helper is executed from. It runs only for a classified release PR, which is why an ordinary
   // PR's git calls are still exactly the two diffs above.
-  const classified = classifyPr({ headRef, changedFiles });
+  let classified = classifyPr({ headRef, changedFiles });
+  if (classified?.kind === "sync" && !classified.classified) {
+    // flow-0184. Only a sync PR that strayed pays for the extra diff: ask which paths it deletes,
+    // so a removed retired path is not mistaken for a stray one.
+    const deletedFiles = git(["diff", "--name-only", "--diff-filter=D", "--no-renames", `${baseRef}...HEAD`])
+      .split("\n").map((s) => s.trim()).filter(Boolean);
+    classified = classifyPr({ headRef, changedFiles, deletedFiles });
+  }
   let prKind = classified;
   if (classified?.classified && classified.kind === "release") {
     prKind = { ...classified, report: releaseReport({ git }) };
@@ -1646,6 +1762,10 @@ export function planSummary({
     for (const l of provenance.lines) out.push(`  - ${l}`);
   }
   for (const w of cfg.warnings) out.push(`- :warning: ${w}`);
+  // flow-0186. A skipped security review starts no runner: the `security` job carries a job-level
+  // `if:` on `security_run`. The skip and its reason are recorded HERE, in the plan job's summary,
+  // in the same form the security job used to print, so the skip stays on the record.
+  if (!security.run) out.push("", "### Security review — SKIPPED", "", security.reason, "");
   // The bootstrap warning is last so it is the line a reader ends on, and it is phrased as a
   // warning rather than an error because the case is legitimate exactly once. What must never
   // happen is that it passes silently: the gate that decided this run came from the diff it was
