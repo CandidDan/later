@@ -10,9 +10,11 @@ name: flow-dispatch
 #
 # Four triggers, one job:
 #   · a push to `.flow/tasks/**` on main — a task allocated `ready`, a claim, a human's edit;
-#   · flow-unblock or flow-recover completing — their commits are pushed with GITHUB_TOKEN, and
-#     GitHub starts no workflow from a GITHUB_TOKEN push, so the push trigger alone would miss a
-#     task they release or reset to `ready`;
+#   · repository_dispatch `flow-task-state` — sent by flow-unblock and flow-recover only after they
+#     push a task-file change. Their commits are pushed with GITHUB_TOKEN, and GitHub starts no
+#     workflow from a GITHUB_TOKEN push, so the push trigger alone would miss a task they release or
+#     reset to `ready`. Until flow-0185 this was `workflow_run` on both, which started a runner
+#     after every one of their runs, including the ones that changed nothing;
 #   · once a day, the sweep that catches a missed event;
 #   · workflow_dispatch, on demand.
 #
@@ -24,9 +26,8 @@ on:
   push:
     branches: [main]
     paths: [".flow/tasks/**"]
-  workflow_run:
-    workflows: [flow-unblock, flow-recover]
-    types: [completed]
+  repository_dispatch:
+    types: [flow-task-state]
   schedule:
     - cron: "41 6 * * *"       # daily sweep; off the top of the hour, where scheduled runs queue
   workflow_dispatch:
@@ -39,6 +40,7 @@ jobs:
   flow-dispatch:
     permissions:
       contents: read           # checkout, and the re-read of the task from main before firing
+      issues: write            # one issue per tier with ready tasks but no routine (flow-0211)
     uses: CandidDan/flow/.github/workflows/_flow-dispatch.yml@v4
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}

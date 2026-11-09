@@ -18,7 +18,8 @@ Humans scan pictures faster than they read paragraphs. Prose is the fallback, no
 6. **Terse is not cryptic.** Plain words, full sentences, jargon explained or cut. Short and
    clear beats short and puzzling. This is the protocol's plain-language rule (`.flow/PROTOCOL.md`,
    **Response style**): name things literally, not by metaphor, and rewrite any sentence that can
-   be read two ways.
+   be read two ways. A PR description's TL;DR has its own requirements: see the PR TL;DR requirements
+   in the same section.
 
 ## Pick the format
 

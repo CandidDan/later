@@ -295,10 +295,10 @@ export function verdictRows({
     { check: "qa", verdict: cell(qa) },
     { check: "code-review", verdict: cell(codeReview) },
   ];
-  // The security job ALWAYS runs so the check is never silently absent — which means a skipped
-  // REVIEW still reports a successful JOB. Rendering that as "pass" is the one wrong answer this
-  // row can give, so the skip is decided from the plan's own `security_run`, and carries the
-  // reason the plan gave for it.
+  // When the plan skips security, the security job does not start at all (a job-level `if:` on
+  // `security_run`, flow-0186), so its result reads `skipped` — which GitHub reports as a passing
+  // required check. Rendering that as "pass" is the one wrong answer this row can give, so the
+  // skip is decided from the plan's own `security_run`, and carries the reason the plan gave for it.
   rows.push(String(securityRun) === "true"
     ? { check: "security", verdict: cell(security) }
     : { check: "security", verdict: ":fast_forward: **skipped** — not a security-triggering diff", note: String(securityReason ?? "").trim() });

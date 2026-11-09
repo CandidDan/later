@@ -74,6 +74,7 @@ ways gets rewritten until it can be read one way — a worker builds whichever r
 | Bad | Good |
 |---|---|
 | "Settings are sentences at the foot of the same shelf." | "The sidebar is the only extra panel; settings sit at its bottom." |
+| "A flow-sync no longer drops a caller's own with: inputs. After it copies canonical's caller and pins it, the new flow-sync.mjs carry-inputs puts back every with: key the repo's previous copy set on a Flow-reusable job, using the repo's value." (a PR's TL;DR) | "A Flow sync was deleting settings a repo had added to its own Flow config files — in one repo, a pinned Node security fix. The sync now keeps them, and the sync PR lists them." |
 
 Out of scope: the product's own user-facing text. Its voice is the project's decision.
 
@@ -87,6 +88,17 @@ its **PR description**, which is in this order — TL;DR, then one visual of the
 captures (screenshots, a recording for motion) when the change is something a person sees and the
 session can run it, then the criteria checklist with proving tests, then the human's to-dos
 (review/merge, a kickback, a `blocked` reason).
+
+A PR description's **TL;DR is its first paragraph**, and that paragraph:
+
+1. says what was wrong or missing, and what is different after the merge, and for whom;
+2. reads correctly to a person who has not read the code or the task;
+3. contains no backticks, no file paths, no task ids and no code names (function, command,
+   variable or file names) — those belong in the sections below it;
+4. is at most 60 words.
+
+The writer of the code does not see its own internal names as jargon, so check requirement 3
+against the finished paragraph, not against how it felt to write.
 
 ---
 
@@ -120,7 +132,10 @@ directly from an issue — if it isn't a `ready` task in `.flow/tasks/`, it isn'
 `.flow/bin/only-flow-changed.mjs` (or an equivalent that keeps its contract: exit 0 skips, exit 1
 builds, diff from the last deployed commit, never exit 0 on an error). Any doubt builds. Hand-written
 skip commands in a host dashboard are discouraged: they live outside git and drift. Wiring the hook
-is the adopting repo's, not Flow's; the recipe is in the helper's header.
+is the adopting repo's, not Flow's; the recipe is in the helper's header. **A Flow state commit is
+never a release target.** To release, take the commit that passed the gate and release the commit
+`node .flow/bin/deployable-sha.mjs --head <that commit>` prints: the nearest commit that was built,
+and the same code. It exits 1 with nothing printed when it is not sure, and then you do not release.
 
 ## Status lifecycle
 
