@@ -24,6 +24,8 @@ touches:
   - "ios/LaterAppUITests/**"
   - "ios/README.md"
 labels: ["ios", "siri"]
+notes:
+  - "2026-11-13: Implemented local-only Siri App Intent and shared app/coordinator runtime on flow/later-0033-siri-app-shortcut, draft PR #67, head 48816e30a049e0d80e06f8d08c64e23a7f4d1258. Existing workers/checkouts untouched. prepareLocal restores existing device-only after-first-unlock Keychain session plus Saved/narration caches without network; foreground resume still refreshes normally. Added action/config/phrase tests and physical-device README steps. Strict formatting of all changed Swift with available 6.0.3 and git diff --check passed. Full local linux-check stopped before tests because pinned Swift 6.4 is absent on Debian; no Docker run locally. Hosted macOS run 43328279594 is in progress. Flow gates/reviews skip draft. NEXT: inspect PR67 macOS jobs/logs, fix compile/test failures on same branch, strengthen actual intent-to-player queue/network integration proof (current action tests inject Listen start seam; network test restores cached Saved without prepared audio). Then mark ready to run hosted Linux Docker/database and independent QA/security/code-review, repair findings, verify exact final head before merge. Do not claim locked voice works until later-0036 signed device tests. Apple signing remains unverified. git push lacked credentials; commits/branch were published using GitHub connector, so local worktree has equivalent uncommitted files and should be compared with remote before resetting."
 ---
 
 ## Context
