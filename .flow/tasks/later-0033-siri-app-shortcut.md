@@ -1,7 +1,7 @@
 ---
 id: "later-0033"
 title: "Start a Later listen hands-free with a named Siri App Shortcut, even when locked"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "later"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for later-0032 (Listen planning) which this shortcut invokes."
-blocked_by: ["later-0032"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G4"]
 intent: ""
 model: "opus"
