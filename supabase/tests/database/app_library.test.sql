@@ -140,7 +140,7 @@ select is((select count(*)::int from capture_revisit_state
 set local role authenticated;
 select set_config('request.jwt.claim.sub','26262626-0000-4000-8000-000000000002',true);
 select results_eq('select capture_id,has_more from app_library_page(null,null,50)',
-  $$values('26262626-bbbb-4000-8000-000000000001'::uuid,false)$$,
+  $select '26262626-bbbb-4000-8000-000000000001'::uuid,false$,
   'AC3 other owner library returns only their capture');
 select is((select count(*)::int from capture_revisit_state where first_exposed_at is not null),1,
   'AC3 other owner sees only their own exposure');
