@@ -1,12 +1,12 @@
 ---
 id: "later-0027"
 title: "Sign in to Later on iPhone with a magic link and keep the session safely"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "later"
-owner: ""
+owner: "dot-build-later-signin"
 created: "2026-10-26"
-started: ""
+started: "2026-11-12T11:47:20Z"
 branch: ""
 pr: ""
 issue: ""
