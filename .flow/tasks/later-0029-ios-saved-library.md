@@ -21,6 +21,8 @@ touches:
   - "ios/LaterKit/Sources/LaterKit/Library/**"
   - "ios/LaterKit/Tests/LaterKitTests/Library/**"
 labels: ["ios", "saved"]
+notes:
+  - "2026-11-12T17:50Z: Implemented Saved on flow/later-0029-saved-library, PR #63. Paged private library, honest status/reason labels, detail Open original/confirmed consume, protected per-user cache and persisted request IDs; guard late async responses with AuthService session generation to prevent cache recreation after sign-out. Automatic reconnect replays queued actions but does not unexpectedly navigate; the user can tap Open original again after replay. Existing semantic tokens and shell retained; no Listen redesign or playback. Seven new Foundation library tests pass in an isolated local Swift 6.0.3 package; all Swift sources pass that formatter. Full local suite does NOT pass on 6.0.3: pre-existing MainActor XCTest discovery is incompatible. Required pinned Linux/macOS checks and PR reviewers are pending; no claim of device installation or Apple signing. Using hosted checks under Dan's standing authorization. Next: inspect final PR head checks, fix failures/findings, and merge only after all required checks and reviews verify that exact head."
 ---
 
 ## Context
