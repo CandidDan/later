@@ -3,7 +3,7 @@ import LaterKit
 import Observation
 
 struct ReadyListen: Equatable, Identifiable {
-  let item: LibraryItem
+  let item: LaterKit.LibraryItem
   let duration: TimeInterval
   let position: TimeInterval
   var id: UUID { item.id }
@@ -27,9 +27,11 @@ final class ListenViewModel {
   private(set) var plan: ListenPlan?
   private(set) var message: String?
   private let read: () throws -> ListenSnapshot
-  private let start: ([LibraryItem]) -> Bool
+  private let start: ([LaterKit.LibraryItem]) -> Bool
 
-  init(read: @escaping () throws -> ListenSnapshot, start: @escaping ([LibraryItem]) -> Bool) {
+  init(
+    read: @escaping () throws -> ListenSnapshot, start: @escaping ([LaterKit.LibraryItem]) -> Bool
+  ) {
     self.read = read
     self.start = start
   }
@@ -83,7 +85,7 @@ final class ListenViewModel {
     guard let item = snapshot.ready.first(where: { $0.id == id }) else { return false }
     return play([item.item])
   }
-  private func play(_ items: [LibraryItem]) -> Bool {
+  private func play(_ items: [LaterKit.LibraryItem]) -> Bool {
     guard start(items) else {
       message = "Couldn't start this audio. Try again from Saved."; return false
     }
@@ -91,8 +93,8 @@ final class ListenViewModel {
   }
 
   static func makeSnapshot(
-    items: [LibraryItem], resume: ResumeStore, pending: Set<UUID>,
-    manifest: (LibraryItem) -> NarrationManifest?
+    items: [LaterKit.LibraryItem], resume: ResumeStore, pending: Set<UUID>,
+    manifest: (LaterKit.LibraryItem) -> NarrationManifest?
   ) -> ListenSnapshot {
     var result = ListenSnapshot()
     for item in items {

@@ -46,7 +46,7 @@ final class ListenViewModelTests: XCTestCase {
   }
   func testLongerListensAreExplicit() throws {
     let item = try entry(1, duration: 1900)
-    var played: [LibraryItem] = []
+    var played: [LaterKit.LibraryItem] = []
     let model = ListenViewModel(
       read: { ListenSnapshot(ready: [item]) },
       start: {
@@ -62,7 +62,7 @@ final class ListenViewModelTests: XCTestCase {
   }
   func testPlayQueuesPlanInOrder() throws {
     let ready = try [entry(1, duration: 480), entry(2, duration: 300)]
-    var played: [LibraryItem] = []
+    var played: [LaterKit.LibraryItem] = []
     let model = ListenViewModel(
       read: { ListenSnapshot(ready: ready) },
       start: {
@@ -102,7 +102,7 @@ final class ListenViewModelTests: XCTestCase {
       {"captureId":"00000000-0000-4000-8000-00000000000\(n)","title":"Item \(n)","source":"Example","savedAt":"2026-11-12T12:00:00Z","kind":"article","listen":{"state":"narratable","textVersion":"v1","wordCount":50}}
       """.utf8)
     return ReadyListen(
-      item: try JSONDecoder().decode(LibraryItem.self, from: data), duration: duration,
+      item: try JSONDecoder().decode(LaterKit.LibraryItem.self, from: data), duration: duration,
       position: position)
   }
 }
