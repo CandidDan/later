@@ -1,7 +1,7 @@
 ---
 id: "later-0023"
 title: "Create the native iPhone app foundation, gated in hosted macOS and Linux CI"
-status: "in_review"
+status: "done"
 priority: 1
 project: "later"
 owner: "codex-later-0023-handoff"
