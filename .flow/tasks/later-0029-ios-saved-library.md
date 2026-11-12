@@ -1,7 +1,7 @@
 ---
 id: "later-0029"
 title: "Show Saved on iPhone from the private library, with Open original for anything not narratable"
-status: "in_review"
+status: "done"
 priority: 2
 project: "later"
 owner: "codex-later-saved-20261112"
