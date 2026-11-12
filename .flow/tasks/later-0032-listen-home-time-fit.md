@@ -1,7 +1,7 @@
 ---
 id: "later-0032"
 title: "Choose a 10, 15 or 30 minute listen on the Listen home"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "later"
 owner: "codex-20261112-listen"
