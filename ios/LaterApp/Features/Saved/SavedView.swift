@@ -30,7 +30,7 @@ struct SavedView: View {
 private struct SavedContent: View {
   let model: SavedViewModel
   @Environment(\.scenePhase) private var scenePhase
-  @State private var selected: LibraryItem?
+  @State private var selected: LaterKit.LibraryItem?
 
   var body: some View {
     ScrollView {
@@ -109,7 +109,7 @@ private struct SavedContent: View {
 }
 
 private struct SavedDetailView: View {
-  let item: LibraryItem
+  let item: LaterKit.LibraryItem
   let model: SavedViewModel
   @Environment(\.dismiss) private var dismiss
   @Environment(\.openURL) private var openURL
