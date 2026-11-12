@@ -1,7 +1,7 @@
 ---
 id: "later-0030"
 title: "Prepare faithful narration audio on the iPhone for offline listening"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "later"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for later-0029 (Saved, library models and the signed-in API client)."
-blocked_by: ["later-0029"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G3", "G4"]
 intent: ""
 model: "opus"
