@@ -1,7 +1,7 @@
 ---
 id: "later-0026"
 title: "Serve the app's private library and narration text, recording exposure before release"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "later"
 owner: "goose-library-20261112"
