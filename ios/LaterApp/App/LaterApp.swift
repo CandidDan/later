@@ -33,6 +33,7 @@ struct LaterApp: App {
             if phase == .active {
               Task { await narration.resume() }
             } else {
+              narration.player?.backgrounded()
               narration.pause()
               narration.schedule()
             }

@@ -62,6 +62,7 @@ targets:
         - now.notfor.later.prepare-narration
         UIBackgroundModes:
         - processing
+        - audio
     dependencies:
       - package: LaterKit
       - package: Supabase
