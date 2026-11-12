@@ -1,7 +1,7 @@
 ---
 id: "later-0027"
 title: "Sign in to Later on iPhone with a magic link and keep the session safely"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "later"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for later-0023 (the iOS project, CI and layout this builds on)."
-blocked_by: ["later-0023"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G4"]
 intent: ""
 model: "opus"

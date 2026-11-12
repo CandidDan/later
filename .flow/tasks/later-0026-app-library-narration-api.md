@@ -1,7 +1,7 @@
 ---
 id: "later-0026"
 title: "Serve the app's private library and narration text, recording exposure before release"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "later"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for later-0024 (the article extraction table this serves) and later-0023 (which adds src/lib/app/** to the security review paths)."
-blocked_by: ["later-0023", "later-0024"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G2", "G3", "G4"]
 intent: ""
 model: "opus"

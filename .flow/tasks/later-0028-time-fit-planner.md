@@ -1,7 +1,7 @@
 ---
 id: "later-0028"
 title: "Plan a listen that fits 10, 15 or 30 minutes from actual ready audio, honestly"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "later"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for later-0023 (the LaterKit package and its Linux/macOS gates)."
-blocked_by: ["later-0023"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G4"]
 intent: ""
 touches:
