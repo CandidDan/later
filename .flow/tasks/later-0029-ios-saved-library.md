@@ -1,7 +1,7 @@
 ---
 id: "later-0029"
 title: "Show Saved on iPhone from the private library, with Open original for anything not narratable"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "later"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for later-0026 (library API) and later-0027 (signed-in session and API client)."
-blocked_by: ["later-0026", "later-0027"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G2", "G3", "G4"]
 intent: ""
 touches:

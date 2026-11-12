@@ -1,7 +1,7 @@
 ---
 id: "later-0034"
 title: "Save a link or text to Later from the iPhone share sheet"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "later"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for later-0025 (capture endpoint) and later-0027 (shared Keychain session)."
-blocked_by: ["later-0025", "later-0027"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G1", "G4"]
 intent: ""
 model: "opus"
