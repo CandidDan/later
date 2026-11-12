@@ -28,6 +28,7 @@ labels: ["ios", "player", "offline"]
 notes:
   - "2026-11-12 delivery: codex-20261112-player implemented PR65 at 5ccd525c0c3f6fd2c271a2456186dd5f25d81114. Local strict formatting and 3 isolated PlaybackQueue/ResumeStore tests passed (Swift 6.0.3). Hosted macOS ios-ci plus Linux/database Flow gates and independent reviews are running; no merge or hosted pass claimed yet. Queue API accepts ordered ready items; Previous restarts after 3 seconds, skips clamp within an item, resumes rewind 5 seconds with version/near-end reset. Next: address exact-head CI/review findings, then verify all required checks and merge. Physical locked-device/headphone/airplane-mode proof remains later-0036; signing not assumed. Existing v2 styling retained."
   - "2026-11-12 review follow-up: PR65 head 0230ece90f19aaa98060a420e51cd10f21089edb fixes both initial blocking findings: explicit Play can recover without interruption-ended; missing-file validation reports an error and Saved navigates only after a successful start. Added regression tests and made ticker exit after owner release. Initial head passed all 81 app unit tests (10 player tests) before its run was cancelled by the new push; this is not final-head proof. Initial Linux iOS check passed 52 LaterKit tests at 97.01% coverage. Final-head macOS/Linux/reviews pending; do not merge until verified. No physical-device or signing claim."
+  - "2026-11-12 final-head proof: 0230ece90f19aaa98060a420e51cd10f21089edb passed hosted macOS ios-ci (83 app tests including 12 PlayerEngineTests, 12 UI tests including PlayerUITests; Later app line coverage 90.70%). Linux Actions passed 52 LaterKit tests with 97.01% coverage and 20 iOS-script tests; full gate passed 808 tests with 3 existing skips, browser suites and 80.66% line coverage. QA, code-review, security and guide passed; latest review has no blockers, review submissions/threads are empty. All visible final-head checks/statuses successful except intentionally skipped intent-review; mergeable_state clean. Confirmed playback.json is per-account under LaterUserData/<UUID>/ and sign-out cleanup removes it. Hardware locked-screen/headphone/system-airplane-mode verification remains later-0036; no install/signing claim."
 ---
 
 ## Context
@@ -68,24 +69,24 @@ This task is the playback engine and the full Player screen; Listen (later-0032)
 
 ## Acceptance criteria
 
-- [ ] Given a queue, then advance/previous/skip and remaining-total behave per the rules —
+- [x] Given a queue, then advance/previous/skip and remaining-total behave per the rules —
       `LaterKitTests/Playback/PlaybackQueueTests` (Linux + macOS).
-- [ ] Given saved positions, then resume, near-end restart and textVersion reset follow the rules —
+- [x] Given saved positions, then resume, near-end restart and textVersion reset follow the rules —
       `LaterKitTests/Playback/ResumeStoreTests`.
-- [ ] Given the engine starts, then the session is `.playback`/`.spokenAudio` and Info.plist
+- [x] Given the engine starts, then the session is `.playback`/`.spokenAudio` and Info.plist
       declares background audio — `LaterAppTests/PlayerEngineTests.testAudioSessionAndBackgroundMode`.
-- [ ] Given each remote command, then the engine performs the matching action and updates
+- [x] Given each remote command, then the engine performs the matching action and updates
       now-playing info — `PlayerEngineTests.testRemoteCommands` (commands invoked via the handlers).
-- [ ] Given an interruption begin/end with and without `shouldResume`, and an
+- [x] Given an interruption begin/end with and without `shouldResume`, and an
       `oldDeviceUnavailable` route change, then pause/resume behaviour matches — `PlayerEngineTests`
       (notifications posted with fixture userInfo).
-- [ ] Given playback reaches the end of an item, then no consume action is sent —
+- [x] Given playback reaches the end of an item, then no consume action is sent —
       `PlayerEngineTests.testFinishingDoesNotConsume`.
-- [ ] Given airplane mode (no network), then a ready item plays from its local file —
+- [x] Given airplane mode (no network), then a ready item plays from its local file —
       `PlayerEngineTests.testPlaysWithoutNetwork` (URLProtocol stub fails all requests).
-- [ ] Given a two-item queue in the simulator, the Player shows title, scrubber, queue and controls
+- [x] Given a two-item queue in the simulator, the Player shows title, scrubber, queue and controls
       and play/pause toggles — `LaterAppUITests/PlayerUITests`.
-- [ ] `ios-ci` and the Flow `ios/` check pass with floors met.
+- [x] `ios-ci` and the Flow `ios/` check pass with floors met.
 
 ## Definition of done (inherited — do not edit)
 
