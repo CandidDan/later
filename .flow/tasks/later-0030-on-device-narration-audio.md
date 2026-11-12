@@ -26,6 +26,8 @@ touches:
   - "ios/LaterKit/Tests/LaterKitTests/Narration/**"
   - "ios/README.md"
 labels: ["ios", "narration", "offline", "research-safeguard"]
+notes:
+  - "2026-11-12 Codex: implementing on flow/later-0030-on-device-narration, draft PR #64. Initial head 77a1d061b18898026ace43f1fb745c52e020f880 is in hosted macOS CI (run 43299470511). Five new pure NarrationScript/NarrationService tests and LaterKit build passed locally with Swift 6.0.3; this is not the pinned full CI gate. NarrationStore, protected files, measured duration, serial queue, eviction and background registration are implemented but iOS runtime behavior is not yet verified. Additional simulator UI tests are being added. Do not merge until the final head passes macOS, full Linux gates and independent reviews; task 0031 owns playback and 0036 owns real-device validation."
 asks:
   - "fyi: v1 narration uses Apple's on-device voices (AVSpeechSynthesizer rendered to audio files): no paid TTS vendor or new credential is allowed, and it works offline. A hosted neural voice later would be a separate vendor/budget decision."
 ---
