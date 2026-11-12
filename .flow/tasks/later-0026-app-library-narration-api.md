@@ -18,6 +18,8 @@ model: "opus"
 effort: "high"
 model_reason: "Releases private content; must keep the research recall/exposure guarantee intact and atomic."
 touches:
+  - "src/lib/operations/launch-readiness.mjs"
+  - "README.md"
   - "src/app/api/app/library/**"
   - "src/app/api/app/narrations/**"
   - "src/lib/app/**"
@@ -27,6 +29,7 @@ touches:
   - "supabase/tests/database/app_library.test.sql"
 labels: ["backend", "narration", "security", "research-safeguard"]
 notes:
+  - "2026-11-12 (orchestrator-authorized scope amendment): Added only README.md and src/lib/operations/launch-readiness.mjs because the existing launch-readiness contract requires every new endpoint and migration to be registered and documented. Checked current main: later-0026 is the only in_progress/in_review task, so these paths have no active overlap."
   - "2026-10-26 (orchestrator): released automatically by flow-unblock when later-0023 and later-0024 are done."
 ---
 
