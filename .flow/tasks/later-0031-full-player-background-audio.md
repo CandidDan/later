@@ -27,6 +27,7 @@ touches:
 labels: ["ios", "player", "offline"]
 notes:
   - "2026-11-12 delivery: codex-20261112-player implemented PR65 at 5ccd525c0c3f6fd2c271a2456186dd5f25d81114. Local strict formatting and 3 isolated PlaybackQueue/ResumeStore tests passed (Swift 6.0.3). Hosted macOS ios-ci plus Linux/database Flow gates and independent reviews are running; no merge or hosted pass claimed yet. Queue API accepts ordered ready items; Previous restarts after 3 seconds, skips clamp within an item, resumes rewind 5 seconds with version/near-end reset. Next: address exact-head CI/review findings, then verify all required checks and merge. Physical locked-device/headphone/airplane-mode proof remains later-0036; signing not assumed. Existing v2 styling retained."
+  - "2026-11-12 review follow-up: PR65 head 0230ece90f19aaa98060a420e51cd10f21089edb fixes both initial blocking findings: explicit Play can recover without interruption-ended; missing-file validation reports an error and Saved navigates only after a successful start. Added regression tests and made ticker exit after owner release. Initial head passed all 81 app unit tests (10 player tests) before its run was cancelled by the new push; this is not final-head proof. Initial Linux iOS check passed 52 LaterKit tests at 97.01% coverage. Final-head macOS/Linux/reviews pending; do not merge until verified. No physical-device or signing claim."
 ---
 
 ## Context
