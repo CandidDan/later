@@ -1,8 +1,8 @@
 # Later for iPhone
 
-The native iPhone app (VISION.md G4). This build is the foundation: a SwiftUI shell with
-**Listen** and **Saved** tabs that say plainly they are not connected yet, and the CI that
-builds, tests, lints and coverage-checks it without an Apple account or signing.
+The native iPhone app (VISION.md G4). This build signs an existing user in with a PKCE magic link.
+**Listen** and **Saved** remain honest empty states until their data tasks land. CI builds,
+tests, lints and coverage-checks the app without an Apple account, signing or real credentials.
 
 ```
 ios/
@@ -89,3 +89,48 @@ To swap the palette, change the values in that file — nothing else. Two tests 
   light and dark.
 - `ThemeTests.testNoColourLiteralsOrSerifOutsideTheme` — no colour value outside the token file,
   no serif or custom font anywhere. Type is the system font through text styles (Dynamic Type).
+
+## Sign-in setup
+
+1. In the existing Supabase project, open **Authentication → URL Configuration → Redirect URLs**
+   and add exactly `later://auth-callback`. Account creation remains disabled in the app.
+2. Copy `ios/Config/Secrets.example.xcconfig` to `ios/Config/Secrets.xcconfig`. The latter is ignored
+   by git. Fill in the existing project's `SUPABASE_URL`, browser-safe public `SUPABASE_ANON_KEY`
+   (legacy anon JWT or publishable key), and `LATER_API_BASE_URL` (`https://notfor.now`). Preserve the
+   `https:/$()/` spelling: it prevents xcconfig from treating the URL as a comment. Never use a
+   service-role or secret key. These public values become part of the distributed app.
+
+`supabase-swift` is pinned to **2.55.6**, with only its **Auth** product linked into the app target.
+LaterKit has no Supabase dependency and remains Foundation-only. Release builds reject missing,
+placeholder, insecure URL and privileged-key configuration before compiling. Debug simulator tests
+use an in-memory auth backend and no network. A placeholder-configured ordinary launch explains
+that sign-in is not configured; it never silently signs in or contacts the placeholder host.
+
+Open the magic link on the same iPhone that requested it. PKCE stores a device-bound verifier;
+opening the link elsewhere cannot complete that sign-in. If you request another link, use the
+latest email. The existing server remains the authority for the one allowed Later user.
+
+### Session and cache boundaries
+
+- Session and PKCE verifier: Keychain service `now.notfor.later.auth`, access group
+  `$(AppIdentifierPrefix)now.notfor.later.shared`, accessibility
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`. Signed builds must provision the group.
+- App group: `group.now.notfor.later`. Only unsigned **Debug simulator** builds with
+  `CODE_SIGNING_ALLOWED=NO` use the default Keychain group and omit the app-group container.
+  Missing signed entitlements fail closed instead of silently changing storage.
+- No email or tokens are written to user defaults, files or logs. The email shown in About comes
+  from the Supabase session. The SDK refreshes expired tokens on demand. LaterKit retries a 401
+  once after refresh; a second 401 or any 403 ends the session. Its transport rejects redirects
+  before sending credentials to another URL and does not cache responses or cookies.
+- Future user downloads belong in `LaterUserData` beneath Caches, Application Support or tmp, or
+  in that directory beneath the app-group root/Library Caches/Library Application Support.
+  Sign out removes these directories and all auth-service Keychain items, even when network
+  revocation fails. A local deletion failure blocks another sign-in until cleanup is retried.
+- Create a new `URLSessionLaterAPIClient` after a new sign-in. A client that reported
+  `sessionEnded` is permanently invalidated; do not reuse it for another user's session.
+
+`AuthServiceTests` exercise the real pinned SDK against an injected HTTP responder: OTP account
+creation is false, PKCE challenge and callback exchange are verified, session persistence is
+checked, and storage failures cannot display a signed-in shell. `AuthUITests` cover sign-in,
+callback, generic errors and sign-out with Debug-only test state. Real signed-device sign-in is
+verified by later-0036 after redirect setup; this task does not change the hosted project.

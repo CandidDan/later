@@ -15,6 +15,9 @@ configFiles: &configFiles
   Debug: Config/Debug.xcconfig
   Release: Config/Release.xcconfig
 packages:
+  Supabase:
+    url: https://github.com/supabase/supabase-swift.git
+    exactVersion: 2.55.6
   LaterKit:
     path: LaterKit
 targets:
@@ -26,10 +29,20 @@ targets:
       - path: LaterApp
         excludes:
           - Info.plist
+          - Later.entitlements
     dependencies:
       - package: LaterKit
+      - package: Supabase
+        product: Auth
+    preBuildScripts:
+      - name: Validate sign-in configuration
+        script: |
+          /usr/bin/python3 "$SRCROOT/Config/validate-auth-config.py"
+          /usr/bin/python3 "$SRCROOT/Config/validate-auth-config.py" --test
+        basedOnDependencyAnalysis: false
     settings:
       base:
+        CODE_SIGN_ENTITLEMENTS: LaterApp/Later.entitlements
         TARGETED_DEVICE_FAMILY: "1"
         PRODUCT_NAME: Later
         PRODUCT_MODULE_NAME: Later

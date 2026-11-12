@@ -12,3 +12,6 @@ CURRENT_PROJECT_VERSION = 1
 IPHONEOS_DEPLOYMENT_TARGET = 18.0
 SWIFT_VERSION = 6.0
 DEVELOPMENT_LANGUAGE = en
+
+#include "Secrets.example.xcconfig"
+#include? "Secrets.xcconfig"

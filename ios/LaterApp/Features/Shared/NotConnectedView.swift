@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The honest state of a tab in a build with no account connection: what it cannot do, plainly.
+/// An honest empty state until the signed-in app connects its data screens.
 struct NotConnectedView: View {
   let identifier: String
   let message: String
@@ -8,7 +8,7 @@ struct NotConnectedView: View {
 
   var body: some View {
     VStack(spacing: 12) {
-      Image(systemName: "icloud.slash")
+      Image(systemName: "tray")
         .font(.largeTitle)
         .foregroundStyle(ColorToken.textSecondary.color)
         .accessibilityHidden(true)

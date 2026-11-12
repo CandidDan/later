@@ -1,14 +1,19 @@
 import SwiftUI
 
-/// The two tabs of v1. Neither is connected to an account in this build, and each says so.
 struct RootView: View {
+  @Environment(AuthService.self) private var auth
+
   var body: some View {
-    TabView {
-      Tab("Listen", systemImage: "headphones") {
-        ListenView()
-      }
-      Tab("Saved", systemImage: "tray.full") {
-        SavedView()
+    Group {
+      if auth.isRestoring {
+        ProgressView("Opening Later")
+      } else if auth.session != nil {
+        TabView {
+          Tab("Listen", systemImage: "headphones") { ListenView() }
+          Tab("Saved", systemImage: "tray.full") { SavedView() }
+        }
+      } else {
+        SignInView()
       }
     }
     .tint(ColorToken.accent.color)
