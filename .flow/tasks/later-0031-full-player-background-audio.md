@@ -1,12 +1,12 @@
 ---
 id: "later-0031"
 title: "Play narration in a full player that works locked, offline and with headphone controls, and resumes"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "later"
-owner: ""
+owner: "codex-20261112-player"
 created: "2026-10-26"
-started: ""
+started: "2026-11-12T21:16:51Z"
 branch: ""
 pr: ""
 issue: ""
