@@ -22,6 +22,7 @@ labels: ["ios", "listen"]
 notes:
   - "2026-11-12 implementation handoff: PR66 flow/later-0032-listen-home head 657e4f3e5ca2e7bda2dc32711bab8aa0254db9dc implements Listen preview, 10/15/30 choices above Play, longer items, Continue and ordered playback using existing TimeFitPlanner/ResumeStore/Player APIs. No planner/player/narration implementation changed. Strict local formatting passed; six new model tests and one UI test are written but hosted execution is pending. ShellUITests now expects the real empty-plan summary and About chrome is retained. CI runs on hosted macOS and GitHub Linux, no local Docker. Next: inspect exact-head ios-ci/full Linux gates/QA/security/code-review, repair any failure, then merge only after all required checks/reviewer findings clear. Do not duplicate overlapping workers. Signing and physical-device validation remain outstanding."
   - "2026-11-12 hosted build repair: initial head 657e4f3e5ca2e7bda2dc32711bab8aa0254db9dc passed QA/security/code-review and Linux iOS check, but macOS run 43319382871 failed during test compilation because LibraryItem was ambiguous in ListenViewModelTests. Head c9773dffce8806a246573ce68d9d2d056ed2ea2a explicitly qualifies LaterKit.LibraryItem in model/tests. No iOS runtime tests have passed for this task yet. Final-head hosted checks/reviews must finish before merge. Nonblocking review decisions: preparation count reflects queued/current preparation rather than promising work for failed/unqueued items; Continue picks oldest part-heard save deterministically; resume path matches coordinator's per-account path. Exact next: inspect current head CI/reviews, repair failures and verify all gates before merging PR66."
+  - "2026-11-12 final-head proof: dae49ab44e19bf97de2ded58f4018c58269e654e passed hosted macOS run 43320371795 (89 app tests, all 6 ListenViewModelTests, 13 UI tests including ListenUITests and About/empty-state regressions; Later line coverage 89.99%). Linux run 43320372333 passed build/lint, database/backend tests 808 passed with 3 existing skips, browser suites and 80.66% lines; Linux LaterKit 52 tests, 97.01% lines. QA/security/code-review/guide PASS, no blocking findings; review submissions/threads empty; all final-head checks/statuses successful except intentional intent-review skip, mergeable_state clean. Current implementation shows total duration for partly heard items and singular preparation wording. No physical-device, signing or installation proof. Final approval to merge is already delegated by Dan."
 ---
 
 ## Context
@@ -54,19 +55,19 @@ resume positions (later-0031 `ResumeStore`), and `TimeFitPlanner.plan(target:can
 
 ## Acceptance criteria
 
-- [ ] Given rendered items and a 15-minute choice, then the shown plan equals the planner's output
+- [x] Given rendered items and a 15-minute choice, then the shown plan equals the planner's output
       for those actual durations/remaining times — `LaterAppTests/ListenViewModelTests.testUsesPlannerWithActualDurations`.
-- [ ] Given a not-yet-rendered narratable item, then it is never in the plan and is counted in
+- [x] Given a not-yet-rendered narratable item, then it is never in the plan and is counted in
       "being prepared" — `ListenViewModelTests.testExcludesUnrenderedItems`.
-- [ ] Given underfill or nothing ready, then the summary text states the real total vs the target
+- [x] Given underfill or nothing ready, then the summary text states the real total vs the target
       or "Nothing's ready to listen to yet" — `ListenViewModelTests.testHonestStates`.
-- [ ] Given a `tooLong` item, then it is listed under Longer listens with its duration and is only
+- [x] Given a `tooLong` item, then it is listed under Longer listens with its duration and is only
       queued when explicitly chosen — `ListenViewModelTests.testLongerListensAreExplicit`.
-- [ ] Given Play, then the player queue receives exactly the planned items in planned order —
+- [x] Given Play, then the player queue receives exactly the planned items in planned order —
       `ListenViewModelTests.testPlayQueuesPlanInOrder`.
-- [ ] Given the simulator with stubbed ready items, the three choices, the plan preview and Play
+- [x] Given the simulator with stubbed ready items, the three choices, the plan preview and Play
       work end to end into the Player — `LaterAppUITests/ListenUITests`.
-- [ ] `ios-ci` and the Flow `ios/` check pass with floors met.
+- [x] `ios-ci` and the Flow `ios/` check pass with floors met.
 
 ## Definition of done (inherited — do not edit)
 
