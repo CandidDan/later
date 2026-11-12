@@ -28,6 +28,8 @@ touches:
   - "ios/LaterKit/Tests/LaterKitTests/API/**"
   - "ios/README.md"
 labels: ["ios", "auth", "security"]
+notes:
+  - "2026-11-12: Implemented iPhone PKCE sign-in, shared Keychain session/verifier, guarded sign-out/cache cleanup, Release config validation, signed-in shell and Foundation bearer API client on flow/later-0027-ios-sign-in, draft PR #61, head e56d540b44d5db6bbc43a622a598f91324889336. Cloud Linux source-root gate passes: strict Swift formatting, 20 Swift tests including 14 API tests, 94.44% LaterKit line coverage, 20 script tests. macOS ios-ci run 43213876507 is in progress; app compilation/UI tests and full Flow gates are not yet verified. Supabase Auth product only is pinned to 2.55.6; no hosted auth configuration or real account was changed. Real signed-device login remains later-0036. Next: inspect ios-ci 43213876507 and fix any app compile/test failures on this branch; run full workflow_dispatch flow-gates for the exact final head, update PR acceptance checklist, then mark ready for independent Flow review only once build/test gates pass. Cloud worktree is later-signin; current local commit f232510 has the same tree as remote e56d540, so fetch remote branch and align history before further commits. Swift 6.4 lives at /workspace/shared/later-swift-6.4.0/usr/bin; cloud source-root command uses CLANG_MODULE_CACHE_PATH=/workspace/shared/signin-cache/clang and SWIFTPM_MODULECACHE_OVERRIDE=/workspace/shared/signin-cache/module. No local Mac tests or Docker; parent coordinates hosted dispatch using authorized Mac CLI."
 ---
 
 ## Context
