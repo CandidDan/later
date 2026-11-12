@@ -83,6 +83,9 @@ struct ListenView: View {
       }
       .foregroundStyle(ColorToken.textPrimary.color)
       .background(ColorToken.background.color)
+      .onChange(of: coordinator.showingPlayer) { _, showing in
+        if !showing { model?.refresh() }
+      }
       .task(id: revision) {
         if model == nil { model = ListenViewModel.live(coordinator) }
         model?.refresh()

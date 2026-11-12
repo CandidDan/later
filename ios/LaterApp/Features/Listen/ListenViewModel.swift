@@ -69,7 +69,9 @@ final class ListenViewModel {
     let versions = planned.map { $0.item.listen.textVersion }
     refresh()
     guard let plan, !plan.items.isEmpty else { return false }
-    guard preview == plan, versions == planned.map({ $0.item.listen.textVersion }) else {
+    guard preview?.items.map(\.id) == plan.items.map(\.id),
+      plan.total <= (preview?.total ?? 0), versions == planned.map({ $0.item.listen.textVersion })
+    else {
       message = "Your ready audio changed. Review the updated plan, then tap Play."
       return false
     }
