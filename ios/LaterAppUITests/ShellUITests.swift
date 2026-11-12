@@ -15,14 +15,14 @@ final class ShellUITests: XCTestCase {
     XCTAssertTrue(tabs.waitForExistence(timeout: 10))
     XCTAssertEqual(tabs.buttons.count, 2, "v1 has exactly two tabs")
 
-    for (tab, identifier) in [("Listen", "listen.empty"), ("Saved", "saved.empty")] {
+    for (tab, identifier) in [("Listen", "listen.summary"), ("Saved", "saved.empty")] {
       let button = tabs.buttons[tab]
       XCTAssertTrue(button.exists, "\(tab) tab is missing")
       button.tap()
 
       let state = app.descendants(matching: .any)[identifier]
       XCTAssertTrue(state.waitForExistence(timeout: 5), "\(tab) shows no empty state")
-      let expected = tab == "Saved" ? "Nothing saved yet" : "Nothing to"
+      let expected = tab == "Saved" ? "Nothing saved yet" : "Nothing's ready to listen to yet"
       XCTAssertTrue(state.label.contains(expected), "\(tab) says: \(state.label)")
 
       XCTAssertEqual(app.cells.count, 0, "\(tab) shows list rows")
