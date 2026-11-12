@@ -1,12 +1,12 @@
 ---
 id: "later-0026"
 title: "Serve the app's private library and narration text, recording exposure before release"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "later"
-owner: ""
+owner: "goose-library-20261112"
 created: "2026-10-26"
-started: ""
+started: "2026-11-12T11:00:29Z"
 branch: ""
 pr: ""
 issue: ""
