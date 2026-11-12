@@ -204,7 +204,9 @@ final class AuthServiceTests: XCTestCase {
       backend: backend, storage: storage, caches: UserCacheCleaner(directories: [directory]))
     await auth.restore()
     XCTAssertEqual(auth.session, saved)
-    XCTAssertEqual(try storage.retrieve(key: SupabaseAuthBackend.storageKey), bytes)
+    // The SDK may re-encode JSON; the durable session must retain all its values.
+    let persisted = try XCTUnwrap(storage.retrieve(key: SupabaseAuthBackend.storageKey))
+    XCTAssertEqual(try JSONDecoder().decode(Session.self, from: persisted), saved)
     XCTAssertEqual(try Data(contentsOf: audio), Data("private audio".utf8))
     XCTAssertEqual(storage.clearCount, 0)
     let request = await requests.last()
@@ -252,7 +254,9 @@ final class AuthServiceTests: XCTestCase {
       }
     }
     XCTAssertEqual(auth.session, saved)
-    XCTAssertEqual(try storage.retrieve(key: SupabaseAuthBackend.storageKey), bytes)
+    // The SDK may re-encode JSON; the durable session must retain all its values.
+    let persisted = try XCTUnwrap(storage.retrieve(key: SupabaseAuthBackend.storageKey))
+    XCTAssertEqual(try JSONDecoder().decode(Session.self, from: persisted), saved)
     XCTAssertEqual(storage.clearCount, 0)
     XCTAssertEqual(caches.clearCount, 0)
     await requests.setFailure(nil)
