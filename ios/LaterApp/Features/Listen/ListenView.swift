@@ -30,8 +30,12 @@ struct ListenView: View {
               .font(.headline).accessibilityIdentifier("listen.summary")
             ForEach(model.planned) { row($0) }
             if model.snapshot.preparing > 0 {
-              Text("\(model.snapshot.preparing) more are being prepared")
-                .accessibilityIdentifier("listen.preparing")
+              Text(
+                model.snapshot.preparing == 1
+                  ? "1 more is being prepared"
+                  : "\(model.snapshot.preparing) more are being prepared"
+              )
+              .accessibilityIdentifier("listen.preparing")
             }
             if !model.longer.isEmpty {
               Text("Longer listens").font(.headline)
@@ -99,6 +103,10 @@ struct ListenView: View {
         "\(item.item.displaySource) · \(ListeningDuration.format(.seconds(Int64(ceil(item.duration - item.position))))) remaining"
       )
       .font(.subheadline)
+      if item.position > 0 {
+        Text("\(ListeningDuration.format(.seconds(Int64(ceil(item.duration))))) total")
+          .font(.caption)
+      }
     }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
   }
 }
