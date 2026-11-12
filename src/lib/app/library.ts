@@ -55,8 +55,9 @@ export async function projectLibraryItem(
   if (["video", "audio", "post"].includes(kind)) listen = { state: "open_original", reason: "not_an_article" };
   else if (metadata) listen = { state: "narratable", ...metadata };
   else if (jobs.some(job => job.job_type === "article_extraction" && ["pending", "processing"].includes(text(job.status)))) listen = { state: "preparing" };
-  else if (!extraction && (jobs.some(job => ["pending", "processing"].includes(text(job.status)))
-      || (runs.length === 0 && !jobs.some(job => job.job_type === "source_resolution" && ["completed", "failed"].includes(text(job.status)))))) listen = { state: "preparing" };
+  // Intent completion may intentionally enqueue no resolution job (for example a plain note).
+  // Only queued or active work is evidence that preparation is still underway.
+  else if (!extraction && jobs.some(job => ["pending", "processing"].includes(text(job.status)))) listen = { state: "preparing" };
   else listen = { state: "open_original", reason: extractionReason(extraction) };
   return {
     captureId: card.captureId, title: card.title ?? null, creator: card.creator ?? null,

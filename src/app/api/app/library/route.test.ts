@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { handleLibrary } from "../../../../lib/app/handler";
-import { appFixture, foreignId, owner, request } from "../../../../lib/app/test-fixture";
+import { appFixture, captureId, foreignId, owner, request } from "../../../../lib/app/test-fixture";
 import { decodeCursor, encodeCursor } from "../../../../lib/app/cursor";
 function privateHeaders(response: Response) {
   expect(response.headers.get("cache-control")).toBe("private, no-store");
@@ -21,6 +21,17 @@ describe("app library route", () => {
     expect(f.queries.find(q => q.table === "captures")?.filters.user_id).toBe(owner);
     expect(f.queries.find(q => q.table === "capture_article_extractions")?.columns).not.toContain("paragraphs");
     expect(JSON.stringify(body)).not.toMatch(/raw_text|rawText|paragraphs|PRIVATE other/);
+  });
+  it("AC6 completed plain-note intent without a source job is open_original/no_source through the route", async () => {
+    const f = appFixture({
+      captures: [{ id: captureId, user_id: owner, raw_text: "Remember to buy tea", capture_kind: "text", captured_at: "2026-11-12T00:00:00Z" }],
+      extractions: [], runs: [],
+      jobs: [{ id: "intent-1", capture_id: captureId, job_type: "intent_analysis", status: "completed", created_at: "2026-11-12T00:00:01Z" }],
+    });
+    const response = await handleLibrary(request("library"), f.deps);
+    expect(response.status).toBe(200); privateHeaders(response);
+    expect(await response.json()).toMatchObject({ items: [{ captureId, kind: "text", sourceUrl: null, listen: { state: "open_original", reason: "no_source" } }], nextCursor: null });
+    expect(f.exposed.has(captureId)).toBe(true);
   });
   it("AC7 pages 120 captures in disjoint newest-first pages, excludes consumed, includes deferred, and ends with null", async () => {
     const captures = Array.from({ length: 120 }, (_, n) => ({ id: `22222222-2222-4222-8222-${String(n).padStart(12, "0")}`, user_id: owner, raw_text: "note", capture_kind: "text", captured_at: `2026-11-12T00:00:00.${String(n).padStart(6, "0")}+00:00`, consumed_at: n === 119 ? "2026-11-12T01:00:00Z" : null, deferred_until: n === 118 ? "2027-01-01T00:00:00Z" : null }));

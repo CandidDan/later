@@ -14,9 +14,21 @@ describe("library mapping", () => {
     const item = await projectLibraryItem(capture, [run], undefined, [{ job_type: "article_extraction", status }], publicHost);
     expect(item.listen).toEqual({ state: "preparing" });
   });
-  it("AC6 unfinished source resolution is preparing; terminal failure without an extraction is no_source", async () => {
-    expect((await projectLibraryItem(capture, [], undefined, [], publicHost)).listen).toEqual({ state: "preparing" });
-    expect((await projectLibraryItem(capture, [], undefined, [{ job_type: "source_resolution", status: "failed" }], publicHost)).listen).toEqual({ state: "open_original", reason: "no_source" });
+  it.each([
+    ["intent_analysis", "pending"], ["intent_analysis", "processing"],
+    ["source_resolution", "pending"], ["source_resolution", "processing"],
+  ])("AC6 %s work that is %s remains preparing", async (job_type, status) => {
+    expect((await projectLibraryItem(capture, [], undefined, [{ job_type, status }], publicHost)).listen).toEqual({ state: "preparing" });
+  });
+  it.each(["completed", "failed"])("AC6 plain note with %s intent and no resolution job is open_original/no_source", async status => {
+    const note = { ...capture, raw_text: "Remember to buy tea", capture_kind: "text", source_platform: "" };
+    const item = await projectLibraryItem(note, [], undefined, [{ job_type: "intent_analysis", status }], publicHost);
+    expect(item).toMatchObject({ kind: "text", sourceUrl: null, listen: { state: "open_original", reason: "no_source" } });
+  });
+  it("AC6 no queued work or terminal resolution is no_source rather than preparing forever", async () => {
+    for (const jobs of [[], [{ job_type: "source_resolution", status: "failed" }], [{ job_type: "source_resolution", status: "completed" }]]) {
+      expect((await projectLibraryItem(capture, [], undefined, jobs, publicHost)).listen).toEqual({ state: "open_original", reason: "no_source" });
+    }
   });
   it.each(["not_an_article", "paywalled", "truncated", "too_short", "not_html", "extraction_failed", "fetch_failed"])("AC6 preserves exact open_original reason %s", async reason => {
     expect((await projectLibraryItem(capture, [run], { status: "unsupported", reason }, [], publicHost)).listen).toEqual({ state: "open_original", reason });
