@@ -28,6 +28,7 @@ final class NarrationStore {
   private let isActive: () -> Bool
   private let cap: Int64
   private var draining = false
+  private var restartAfterDrain = false
   private var stopped = false
   private var desired: [UUID: String] = [:]
 
@@ -46,7 +47,7 @@ final class NarrationStore {
     try files.removeOrphans(keeping: snapshot.manifests)
   }
 
-  func manifest(for item: LibraryItem) -> NarrationManifest? {
+  func manifest(for item: LaterKit.LibraryItem) -> NarrationManifest? {
     guard item.listen.state == .narratable, snapshot.conflicts[item.id] == nil,
       let value = snapshot.manifests[item.id], value.textVersion == item.listen.textVersion
     else { return nil }
@@ -54,7 +55,7 @@ final class NarrationStore {
   }
 
   /// Auto-queue only the newest ten; explicit requests survive refresh and process serially.
-  func enqueueNewest(_ items: [LibraryItem]) {
+  func enqueueNewest(_ items: [LaterKit.LibraryItem]) {
     let candidates = items.filter { $0.listen.state == .narratable }.sorted {
       ($0.savedDate ?? .distantPast) > ($1.savedDate ?? .distantPast)
     }.prefix(10)
@@ -68,7 +69,7 @@ final class NarrationStore {
     for item in candidates { enqueue(item, explicit: false) }
   }
 
-  func enqueue(_ item: LibraryItem, explicit: Bool = true) {
+  func enqueue(_ item: LaterKit.LibraryItem, explicit: Bool = true) {
     guard isActive(), item.listen.state == .narratable, let version = item.listen.textVersion else {
       return
     }
@@ -85,16 +86,28 @@ final class NarrationStore {
 
   func pause() {
     stopped = true
+    restartAfterDrain = false
     renderer.cancel()
   }
 
   /// One drain owns the renderer. Expiration/cancellation leaves the queue retryable.
   func process() async {
-    guard !draining, isActive() else { return }
+    guard isActive() else { return }
+    if draining {
+      if stopped { restartAfterDrain = true }
+      return
+    }
     draining = true
     stopped = false
     message = nil
-    defer { draining = false; preparing = nil }
+    defer {
+      draining = false
+      preparing = nil
+      if restartAfterDrain {
+        restartAfterDrain = false
+        Task { await process() }
+      }
+    }
     var attempted: [NarrationCandidate] = []
     while let candidate = snapshot.pending.first(where: { !attempted.contains($0) }) {
       attempted.append(candidate)

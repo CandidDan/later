@@ -7,6 +7,7 @@ final class DeviceNarrationRenderer: NarrationRendering {
   enum RenderError: Error { case noVoice, emptyAudio, invalidBuffer }
   private let synthesizer = AVSpeechSynthesizer()
   private var sink: SpeechFileSink?
+  private var exportSession: AVAssetExportSession?
 
   static func voice(
     language: String = Locale.current.identifier.replacingOccurrences(of: "_", with: "-")
@@ -56,6 +57,8 @@ final class DeviceNarrationRenderer: NarrationRendering {
     if let export = AVAssetExportSession(
       asset: AVURLAsset(url: caf), presetName: AVAssetExportPresetAppleM4A)
     {
+      exportSession = export
+      defer { exportSession = nil }
       do {
         try await export.export(to: m4a, as: .m4a)
         try Task.checkCancellation()
@@ -71,6 +74,7 @@ final class DeviceNarrationRenderer: NarrationRendering {
   }
 
   func cancel() {
+    exportSession?.cancelExport()
     sink?.cancel()
     synthesizer.stopSpeaking(at: .immediate)
   }

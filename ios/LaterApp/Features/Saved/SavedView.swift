@@ -90,7 +90,7 @@ private struct SavedContent: View {
     .foregroundStyle(ColorToken.textPrimary.color)
     .refreshable {
       await model.refresh()
-      await model.narration?.process()
+      Task { await model.narration?.process() }
     }
     .onScrollGeometryChange(for: Bool.self) { geometry in
       geometry.contentOffset.y > 10
@@ -103,11 +103,19 @@ private struct SavedContent: View {
     .task {
       await model.start()
       for await online in SavedConnectivity.updates() {
-        if online, scenePhase == .active { await model.reconnect() }
+        if online, scenePhase == .active {
+          await model.reconnect()
+          Task { await model.narration?.process() }
+        }
       }
     }
     .onChange(of: scenePhase) { _, phase in
-      if phase == .active { Task { await model.reconnect() } }
+      if phase == .active {
+        Task {
+          await model.reconnect()
+          Task { await model.narration?.process() }
+        }
+      }
     }
   }
 }

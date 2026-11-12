@@ -12,8 +12,18 @@ enum SavedServiceFactory {
     }
     #if DEBUG && targetEnvironment(simulator)
       if ProcessInfo.processInfo.arguments.contains("--uitesting-auth") {
+        let narration: NarrationStore?
+        if ProcessInfo.processInfo.arguments.contains("--uitesting-narration") {
+          narration = try NarrationStore(
+            client: SavedTestSupport.Client(), renderer: NarrationUITestRenderer(),
+            files: NarrationFiles(userID: userID, parent: FileManager.default.temporaryDirectory),
+            isActive: active)
+        } else {
+          narration = nil
+        }
         return SavedViewModel(
-          client: SavedTestSupport.Client(), cache: SavedTestSupport.Cache(), isActive: active)
+          client: SavedTestSupport.Client(), cache: SavedTestSupport.Cache(), isActive: active,
+          narration: narration)
       }
     #endif
     let configuration = try AppAuthConfiguration(info: Bundle.main.infoDictionary ?? [:])
@@ -48,6 +58,16 @@ enum SavedConnectivity {
       func send(_ request: LaterAPIRequest) async throws -> Data {
         let args = ProcessInfo.processInfo.arguments
         if args.contains("--saved-offline") { throw URLError(.notConnectedToInternet) }
+        if request.path.hasPrefix("api/app/narrations/") {
+          if args.contains("--narration-conflict") { throw NarrationError.openOriginal(.paywalled) }
+          return try JSONSerialization.data(withJSONObject: [
+            "captureId": request.path.split(separator: "/").last.map(String.init) ?? "",
+            "textVersion": "fixture", "title": "A quiet morning", "siteName": "Example",
+            "sourceUrl": "https://example.org/article", "intro": "Narrated by Later.",
+            "paragraphs": ["The complete article."], "outro": "End of A quiet morning.",
+            "wordCount": 3,
+          ])
+        }
         if request.method == .post {
           if args.contains("--saved-unavailable") {
             throw LaterAPIError.server(status: 409, message: nil)

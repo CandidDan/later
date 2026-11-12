@@ -250,12 +250,12 @@ enum NarrationFixtures {
   static let user = UUID()
   static func item(
     id: UUID = UUID(), version: String = "v1", date: String = "2026-11-12T12:00:00Z"
-  ) throws -> LibraryItem {
+  ) throws -> LaterKit.LibraryItem {
     let data = try JSONSerialization.data(withJSONObject: [
       "captureId": id.uuidString, "title": "A morning", "source": "Example", "savedAt": date,
       "kind": "article",
       "listen": ["state": "narratable", "textVersion": version, "wordCount": 2],
     ])
-    return try JSONDecoder().decode(LibraryItem.self, from: data)
+    return try JSONDecoder().decode(LaterKit.LibraryItem.self, from: data)
   }
 }
