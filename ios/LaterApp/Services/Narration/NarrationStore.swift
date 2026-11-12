@@ -94,7 +94,7 @@ final class NarrationStore {
   func process() async {
     guard isActive() else { return }
     if draining {
-      if stopped { restartAfterDrain = true }
+      restartAfterDrain = true
       return
     }
     draining = true

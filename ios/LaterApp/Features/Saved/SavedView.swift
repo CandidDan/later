@@ -99,7 +99,7 @@ private struct SavedContent: View {
     } action: { _, atEnd in
       if atEnd { Task { await model.loadNextPage() } }
     }
-    .sheet(item: $selected) { item in SavedDetailView(item: item, model: model) }
+    .sheet(item: $selected) { item in SavedDetailView(selected: item, model: model) }
     .task {
       await model.start()
       for await online in SavedConnectivity.updates() {
@@ -121,8 +121,9 @@ private struct SavedContent: View {
 }
 
 private struct SavedDetailView: View {
-  let item: LaterKit.LibraryItem
+  let selected: LaterKit.LibraryItem
   let model: SavedViewModel
+  private var item: LaterKit.LibraryItem { model.items.first { $0.id == selected.id } ?? selected }
   @Environment(\.dismiss) private var dismiss
   @Environment(\.openURL) private var openURL
   @State private var confirmingDone = false

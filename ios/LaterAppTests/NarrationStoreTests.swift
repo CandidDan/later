@@ -357,3 +357,36 @@ private final class SuspendedNarrationRenderer: NarrationRendering {
     waiting = false
   }
 }
+
+extension NarrationStoreTests {
+  func testNewVersionDuringRenderRestartsWithCurrentText() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let client = NarrationAPIStub()
+    let renderer = SuspendedNarrationRenderer()
+    let store = try NarrationStore(
+      client: client, renderer: renderer, files: NarrationFiles(userID: UUID(), parent: directory))
+    let old = try NarrationFixtures.item()
+    store.enqueue(old)
+    let work = Task { await store.process() }
+    for _ in 0..<100 {
+      if renderer.waiting { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    XCTAssertTrue(renderer.waiting)
+    let current = try NarrationFixtures.item(id: old.id, version: "v2")
+    await client.setVersion("v2")
+    store.enqueue(current)
+    await store.process()
+    renderer.suspend = false
+    renderer.finish()
+    await work.value
+    for _ in 0..<100 {
+      if store.manifest(for: current) != nil { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    XCTAssertEqual(store.manifest(for: current)?.textVersion, "v2")
+    XCTAssertNil(store.manifest(for: old))
+    XCTAssertTrue(store.snapshot.pending.isEmpty)
+  }
+}

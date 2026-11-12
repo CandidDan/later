@@ -33,7 +33,7 @@ final class DeviceNarrationRenderer: NarrationRendering {
     let caf = directory.appendingPathComponent("audio.caf")
     let sink = SpeechFileSink(url: caf)
     self.sink = sink
-    defer { self.sink = nil; sink.close() }
+    defer { synthesizer.stopSpeaking(at: .immediate); self.sink = nil; sink.close() }
     try await withTaskCancellationHandler {
       for part in NarrationScript.utterances(for: text) where !part.text.isEmpty {
         try Task.checkCancellation()
