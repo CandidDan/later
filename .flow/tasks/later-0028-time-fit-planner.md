@@ -1,7 +1,7 @@
 ---
 id: "later-0028"
 title: "Plan a listen that fits 10, 15 or 30 minutes from actual ready audio, honestly"
-status: "in_review"
+status: "done"
 priority: 2
 project: "later"
 owner: "dot-later-0028-timefit"
