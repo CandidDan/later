@@ -1,12 +1,12 @@
 ---
 id: "later-0032"
 title: "Choose a 10, 15 or 30 minute listen on the Listen home"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "later"
-owner: ""
+owner: "codex-20261112-listen"
 created: "2026-10-26"
-started: ""
+started: "2026-11-12T22:18:04Z"
 branch: ""
 pr: ""
 issue: ""
