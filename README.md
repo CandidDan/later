@@ -84,6 +84,7 @@ research console as ready.
    - `20260915150000_segment_resolution.sql`
    - `20261006090000_capture_revisit_state.sql`
    - `20261026090000_article_extraction.sql`
+   - `20261112090000_app_library.sql`
 
 4. Confirm in the dashboard that the `capture-assets` bucket remains private, RLS is enabled, and
    the extensions `pg_cron`, `pg_net`, `pgcrypto` and Vault are installed. Do not weaken policies for
@@ -178,6 +179,8 @@ Production endpoints are deliberately narrow:
 | `POST /api/inbound/whatsapp` | Validates Twilio signature, persists, then returns `Saved for Later ✓`; invalid signatures are rejected |
 | `POST /api/inbound/email` | Validates Resend signature, persists addressed mail, then returns `Accepted`; unaddressed signed mail receives the same acknowledgement |
 | `POST /api/app/captures` | Requires the evaluator's verified Supabase bearer session; accepts `requestId` (UUID) with `url` and/or `text` and an optional `note`, saves one `ios_share` capture owned by the session user, and returns only its id; retries with the same `requestId` save once |
+| `GET /api/app/library` | Requires the evaluator's verified Supabase bearer session; keyset-pages up to 50 owned unconsumed saves newest first, includes deferred saves, records exposure atomically before returning each page, and reports narration availability without returning article text |
+| `GET /api/app/narrations/[captureId]` | Requires the evaluator's verified Supabase bearer session; commits exposure before reading the latest extraction through RLS, returns full stored paragraphs unchanged with separate Later attribution and an ETag, or 409 `open_original` with a closed-list reason |
 | `POST /api/jobs/process` | Requires bearer `JOBS_PROCESS_SECRET`; responds only with claimed/succeeded/failed counts |
 | `GET /api/research/next` | Authenticated evaluator receives capture-time recall material only |
 | `POST /api/research/recall` | Atomically stores immutable unaided recall before reveal; rejects fresh recall after revisit exposure while preserving existing recall |

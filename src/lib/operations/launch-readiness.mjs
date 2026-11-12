@@ -248,6 +248,8 @@ export const PRODUCTION_ENDPOINTS = [
   "POST /api/inbound/whatsapp",
   "POST /api/inbound/email",
   "POST /api/app/captures",
+  "GET /api/app/library",
+  "GET /api/app/narrations/[captureId]",
   "POST /api/jobs/process",
   "GET /api/research/next",
   "POST /api/research/recall",
