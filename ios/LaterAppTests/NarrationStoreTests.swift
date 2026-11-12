@@ -259,3 +259,101 @@ enum NarrationFixtures {
     return try JSONDecoder().decode(LaterKit.LibraryItem.self, from: data)
   }
 }
+
+extension NarrationStoreTests {
+  func testPauseRemovesPartialFileAndKeepsQueueForRetry() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let renderer = SuspendedNarrationRenderer()
+    let store = try NarrationStore(
+      client: NarrationAPIStub(), renderer: renderer,
+      files: NarrationFiles(userID: UUID(), parent: directory))
+    let item = try NarrationFixtures.item()
+    store.enqueue(item)
+    let work = Task { await store.process() }
+    for _ in 0..<100 {
+      if renderer.waiting { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    XCTAssertTrue(renderer.waiting)
+    XCTAssertNil(store.manifest(for: item))
+    store.pause()
+    await work.value
+    XCTAssertNil(store.manifest(for: item))
+    XCTAssertEqual(store.snapshot.pending.count, 1)
+    XCTAssertEqual(
+      try FileManager.default.contentsOfDirectory(atPath: store.files.root.path), ["manifest.json"])
+    renderer.suspend = false
+    await store.process()
+    XCTAssertNotNil(store.manifest(for: item))
+  }
+
+  func testLateRenderCannotPublishAfterSignOut() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var active = true
+    let renderer = SuspendedNarrationRenderer()
+    let store = try NarrationStore(
+      client: NarrationAPIStub(), renderer: renderer,
+      files: NarrationFiles(userID: UUID(), parent: directory), isActive: { active })
+    let item = try NarrationFixtures.item()
+    store.enqueue(item)
+    let work = Task { await store.process() }
+    for _ in 0..<100 {
+      if renderer.waiting { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    XCTAssertTrue(renderer.waiting)
+    active = false
+    try UserCacheCleaner(directories: [
+      directory.appendingPathComponent(UserCacheCleaner.directoryName)
+    ]).clearAll()
+    renderer.finish()
+    await work.value
+    XCTAssertNil(store.manifest(for: item))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: store.files.root.path))
+  }
+
+  func testOversizedAudioStaysRetryableWithoutPublishing() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = try NarrationStore(
+      client: NarrationAPIStub(), renderer: FixtureNarrationRenderer(),
+      files: NarrationFiles(userID: UUID(), parent: directory), cap: 1)
+    let item = try NarrationFixtures.item()
+    store.enqueue(item)
+    await store.process()
+    XCTAssertNil(store.manifest(for: item))
+    XCTAssertEqual(store.snapshot.pending.count, 1)
+    XCTAssertNotNil(store.message)
+    XCTAssertEqual(
+      try FileManager.default.contentsOfDirectory(atPath: store.files.root.path), ["manifest.json"])
+  }
+}
+
+@MainActor
+private final class SuspendedNarrationRenderer: NarrationRendering {
+  var suspend = true
+  var waiting = false
+  private var continuation: CheckedContinuation<Void, Error>?
+  func render(_ text: NarrationText, in directory: URL) async throws -> RenderedNarration {
+    let rendered = try FixtureNarrationRenderer().render(text, in: directory)
+    if suspend {
+      try await withCheckedThrowingContinuation { (value: CheckedContinuation<Void, Error>) in
+        continuation = value
+        waiting = true
+      }
+    }
+    return rendered
+  }
+  func finish() {
+    continuation?.resume()
+    continuation = nil
+    waiting = false
+  }
+  func cancel() {
+    continuation?.resume(throwing: CancellationError())
+    continuation = nil
+    waiting = false
+  }
+}
