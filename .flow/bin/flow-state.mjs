@@ -501,7 +501,11 @@ export function runStateCli({ repoRoot, argv = [], out = process.stdout } = {}) 
 // ── CLI ────────────────────────────────────────────────────────────────────
 // The template's own root: `.flow/bin` -> `.flow` -> repo. In an adopting repo that IS the
 // repo; in canonical it is `project-template/`, which is why canonical adapts (see above).
+// The exit code is set, not forced with `process.exit()`. When stdout is a pipe, Node writes to
+// it asynchronously, and `process.exit()` ends the process before those writes finish: the
+// reader got the first 65,536 bytes and nothing more (flow-0212). Setting `process.exitCode`
+// lets Node drain stdout first and then exit with the same code.
 if (__isMain) {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-  process.exit(runStateCli({ repoRoot, argv: process.argv.slice(2) }));
+  process.exitCode = runStateCli({ repoRoot, argv: process.argv.slice(2) });
 }

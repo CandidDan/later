@@ -9,7 +9,12 @@ name: flow-unblock
 # loop. A block with no machine-readable `blocked_by` entry is never released — only a human may
 # lift it.
 #
-# Three triggers, one job: flow-done completing (fast), hourly (the backstop), and on demand.
+# Two triggers, one job: flow-done completing, and on demand. No schedule (flow-0185): a
+# `blocked_by` entry resolves only when a task reaches `done` or a PR merges, which is flow-done
+# completing; an hourly backstop cost about 720 billed Actions minutes a month in an idle repo. A
+# block written after its dependency already landed waits for the next flow-done run, or a
+# workflow_dispatch. After a release is pushed, the reusable sends repository_dispatch
+# `flow-task-state`, which starts flow-dispatch.
 # NOT gated on FLOW_AI: a repo worked entirely by humans still has blocks whose dependencies land.
 # No secrets — the reusable uses GITHUB_TOKEN only. The reusable still declares an ignored
 # `queue_runner_workflow` input (the retired queue-runner) so an older caller passing it keeps working.
@@ -18,8 +23,6 @@ on:
   workflow_run:
     workflows: [flow-done]
     types: [completed]
-  schedule:
-    - cron: "17 * * * *"       # hourly; off the top of the hour, where scheduled runs queue
   workflow_dispatch:
 
 concurrency:

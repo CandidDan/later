@@ -9,10 +9,15 @@ name: flow-recover
 # DORMANT until repo variable FLOW_AI=true (no autonomous workers, nothing to strand); always
 # runnable on demand via workflow_dispatch. A reset with nothing pushed also moves the task up one
 # model tier (flow-0174).
+#
+# Once a day (flow-0185), not every 3 hours: a stranded claim waits up to a day to be reset, and an
+# idle repo bills 30 runs a month here instead of 240. The 75-minute threshold is unchanged. A sweep
+# that pushes a task-file change sends repository_dispatch `flow-task-state`, which starts
+# flow-dispatch; a sweep that changes nothing starts nothing.
 
 on:
   schedule:
-    - cron: "0 */3 * * *"      # every 3h; the threshold (in the reusable) is the real gate
+    - cron: "53 5 * * *"       # daily (flow-0185); the threshold (in the reusable) is the real gate
   workflow_dispatch:
     inputs:
       threshold_minutes:

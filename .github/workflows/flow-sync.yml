@@ -22,7 +22,9 @@ name: flow-sync
 # file's `uses:` line instead — so repinning this repo is the one `sed` over `.github/workflows/`
 # and the sync follows. If two callers in this repo disagree about the ref, the sync fails and names
 # both rather than guessing. A `workflow_dispatch` run overrides all of that: whatever you type in
-# the input wins, which is how you adopt from a canary ref once without repinning anything.
+# the input wins. It also REPINS: the copied callers' `uses:` lines are rewritten to that ref
+# (flow-0158), so later scheduled syncs follow it until it is changed back, for example by a sync
+# dispatched with the alias.
 
 on:
   schedule:
