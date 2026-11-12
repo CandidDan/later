@@ -37,7 +37,8 @@ final class SavedCacheTests: XCTestCase {
     XCTAssertEqual(offline.pendingCount, 1)
     let attributes = try FileManager.default.attributesOfItem(atPath: cache.file.path)
     XCTAssertEqual(
-      attributes[.protectionKey] as? FileProtectionType, .completeUntilFirstUserAuthentication)
+      attributes[.protectionKey] as? String,
+      FileProtectionType.completeUntilFirstUserAuthentication.rawValue)
     XCTAssertEqual(
       try cache.directory.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup,
       true)

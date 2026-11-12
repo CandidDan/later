@@ -148,9 +148,7 @@ private struct SavedDetailView: View {
           Button("Close") { dismiss() }.accessibilityIdentifier("saved.detail.close")
         }
       }
-      .confirmationDialog(
-        "Mark this item done?", isPresented: $confirmingDone, titleVisibility: .visible
-      ) {
+      .alert("Mark this item done?", isPresented: $confirmingDone) {
         Button("Mark done") { Task { _ = await model.perform(.consume, on: item) } }
         Button("Cancel", role: .cancel) {}
       }
