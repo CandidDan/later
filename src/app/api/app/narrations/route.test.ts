@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { handleNarration } from "../../../../lib/app/handler";
 import { appFixture, captureId, foreignId, fullExtraction, owner, request } from "../../../../lib/app/test-fixture";
 function privateHeaders(response: Response) {
@@ -57,4 +57,15 @@ describe("app narration route", () => {
     const f = appFixture(); const req = request(`narrations/${captureId}`); req.headers.set("If-None-Match", `"${"a".repeat(64)}"`);
     expect((await handleNarration(req, captureId, f.deps)).status).toBe(200); expect(f.rpc).toHaveBeenCalledOnce();
   });
+});
+
+const routeDependencies = vi.hoisted(() => ({ get: vi.fn() }));
+vi.mock("@/lib/app/server", () => ({ createAppDependencies: routeDependencies.get }));
+vi.mock("@/lib/app/handler", () => import("../../../../lib/app/handler"));
+import { GET, runtime, dynamic } from "./[captureId]/route";
+it("wires the dynamic Node route to the authenticated handler", async () => {
+  const f = appFixture(); routeDependencies.get.mockReturnValue(f.deps);
+  const response = await GET(request(`narrations/${captureId}`), { params: Promise.resolve({ captureId }) });
+  expect(response.status).toBe(200); privateHeaders(response);
+  expect(runtime).toBe("nodejs"); expect(dynamic).toBe("force-dynamic"); expect(f.storeFor).toHaveBeenCalledOnce();
 });

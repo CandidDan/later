@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { handleLibrary } from "../../../../lib/app/handler";
 import { appFixture, foreignId, owner, request } from "../../../../lib/app/test-fixture";
 import { decodeCursor, encodeCursor } from "../../../../lib/app/cursor";
@@ -55,4 +55,15 @@ describe("app library route", () => {
     const response = await handleLibrary(request("library"), f.deps);
     expect(response.status).toBe(503); expect(await response.json()).toEqual({ error: "Unavailable" }); privateHeaders(response); expect(f.from).not.toHaveBeenCalled();
   });
+});
+
+const routeDependencies = vi.hoisted(() => ({ get: vi.fn() }));
+vi.mock("@/lib/app/server", () => ({ createAppDependencies: routeDependencies.get }));
+vi.mock("@/lib/app/handler", () => import("../../../../lib/app/handler"));
+import { GET, runtime, dynamic } from "./route";
+it("wires the dynamic Node route to the authenticated handler", async () => {
+  const f = appFixture(); routeDependencies.get.mockReturnValue(f.deps);
+  const response = await GET(request("library"));
+  expect(response.status).toBe(200); privateHeaders(response);
+  expect(runtime).toBe("nodejs"); expect(dynamic).toBe("force-dynamic"); expect(f.storeFor).toHaveBeenCalledOnce();
 });

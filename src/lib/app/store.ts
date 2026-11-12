@@ -25,7 +25,7 @@ export function createAppStore(client: SupabaseClient, userId: string, resolve?:
     if (capture.error || !capture.data) throw new Error("Capture unavailable");
     const [runs, extraction, ...jobs] = await Promise.all([
       client.from("capture_analyses").select("id, analysis_type, status, created_at, input_snapshot, result")
-        .eq("capture_id", id).eq("analysis_type", "source_resolution").order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1),
+        .eq("capture_id", id).eq("analysis_type", "source_resolution").eq("status", "succeeded").order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1),
       latestExtraction(id),
       ...["intent_analysis", "source_resolution", "article_extraction"].map(type => client.from("capture_jobs").select("job_type, status, created_at, id")
         .eq("capture_id", id).eq("job_type", type).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1)),
