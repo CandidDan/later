@@ -134,3 +134,32 @@ creation is false, PKCE challenge and callback exchange are verified, session pe
 checked, and storage failures cannot display a signed-in shell. `AuthUITests` cover sign-in,
 callback, generic errors and sign-out with Debug-only test state. Real signed-device sign-in is
 verified by later-0036 after redirect setup; this task does not change the hosted project.
+
+### On-device narration (later-0030)
+
+Saved prepares the ten newest narratable items, plus items explicitly requested with **Prepare**.
+Only `GET /api/app/narrations/{captureId}` supplies text; that endpoint records exposure before
+returning it. Intro, full paragraphs and outro are spoken in order at the system default rate.
+Long paragraphs split conservatively at sentence endings without changing any characters.
+Installed enhanced/premium voices matching the device language are preferred. No voice vendor,
+credential, upload or server-side audio storage is involved.
+
+Audio is written to protected Application Support/LaterUserData/<user>/Narrations directories,
+excluded from backups. AAC export is attempted; complete CAF audio is retained if conversion is
+unavailable. A manifest is published only after the entire file is closed and its duration is
+measured. Interrupted work never appears ready. Sign-out removes the entire user-data tree;
+late download/render completions cannot publish into a signed-out session.
+
+Preparation runs serially while active and opportunistically under the registered
+`now.notfor.later.prepare-narration` BGProcessingTask. iOS decides when background time is
+available; foreground preparation does not depend on it. Expiration cancels rendering and retains
+the queue for retry. The 500 MiB audio cap evicts oldest-heard files first, then oldest unplayed
+files. A file marked as playing is protected; if no space can be reclaimed, preparation remains
+retryable. Playback integration must set `playingID` before opening the file, clear it after
+closing it, and call `markHeard` (later-0031). This task does not play audio.
+
+Simulator tests use a real short speech render when any installed voice exists, otherwise log a
+skip for that single test. Deterministic CAF fixtures test the store, measured durations, version
+replacement, queue bounds, conflict handling, eviction and sign-out. The simulator does not
+prove hardware file protection or background scheduling on a physical phone; those remain in
+later-0036. All iOS execution uses hosted macOS, and database tests use Linux Actions.

@@ -19,9 +19,14 @@ enum SavedServiceFactory {
     let configuration = try AppAuthConfiguration(info: Bundle.main.infoDictionary ?? [:])
     let parent = try FileManager.default.url(
       for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+    let narrationClient = try URLSessionLaterAPIClient(
+      baseURL: configuration.apiBaseURL, tokenProvider: auth, transport: NarrationHTTPTransport())
+    let narration = try NarrationStore(
+      client: narrationClient, renderer: DeviceNarrationRenderer(),
+      files: NarrationFiles(userID: userID, parent: parent), isActive: active)
     return SavedViewModel(
       client: try URLSessionLaterAPIClient(baseURL: configuration.apiBaseURL, tokenProvider: auth),
-      cache: SavedFileCache(userID: userID, parent: parent), isActive: active)
+      cache: SavedFileCache(userID: userID, parent: parent), isActive: active, narration: narration)
   }
 }
 

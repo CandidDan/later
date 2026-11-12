@@ -2,15 +2,13 @@ import LaterKit
 import SwiftUI
 
 struct SavedView: View {
-  @Environment(AuthService.self) private var auth
-  @State private var model: SavedViewModel?
-  @State private var configurationFailed = false
+  @Environment(NarrationCoordinator.self) private var coordinator
 
   var body: some View {
     ShellScreen(title: "Saved") {
-      if let model {
+      if let model = coordinator.model {
         SavedContent(model: model)
-      } else if configurationFailed {
+      } else if coordinator.configurationFailed {
         ContentUnavailableView(
           "Couldn't open Saved", systemImage: "exclamationmark.triangle",
           description: Text("Please close and reopen Later to try again."))
@@ -18,12 +16,7 @@ struct SavedView: View {
         ProgressView("Opening Saved")
       }
     }
-    .task {
-      guard model == nil else { return }
-      do { model = try SavedServiceFactory.make(auth: auth) } catch {
-        configurationFailed = true
-      }
-    }
+
   }
 }
 
@@ -65,8 +58,10 @@ private struct SavedContent: View {
             VStack(alignment: .leading, spacing: 8) {
               Text(item.displayTitle).font(.headline)
               Text("\(item.displaySource) · Saved \(item.displayDate)").font(.subheadline)
-              Text(item.statusLabel).font(.subheadline)
-              if let reason = item.reasonLabel { Text(reason).font(.subheadline) }
+              Text(model.narration?.statusLabel(for: item) ?? item.statusLabel).font(.subheadline)
+              if let reason = model.narration?.reasonLabel(for: item) ?? item.reasonLabel {
+                Text(reason).font(.subheadline)
+              }
             }
             .foregroundStyle(ColorToken.textPrimary.color)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -74,7 +69,13 @@ private struct SavedContent: View {
             .background(ColorToken.surface.color, in: RoundedRectangle(cornerRadius: 16))
           }
           .buttonStyle(.plain)
-          .accessibilityLabel(item.accessibilitySummary)
+          .accessibilityLabel(
+            [
+              item.displayTitle, item.displaySource, "Saved \(item.displayDate)",
+              model.narration?.statusLabel(for: item) ?? item.statusLabel,
+              model.narration?.reasonLabel(for: item) ?? item.reasonLabel,
+            ].compactMap { $0 }.joined(separator: ", ")
+          )
           .accessibilityIdentifier("saved.item.\(item.id.uuidString)")
         }
         if model.isLoading { ProgressView("Loading Saved") }
@@ -87,7 +88,10 @@ private struct SavedContent: View {
       .padding()
     }
     .foregroundStyle(ColorToken.textPrimary.color)
-    .refreshable { await model.refresh() }
+    .refreshable {
+      await model.refresh()
+      await model.narration?.process()
+    }
     .onScrollGeometryChange(for: Bool.self) { geometry in
       geometry.contentOffset.y > 10
         && geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height
@@ -123,8 +127,23 @@ private struct SavedDetailView: View {
           if let creator = item.creator, !creator.isEmpty { Text(creator) }
           Text(item.displaySource)
           Text("Saved \(item.displayDate)")
-          Text(item.statusLabel)
-          if let reason = item.reasonLabel { Text(reason) }
+          Text(model.narration?.statusLabel(for: item) ?? item.statusLabel)
+          if let reason = model.narration?.reasonLabel(for: item) ?? item.reasonLabel {
+            Text(reason)
+          }
+          if let narration = model.narration, item.listen.state == .narratable {
+            Text("Narrated by Later with an iPhone voice · Source: \(item.displaySource)")
+            if narration.manifest(for: item) == nil && narration.snapshot.conflicts[item.id] == nil
+            {
+              Button("Prepare", systemImage: "arrow.down.circle") {
+                narration.enqueue(item)
+                Task { await narration.process() }
+              }
+              .disabled(narration.preparing == item.id)
+              .accessibilityIdentifier("saved.detail.prepare")
+            }
+            if let message = narration.message { Text(message) }
+          }
           if let message = model.message {
             Text(message).accessibilityIdentifier("saved.detail.message")
           }
