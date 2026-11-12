@@ -12,6 +12,13 @@ enum SavedServiceFactory {
     }
     #if DEBUG && targetEnvironment(simulator)
       if ProcessInfo.processInfo.arguments.contains("--uitesting-auth") {
+        if ProcessInfo.processInfo.arguments.contains("--uitesting-narration") {
+          return makeModel(
+            client: SavedTestSupport.Client(), cache: SavedTestSupport.Cache(),
+            narrationClient: SavedTestSupport.Client(), renderer: NarrationUITestRenderer(),
+            files: NarrationFiles(userID: userID, parent: FileManager.default.temporaryDirectory),
+            isActive: active)
+        }
         return SavedViewModel(
           client: SavedTestSupport.Client(), cache: SavedTestSupport.Cache(), isActive: active)
       }
@@ -19,9 +26,38 @@ enum SavedServiceFactory {
     let configuration = try AppAuthConfiguration(info: Bundle.main.infoDictionary ?? [:])
     let parent = try FileManager.default.url(
       for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
-    return SavedViewModel(
+    let narrationClient = try URLSessionLaterAPIClient(
+      baseURL: configuration.apiBaseURL, tokenProvider: auth, transport: NarrationHTTPTransport())
+    return makeModel(
       client: try URLSessionLaterAPIClient(baseURL: configuration.apiBaseURL, tokenProvider: auth),
-      cache: SavedFileCache(userID: userID, parent: parent), isActive: active)
+      cache: SavedFileCache(userID: userID, parent: parent),
+      narrationClient: narrationClient, renderer: DeviceNarrationRenderer(),
+      files: NarrationFiles(userID: userID, parent: parent), isActive: active)
+  }
+
+  static func makeModel(
+    client: any LaterAPIClient, cache: any SavedCaching, narrationClient: any LaterAPIClient,
+    renderer: any NarrationRendering, files: NarrationFiles,
+    isActive: @escaping @MainActor () -> Bool = { true }
+  ) -> SavedViewModel {
+    var narration: NarrationStore?
+    if isActive() {
+      do {
+        narration = try NarrationStore(
+          client: narrationClient, renderer: renderer, files: files, isActive: isActive)
+      } catch {
+        // Audio is rebuildable. Never delete Saved's persisted actions or block the library.
+        do {
+          try files.reset()
+          narration = try NarrationStore(
+            client: narrationClient, renderer: renderer, files: files, isActive: isActive)
+        } catch { narration = nil }
+      }
+    }
+    return SavedViewModel(
+      client: client, cache: cache, isActive: isActive, narration: narration,
+      narrationNotice: narration == nil
+        ? "Couldn't open audio storage. Your Saved library is still available." : nil)
   }
 }
 
@@ -43,6 +79,16 @@ enum SavedConnectivity {
       func send(_ request: LaterAPIRequest) async throws -> Data {
         let args = ProcessInfo.processInfo.arguments
         if args.contains("--saved-offline") { throw URLError(.notConnectedToInternet) }
+        if request.path.hasPrefix("api/app/narrations/") {
+          if args.contains("--narration-conflict") { throw NarrationError.openOriginal(.paywalled) }
+          return try JSONSerialization.data(withJSONObject: [
+            "captureId": request.path.split(separator: "/").last.map(String.init) ?? "",
+            "textVersion": "fixture", "title": "A quiet morning", "siteName": "Example",
+            "sourceUrl": "https://example.org/article", "intro": "Narrated by Later.",
+            "paragraphs": ["The complete article."], "outro": "End of A quiet morning.",
+            "wordCount": 3,
+          ])
+        }
         if request.method == .post {
           if args.contains("--saved-unavailable") {
             throw LaterAPIError.server(status: 409, message: nil)

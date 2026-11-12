@@ -137,3 +137,22 @@ final class SavedViewModelTests: XCTestCase {
     XCTAssertEqual(requests.count, 2)
   }
 }
+
+extension SavedViewModelTests {
+  func testCancelledInitialLoadCanStartAgain() async throws {
+    let client = SavedAPIStub()
+    let item = try SavedFixtures.item()
+    await client.setPages(first: try SavedFixtures.page([item]))
+    await client.setDelay(100_000_000)
+    let model = SavedViewModel(client: client, cache: SavedMemoryCache())
+    let work = Task { await model.start() }
+    while !model.isLoading { await Task.yield() }
+    work.cancel()
+    await work.value
+    XCTAssertFalse(model.snapshot.hasLoaded)
+    await client.setDelay(0)
+    await model.start()
+    XCTAssertTrue(model.snapshot.hasLoaded)
+    XCTAssertEqual(model.items, [item])
+  }
+}

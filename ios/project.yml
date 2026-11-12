@@ -30,6 +30,38 @@ targets:
         excludes:
           - Info.plist
           - Later.entitlements
+    info:
+      path: LaterApp/Info.plist
+      properties:
+        SUPABASE_URL: $(SUPABASE_URL)
+        SUPABASE_ANON_KEY: $(SUPABASE_ANON_KEY)
+        LATER_API_BASE_URL: $(LATER_API_BASE_URL)
+        LATER_APP_GROUP: $(LATER_APP_GROUP)
+        LATER_KEYCHAIN_ACCESS_GROUP: $(AppIdentifierPrefix)now.notfor.later.shared
+        LATER_CODE_SIGNING_ALLOWED: $(CODE_SIGNING_ALLOWED)
+        CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
+        CFBundleDisplayName: Later
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: '6.0'
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleURLTypes:
+        - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
+          CFBundleURLSchemes:
+          - $(LATER_URL_SCHEME)
+        LSRequiresIPhoneOS: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+        - UIInterfaceOrientationPortrait
+        BGTaskSchedulerPermittedIdentifiers:
+        - now.notfor.later.prepare-narration
+        UIBackgroundModes:
+        - processing
     dependencies:
       - package: LaterKit
       - package: Supabase
