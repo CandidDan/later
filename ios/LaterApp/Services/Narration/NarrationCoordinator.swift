@@ -14,11 +14,12 @@ final class NarrationCoordinator {
   private let auth: AuthService
   private var generation: Int?
 
-  private let makeModel: (AuthService) throws -> SavedViewModel
+  private let makeModel: @MainActor (AuthService) throws -> SavedViewModel
 
   init(
     auth: AuthService,
-    makeModel: @escaping (AuthService) throws -> SavedViewModel = SavedServiceFactory.make
+    makeModel: @escaping @MainActor (AuthService) throws -> SavedViewModel = SavedServiceFactory
+      .make
   ) {
     self.auth = auth
     self.makeModel = makeModel

@@ -66,9 +66,11 @@ enum SiriPlaybackRuntime {
     return value
   }
 
-  static func play(minutes: SiriListenSlot?) async -> String {
+  static func play(
+    minutes: SiriListenSlot?, coordinator supplied: NarrationCoordinator? = nil
+  ) async -> String {
     do {
-      let coordinator = try services().coordinator
+      let coordinator = try supplied ?? services().coordinator
       guard await coordinator.prepareLocal() else {
         return "Open Later to sign in and prepare something to listen to."
       }

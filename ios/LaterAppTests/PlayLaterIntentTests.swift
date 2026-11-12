@@ -1,3 +1,4 @@
+import AVFoundation
 import AppIntents
 import Auth
 import Foundation
@@ -96,17 +97,36 @@ final class PlayLaterIntentTests: XCTestCase {
     try cache.write(SavedSnapshot(items: [item], hasLoaded: true))
     let auth = AuthService(
       backend: backend, storage: storage, caches: UserCacheCleaner(directories: []))
+    let files = NarrationFiles(userID: AuthTestSupport.session.user.id, parent: parent)
+    let directory = UUID()
+    let audio = try files.createWorkDirectory(directory).appendingPathComponent("audio.caf")
+    let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 8_000, channels: 1))
+    let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 80_000))
+    buffer.frameLength = buffer.frameCapacity
+    buffer.floatChannelData?[0].initialize(repeating: 0, count: Int(buffer.frameLength))
+    try AVAudioFile(forWriting: audio, settings: format.settings).write(from: buffer)
+    var snapshot = NarrationSnapshot()
+    snapshot.manifests[item.id] = NarrationManifest(
+      captureId: item.id, textVersion: "v1", voiceID: "fixture", directory: directory,
+      audioFile: "audio.caf", duration: 10, renderedAt: Date())
+    try files.save(snapshot)
+    let narration = try NarrationStore(
+      client: RejectSiriAPI(), renderer: FixtureNarrationRenderer(), files: files)
     let coordinator = NarrationCoordinator(
       auth: auth,
       makeModel: { _ in
-        SavedViewModel(client: RejectSiriAPI(), cache: cache)
+        SavedViewModel(client: RejectSiriAPI(), cache: cache, narration: narration)
       })
     let restored = await coordinator.prepareLocal()
     XCTAssertTrue(restored)
     XCTAssertEqual(coordinator.model?.items.map(\.id), [item.id])
-    let response = PlayLaterAction.perform(minutes: .ten, model: .live(coordinator))
-    XCTAssertEqual(response, "Nothing's ready to listen to yet in Later.")
-    coordinator.resetSession()
+    defer { coordinator.resetSession() }
+    let response = await SiriPlaybackRuntime.play(minutes: .ten, coordinator: coordinator)
+    XCTAssertTrue(response.hasPrefix("Playing less than a minute"))
+    let player = try XCTUnwrap(coordinator.player)
+    XCTAssertEqual(player.current?.captureId, item.id)
+    XCTAssertTrue(player.isPlaying)
+    XCTAssertEqual(narration.playingID, item.id)
   }
 
   private func entry(_ n: Int, duration: Double, position: Double = 0) throws -> ReadyListen {
