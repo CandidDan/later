@@ -1,0 +1,14 @@
+// Settings shared by every configuration. The fixed identifiers live here and nowhere else: the
+// signed-release task changes them in this one place.
+
+LATER_BUNDLE_ID = now.notfor.later
+LATER_SHARE_BUNDLE_ID = now.notfor.later.share
+LATER_APP_GROUP = group.now.notfor.later
+LATER_URL_SCHEME = later
+
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+IPHONEOS_DEPLOYMENT_TARGET = 18.0
+SWIFT_VERSION = 6.0
+DEVELOPMENT_LANGUAGE = en

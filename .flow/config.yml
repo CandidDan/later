@@ -38,6 +38,12 @@ coverage_min: 15
 source_roots:
   - path: "src/"
     check: "pnpm lint"
+  # The iPhone app. This is its Linux half: lint all Swift, build + test LaterKit, enforce the
+  # LaterKit coverage floor, run the ios/scripts node tests. The macOS half (Xcode build, unit +
+  # UI tests, app coverage) cannot run here and is .github/workflows/ios-ci.yml.
+  - path: "ios/"
+    check: "bash ios/scripts/linux-check.sh"
+    runtime: "none"
 
 # Security expectations the security-reviewer enforces on top of its general review.
 security:
@@ -73,6 +79,9 @@ review:
     - "supabase/**"
     - "package.json"
     - "pnpm-lock.yaml"
+    - "ios/**"
+    - "src/lib/app/**"
+    - "src/lib/revisit/**"
 
   # How much PR diff the qa, code-review and security checks read (Flow 2.2.0+). A diff over
   # the limit fails all three checks, so this is set above the largest PRs this repo opens.
