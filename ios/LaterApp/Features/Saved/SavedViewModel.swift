@@ -17,6 +17,7 @@ final class SavedViewModel {
   private let cache: any SavedCaching
   private let isActive: @MainActor () -> Bool
   private var started = false
+  private var requestedInitialRefresh = false
   private var requestedCursors: Set<String> = []
 
   var items: [LibraryItem] { snapshot.items }
@@ -36,8 +37,11 @@ final class SavedViewModel {
     self.isActive = isActive
   }
 
-  func start() async {
-    guard !started, isActive() else { return }
+  /// Restore protected local data without retrying actions or fetching the library.
+  @discardableResult
+  func restoreLocal() -> Bool {
+    guard isActive() else { return false }
+    guard !started else { return true }
     started = true
     do {
       if let saved = try cache.read() { snapshot = saved }
@@ -45,8 +49,14 @@ final class SavedViewModel {
       // Do not overwrite a queue that could not be read (for example while protected).
       message = "Couldn't read saved data on this device. Please try again."
       started = false
-      return
+      return false
     }
+    return true
+  }
+
+  func start() async {
+    guard !requestedInitialRefresh, restoreLocal() else { return }
+    requestedInitialRefresh = true
     await refresh()
   }
 

@@ -163,3 +163,25 @@ skip for that single test. Deterministic CAF fixtures test the store, measured d
 replacement, queue bounds, conflict handling, eviction and sign-out. The simulator does not
 prove hardware file protection or background scheduling on a physical phone; those remain in
 later-0036. All iOS execution uses hosted macOS, and database tests use Linux Actions.
+
+## Siri: physical iPhone verification
+
+After installing a signed build, sign in and prepare at least two articles in Saved. Unlock once
+since the last restart; protected audio and the device-only Keychain session remain available
+while locked after that first unlock. The App Intent uses local session restoration and cached
+library/audio only. It never refreshes tokens, drains actions, downloads or generates narration.
+
+1. Check Shortcuts contains **Play Later**, with optional 10, 15 and 30 minute choices.
+2. With headphones connected and the screen locked, say “Hey Siri, play Later”. Confirm audio
+   starts without opening the app. Pause part-way; repeat and confirm it resumes the same item.
+3. Say “Play a 10 minute Later”, then repeat for 15 and 30. Confirm the queue matches Listen's
+   plan for that slot and the spoken duration describes the prepared audio, including underfill.
+4. Enable airplane mode, lock again and repeat. Verify audio, headphone controls and lock-screen
+   controls work. Background-launch behavior must also be checked after the app has been closed.
+5. With nothing prepared, confirm Siri reports nothing ready and starts no audio. With only a
+   recording longer than the slot, confirm it asks for a longer listen instead of claiming empty.
+6. Sign out and repeat: no private audio should play. After a reboot before first unlock, access
+   may be denied; unlock once and retry. Record results/build in task later-0036.
+
+Simulator unit tests and App Intents metadata extraction do not prove locked-device voice
+invocation. That remains a signed physical-device release check.

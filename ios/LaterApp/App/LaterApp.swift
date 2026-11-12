@@ -7,9 +7,10 @@ struct LaterApp: App {
   @Environment(\.scenePhase) private var scenePhase
 
   init() {
-    let auth = try? AuthServiceFactory.make()
+    let services = try? SiriPlaybackRuntime.services()
+    let auth = services?.auth
     _auth = State(initialValue: auth)
-    let coordinator = auth.map { NarrationCoordinator(auth: $0) }
+    let coordinator = services?.coordinator
     _narration = State(initialValue: coordinator)
     coordinator?.registerBackgroundTask()
   }
