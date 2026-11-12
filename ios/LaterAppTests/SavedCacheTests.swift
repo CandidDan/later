@@ -17,7 +17,11 @@ final class SavedCacheTests: XCTestCase {
       ]))
     await auth.restore()
     let userID = try XCTUnwrap(auth.session?.user.id)
-    let cache = SavedFileCache(userID: userID, parent: parent)
+    var writeOptions: [Data.WritingOptions] = []
+    let cache = SavedFileCache(userID: userID, parent: parent) { data, url, options in
+      writeOptions.append(options)
+      try data.write(to: url, options: options)
+    }
     XCTAssertNil(try cache.read())
     let client = SavedAPIStub()
     let item = try SavedFixtures.item()
@@ -35,10 +39,19 @@ final class SavedCacheTests: XCTestCase {
     XCTAssertTrue(offline.isOffline)
     XCTAssertEqual(SavedViewModel.offlineNotice, "Offline — showing what you last loaded")
     XCTAssertEqual(offline.pendingCount, 1)
-    let attributes = try FileManager.default.attributesOfItem(atPath: cache.file.path)
-    XCTAssertEqual(
-      attributes[.protectionKey] as? String,
-      FileProtectionType.completeUntilFirstUserAuthentication.rawValue)
+    // The hosted simulator returns no protection attribute. Verify the actual write options
+    // on every platform; a device run additionally verifies the filesystem metadata.
+    XCTAssertFalse(writeOptions.isEmpty)
+    XCTAssertTrue(
+      writeOptions.allSatisfy {
+        $0.contains(.atomic) && $0.contains(.completeFileProtectionUntilFirstUserAuthentication)
+      })
+    #if !targetEnvironment(simulator)
+      let attributes = try FileManager.default.attributesOfItem(atPath: cache.file.path)
+      XCTAssertEqual(
+        attributes[.protectionKey] as? String,
+        FileProtectionType.completeUntilFirstUserAuthentication.rawValue)
+    #endif
     XCTAssertEqual(
       try cache.directory.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup,
       true)

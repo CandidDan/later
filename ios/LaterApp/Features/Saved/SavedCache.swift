@@ -18,9 +18,16 @@ protocol SavedCaching {
 @MainActor
 struct SavedFileCache: SavedCaching {
   let directory: URL
+  private let writeData: (Data, URL, Data.WritingOptions) throws -> Void
   var file: URL { directory.appendingPathComponent("saved.json") }
 
-  init(userID: UUID, parent: URL) {
+  init(
+    userID: UUID, parent: URL,
+    writeData: @escaping (Data, URL, Data.WritingOptions) throws -> Void = { data, url, options in
+      try data.write(to: url, options: options)
+    }
+  ) {
+    self.writeData = writeData
     directory = parent.appendingPathComponent(UserCacheCleaner.directoryName, isDirectory: true)
       .appendingPathComponent(userID.uuidString, isDirectory: true)
   }
@@ -43,7 +50,6 @@ struct SavedFileCache: SavedCaching {
     values.isExcludedFromBackup = true
     try location.setResourceValues(values)
     let bytes = try JSONEncoder().encode(snapshot)
-    try bytes.write(
-      to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    try writeData(bytes, file, [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
   }
 }
