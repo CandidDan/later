@@ -12,7 +12,7 @@ struct ListenView: View {
     }.joined(separator: ",") + ":\(coordinator.model?.narration?.snapshot.pending.count ?? 0)"
   }
   var body: some View {
-    NavigationStack {
+    ShellScreen(title: "Listen") {
       ScrollView {
         VStack(alignment: .leading, spacing: 24) {
           if let model {
@@ -83,7 +83,6 @@ struct ListenView: View {
       }
       .foregroundStyle(ColorToken.textPrimary.color)
       .background(ColorToken.background.color)
-      .navigationTitle("Listen")
       .task(id: revision) {
         if model == nil { model = ListenViewModel.live(coordinator) }
         model?.refresh()
