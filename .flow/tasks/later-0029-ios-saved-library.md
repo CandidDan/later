@@ -1,12 +1,12 @@
 ---
 id: "later-0029"
 title: "Show Saved on iPhone from the private library, with Open original for anything not narratable"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "later"
-owner: ""
+owner: "codex-later-saved-20261112"
 created: "2026-10-26"
-started: ""
+started: "2026-11-12T17:33:27Z"
 branch: ""
 pr: ""
 issue: ""
