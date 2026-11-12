@@ -1,7 +1,7 @@
 ---
 id: "later-0031"
 title: "Play narration in a full player that works locked, offline and with headphone controls, and resumes"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "later"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for later-0030 (rendered narration audio and its manifest)."
-blocked_by: ["later-0030"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G3", "G4"]
 intent: ""
 model: "opus"
