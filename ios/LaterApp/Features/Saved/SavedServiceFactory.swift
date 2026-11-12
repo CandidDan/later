@@ -95,6 +95,22 @@ enum SavedConnectivity {
           }
           return Data(#"{"status":"applied","destination":"https://example.org/article"}"#.utf8)
         }
+        if args.contains("--uitesting-player") {
+          let items = [
+            ("00000000-0000-4000-8000-000000000001", "A quiet morning"),
+            ("00000000-0000-4000-8000-000000000003", "A second thought"),
+          ].map { id, title in
+            [
+              "captureId": id, "title": title, "source": "Example",
+              "savedAt": "2026-11-12T12:00:00Z",
+              "kind": "article",
+              "listen": ["state": "narratable", "textVersion": "fixture", "wordCount": 3],
+            ] as [String: Any]
+          }
+          return try JSONSerialization.data(withJSONObject: [
+            "items": items, "nextCursor": NSNull(),
+          ])
+        }
         if !args.contains("--uitesting-library") {
           return Data(#"{"items":[],"nextCursor":null}"#.utf8)
         }

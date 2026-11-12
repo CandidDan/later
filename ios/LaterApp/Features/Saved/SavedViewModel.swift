@@ -104,11 +104,15 @@ final class SavedViewModel {
 
   /// Persist the request ID before sending. A timeout may mean the server already applied it.
   func perform(_ kind: PendingItemAction.Kind, on item: LibraryItem) async -> URL? {
+    await perform(kind, captureID: item.id)
+  }
+
+  func perform(_ kind: PendingItemAction.Kind, captureID: UUID) async -> URL? {
     guard started, isActive(), !isSending else { return nil }
     message = nil
     let action =
-      snapshot.pending.first { $0.captureId == item.id && $0.action == kind }
-      ?? PendingItemAction(captureId: item.id, action: kind)
+      snapshot.pending.first { $0.captureId == captureID && $0.action == kind }
+      ?? PendingItemAction(captureId: captureID, action: kind)
     if !snapshot.pending.contains(action) {
       var next = snapshot
       next.pending.append(action)

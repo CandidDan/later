@@ -127,6 +127,8 @@ private struct SavedDetailView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.openURL) private var openURL
   @State private var confirmingDone = false
+  @State private var showingPlayer = false
+  @Environment(NarrationCoordinator.self) private var coordinator
 
   var body: some View {
     NavigationStack {
@@ -156,6 +158,12 @@ private struct SavedDetailView: View {
           if let message = model.message {
             Text(message).accessibilityIdentifier("saved.detail.message")
           }
+          if model.narration?.manifest(for: item) != nil, coordinator.player != nil {
+            Button("Play", systemImage: "play.fill") {
+              coordinator.startPlayback([item])
+              showingPlayer = true
+            }.accessibilityIdentifier("saved.detail.play")
+          }
           Button("Open original", systemImage: "arrow.up.right.square") {
             Task {
               if let destination = await model.perform(.open, on: item) { openURL(destination) }
@@ -175,6 +183,9 @@ private struct SavedDetailView: View {
         ToolbarItem(placement: .confirmationAction) {
           Button("Close") { dismiss() }.accessibilityIdentifier("saved.detail.close")
         }
+      }
+      .navigationDestination(isPresented: $showingPlayer) {
+        if let player = coordinator.player { PlayerScreen(engine: player, model: model) }
       }
       .alert("Mark this item done?", isPresented: $confirmingDone) {
         Button("Mark done") { Task { _ = await model.perform(.consume, on: item) } }

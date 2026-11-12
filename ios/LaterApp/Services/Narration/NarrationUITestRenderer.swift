@@ -13,7 +13,10 @@
         throw CocoaError(.fileWriteOutOfSpace)
       }
       guard let format = AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1),
-        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48_000)
+        let buffer = AVAudioPCMBuffer(
+          pcmFormat: format,
+          frameCapacity: ProcessInfo.processInfo.arguments.contains("--uitesting-player")
+            ? 2_880_000 : 48_000)
       else { throw DeviceNarrationRenderer.RenderError.invalidBuffer }
       buffer.frameLength = buffer.frameCapacity
       if let samples = buffer.floatChannelData {
