@@ -1,7 +1,7 @@
 ---
 id: "later-0032"
 title: "Choose a 10, 15 or 30 minute listen on the Listen home"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "later"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for later-0028 (time-fit planner) and later-0031 (player and queue)."
-blocked_by: ["later-0028", "later-0031"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G3", "G4"]
 intent: ""
 touches:
