@@ -1,12 +1,12 @@
 ---
 id: "later-0030"
 title: "Prepare faithful narration audio on the iPhone for offline listening"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "later"
-owner: ""
+owner: "codex-20261112-narration"
 created: "2026-10-26"
-started: ""
+started: "2026-11-12T20:11:22Z"
 branch: ""
 pr: ""
 issue: ""
