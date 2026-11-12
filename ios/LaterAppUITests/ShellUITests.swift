@@ -22,7 +22,8 @@ final class ShellUITests: XCTestCase {
 
       let state = app.descendants(matching: .any)[identifier]
       XCTAssertTrue(state.waitForExistence(timeout: 5), "\(tab) shows no empty state")
-      XCTAssertTrue(state.label.contains("Nothing to"), "\(tab) says: \(state.label)")
+      let expected = tab == "Saved" ? "Nothing saved yet" : "Nothing to"
+      XCTAssertTrue(state.label.contains(expected), "\(tab) says: \(state.label)")
 
       XCTAssertEqual(app.cells.count, 0, "\(tab) shows list rows")
       XCTAssertEqual(app.tables.count, 0, "\(tab) shows a list")

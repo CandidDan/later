@@ -22,6 +22,9 @@ final class AuthService: TokenProvider {
   private var completingCallback = false
   private var generation = 0
 
+  /// Async data work must still belong to this session before writing private caches.
+  var sessionGeneration: Int { generation }
+
   init(
     backend: any LaterAuthBackend, storage: any SessionStorageClearing,
     caches: any UserCacheCleaning

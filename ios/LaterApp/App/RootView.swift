@@ -10,7 +10,9 @@ struct RootView: View {
       } else if auth.session != nil {
         TabView {
           Tab("Listen", systemImage: "headphones") { ListenView() }
-          Tab("Saved", systemImage: "tray.full") { SavedView() }
+          Tab("Saved", systemImage: "tray.full") {
+            SavedView().id(auth.session?.user.id)
+          }
         }
       } else {
         SignInView()
