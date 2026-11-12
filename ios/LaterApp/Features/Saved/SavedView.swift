@@ -158,10 +158,12 @@ private struct SavedDetailView: View {
           if let message = model.message {
             Text(message).accessibilityIdentifier("saved.detail.message")
           }
+          if let message = coordinator.player?.message {
+            Text(message).accessibilityIdentifier("saved.detail.player.message")
+          }
           if model.narration?.manifest(for: item) != nil, coordinator.player != nil {
             Button("Play", systemImage: "play.fill") {
-              coordinator.startPlayback([item])
-              showingPlayer = true
+              showingPlayer = coordinator.startPlayback([item])
             }.accessibilityIdentifier("saved.detail.play")
           }
           Button("Open original", systemImage: "arrow.up.right.square") {

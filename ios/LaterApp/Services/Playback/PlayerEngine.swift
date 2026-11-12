@@ -28,7 +28,6 @@ final class PlayerEngine {
   private var observers: [NSObjectProtocol] = []
   private var ticker: Task<Void, Never>?
   private var lastPersist = Date.distantPast
-  private var interrupted = false
   private var resumeAfterInterruption = false
   private var closed = false
   private var audioLoaded = false
@@ -63,7 +62,8 @@ final class PlayerEngine {
       ticker = Task { [weak self] in
         while !Task.isCancelled {
           do { try await Task.sleep(for: .seconds(1)) } catch { return }
-          self?.tick()
+          guard let self else { return }
+          self.tick()
         }
       }
     }
@@ -72,12 +72,17 @@ final class PlayerEngine {
   /// Ordered queue API for Saved, Listen and Siri. Selection belongs to those callers.
   func start(_ items: [PlaybackItem], autoplay: Bool = true) throws {
     guard validSession() else { return }
-    _ = try PlaybackQueue(items: items)
-    for item in items {
-      let url = try resolve(item)
-      guard url.isFileURL, FileManager.default.fileExists(atPath: url.path) else {
-        throw LocalAudioDriver.Failure.notLocal
+    do {
+      _ = try PlaybackQueue(items: items)
+      for item in items {
+        let url = try resolve(item)
+        guard url.isFileURL, FileManager.default.fileExists(atPath: url.path) else {
+          throw LocalAudioDriver.Failure.notLocal
+        }
       }
+    } catch {
+      message = "This audio isn't available. Prepare it again in Saved."
+      throw error
     }
     // Save the old queue before deriving resume positions, including a restart of its current item.
     pause()
@@ -110,7 +115,10 @@ final class PlayerEngine {
   }
 
   func play() {
-    guard validSession(), current != nil, !interrupted else { return }
+    guard validSession(), current != nil else { return }
+    // An explicit Play retries activation even if iOS omitted interruption-ended.
+    // Automatic resumption only reaches here from an ended notification with shouldResume.
+    resumeAfterInterruption = false
     do {
       if queue?.isFinished == true || position >= (current?.duration ?? 0) {
         queue?.seek(to: 0)
@@ -314,13 +322,11 @@ final class PlayerEngine {
     if type == AVAudioSession.InterruptionType.began.rawValue {
       let playing = isPlaying
       pause()
-      interrupted = true
       resumeAfterInterruption = playing
     } else if type == AVAudioSession.InterruptionType.ended.rawValue {
       let shouldPlay =
         resumeAfterInterruption
         && AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume)
-      interrupted = false
       resumeAfterInterruption = false
       if shouldPlay { play() }
     }

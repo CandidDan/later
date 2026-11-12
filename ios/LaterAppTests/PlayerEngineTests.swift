@@ -118,6 +118,45 @@ final class PlayerEngineTests: XCTestCase {
     XCTAssertFalse(engine.isPlaying, "Unplugging cancels automatic resumption")
   }
 
+  func testExplicitPlayRecoversWhenInterruptionNeverEnds() async throws {
+    let fixture = try PlayerFixture()
+    defer { fixture.cleanup() }
+    let center = NotificationCenter()
+    let engine = fixture.engine(notifications: center)
+    defer { engine.shutdown() }
+    try engine.start(fixture.items)
+    center.post(
+      name: AVAudioSession.interruptionNotification, object: nil,
+      userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue])
+    try await Task.sleep(for: .milliseconds(20))
+    XCTAssertFalse(engine.isPlaying)
+    engine.handle(.play)
+    XCTAssertTrue(engine.isPlaying)
+    // A late ended event cannot undo a subsequent explicit pause.
+    engine.pause()
+    center.post(
+      name: AVAudioSession.interruptionNotification, object: nil,
+      userInfo: [
+        AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+        AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume
+          .rawValue,
+      ])
+    try await Task.sleep(for: .milliseconds(20))
+    XCTAssertFalse(engine.isPlaying)
+  }
+
+  func testMissingFileReportsVisibleErrorAndPreservesExistingQueue() throws {
+    let fixture = try PlayerFixture()
+    defer { fixture.cleanup() }
+    let engine = fixture.engine()
+    defer { engine.shutdown() }
+    try engine.start([fixture.items[0]])
+    try FileManager.default.removeItem(at: fixture.url)
+    XCTAssertThrowsError(try engine.start([fixture.items[1]]))
+    XCTAssertNotNil(engine.message)
+    XCTAssertEqual(engine.current?.id, fixture.items[0].id)
+  }
+
   func testFinishingDoesNotConsume() async throws {
     let fixture = try PlayerFixture()
     defer { fixture.cleanup() }

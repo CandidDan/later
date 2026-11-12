@@ -107,17 +107,20 @@ final class NarrationCoordinator {
 
   func pause() { model?.narration?.pause() }
 
-  func startPlayback(_ items: [LaterKit.LibraryItem], autoplay: Bool = true) {
-    guard let store = model?.narration, let player else { return }
+  @discardableResult
+  func startPlayback(_ items: [LaterKit.LibraryItem], autoplay: Bool = true) -> Bool {
+    guard let store = model?.narration, let player else { return false }
     let ready = items.compactMap { item -> PlaybackItem? in
       guard let manifest = store.manifest(for: item) else { return nil }
       return PlaybackItem(
         captureId: item.id, textVersion: manifest.textVersion,
         title: item.displayTitle, source: item.displaySource, duration: manifest.duration)
     }
-    guard ready.count == items.count, !ready.isEmpty else { return }
-    do { try player.start(ready, autoplay: autoplay) } catch
-    { /* Engine exposes a recoverable message. */  }
+    guard ready.count == items.count, !ready.isEmpty else { return false }
+    do {
+      try player.start(ready, autoplay: autoplay)
+      return true
+    } catch { return false }
   }
 
   func schedule() {
