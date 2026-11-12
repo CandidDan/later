@@ -1,12 +1,12 @@
 ---
 id: "later-0028"
 title: "Plan a listen that fits 10, 15 or 30 minutes from actual ready audio, honestly"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "later"
-owner: ""
+owner: "dot-later-0028-timefit"
 created: "2026-10-26"
-started: ""
+started: "2026-11-12T11:47:51Z"
 branch: ""
 pr: ""
 issue: ""
