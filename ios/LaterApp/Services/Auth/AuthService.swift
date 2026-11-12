@@ -152,8 +152,8 @@ final class AuthService: TokenProvider {
     case .sessionMissing:
       return true
     case .api(_, _, _, let response):
-      // Transport and server failures do not prove that credentials were revoked.
-      return (400..<500).contains(response.statusCode)
+      // Only credential rejection ends a session. Timeouts and rate limits are retryable.
+      return [400, 401, 403].contains(response.statusCode)
     default:
       return false
     }

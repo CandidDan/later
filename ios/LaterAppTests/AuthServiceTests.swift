@@ -219,7 +219,9 @@ final class AuthServiceTests: XCTestCase {
       for failure in [URLError(.notConnectedToInternet), URLError(.timedOut)] {
         try await assertTokenFailurePreservesSession(refresh: refresh, failure: failure)
       }
-      try await assertTokenFailurePreservesSession(refresh: refresh, status: 503)
+      for status in [408, 429, 503] {
+        try await assertTokenFailurePreservesSession(refresh: refresh, status: status)
+      }
     }
   }
 
@@ -250,7 +252,7 @@ final class AuthServiceTests: XCTestCase {
       } else if case .api(_, _, _, let response) = error as? AuthError {
         XCTAssertEqual(response.statusCode, status)
       } else {
-        XCTFail("Expected server error, got \(error)")
+        XCTFail("Expected HTTP error, got \(error)")
       }
     }
     XCTAssertEqual(auth.session, saved)
@@ -408,7 +410,13 @@ private actor AuthRequests {
     if let failure { throw failure }
     let data: Data
     if status != 200 {
-      let code = status >= 500 ? "unexpected_failure" : "refresh_token_not_found"
+      let code: String
+      switch status {
+      case 408: code = "request_timeout"
+      case 429: code = "over_request_rate_limit"
+      case 500...599: code = "unexpected_failure"
+      default: code = "refresh_token_not_found"
+      }
       data = Data("{\"msg\":\"Token request failed\",\"error_code\":\"\(code)\"}".utf8)
     } else if request.url?.path == "/auth/v1/token", let session {
       data = try AuthClient.Configuration.jsonEncoder.encode(session)
