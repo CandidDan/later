@@ -7,6 +7,7 @@ extension NarrationStore {
     if let manifest = manifest(for: item) {
       return "Ready to listen · \(max(1, Int(ceil(manifest.duration / 60)))) min"
     }
+    if snapshot.failures[item.id] != nil { return "Audio not ready" }
     if preparing == item.id || snapshot.pending.contains(where: { $0.id == item.id }) {
       return "Preparing audio…"
     }

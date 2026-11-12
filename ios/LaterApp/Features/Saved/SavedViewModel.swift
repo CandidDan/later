@@ -12,6 +12,7 @@ final class SavedViewModel {
   private(set) var isOffline = false
   private(set) var message: String?
   let narration: NarrationStore?
+  let narrationNotice: String?
   private let service: LibraryService
   private let cache: any SavedCaching
   private let isActive: @MainActor () -> Bool
@@ -25,10 +26,12 @@ final class SavedViewModel {
 
   init(
     client: any LaterAPIClient, cache: any SavedCaching,
-    isActive: @escaping @MainActor () -> Bool = { true }, narration: NarrationStore? = nil
+    isActive: @escaping @MainActor () -> Bool = { true }, narration: NarrationStore? = nil,
+    narrationNotice: String? = nil
   ) {
     service = LibraryService(client: client)
     self.narration = narration
+    self.narrationNotice = narrationNotice
     self.cache = cache
     self.isActive = isActive
   }
@@ -84,7 +87,7 @@ final class SavedViewModel {
       }
       snapshot.nextCursor = page.nextCursor.flatMap { requestedCursors.contains($0) ? nil : $0 }
       snapshot.hasLoaded = true
-      narration?.enqueueNewest(snapshot.items)
+      narration?.enqueueNewest(snapshot.items, libraryComplete: snapshot.nextCursor == nil)
       isOffline = false
       do { try cache.write(snapshot) } catch {
         message = "Couldn't keep this library offline. Please try again."

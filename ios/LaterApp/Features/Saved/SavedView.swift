@@ -16,7 +16,6 @@ struct SavedView: View {
         ProgressView("Opening Saved")
       }
     }
-
   }
 }
 
@@ -28,6 +27,7 @@ private struct SavedContent: View {
   var body: some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 20) {
+        if let notice = model.narrationNotice { Text(notice) }
         if model.isOffline {
           Text(
             model.snapshot.hasLoaded

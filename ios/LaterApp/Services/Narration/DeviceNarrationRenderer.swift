@@ -4,16 +4,16 @@ import LaterKit
 
 @MainActor
 final class DeviceNarrationRenderer: NarrationRendering {
-  enum RenderError: Error { case noVoice, emptyAudio, invalidBuffer }
+  enum RenderError: Error { case noVoice, emptyAudio, invalidBuffer, timedOut }
   private let synthesizer = AVSpeechSynthesizer()
   private var sink: SpeechFileSink?
   private var exportSession: AVAssetExportSession?
 
-  static func voice(
-    language: String = Locale.current.identifier.replacingOccurrences(of: "_", with: "-")
-  )
-    -> AVSpeechSynthesisVoice?
-  {
+  static func voice(language suppliedLanguage: String? = nil) -> AVSpeechSynthesisVoice? {
+    let language =
+      suppliedLanguage
+      ?? [Locale.current.language.languageCode?.identifier, Locale.current.region?.identifier]
+      .compactMap { $0 }.joined(separator: "-")
     let installed = AVSpeechSynthesisVoice.speechVoices()
     let prefix = language.split(separator: "-").first.map(String.init) ?? language
     let matching = installed.filter {
@@ -40,6 +40,12 @@ final class DeviceNarrationRenderer: NarrationRendering {
         let utterance = AVSpeechUtterance(string: part.text)
         utterance.voice = voice
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        let watchdog = Task { @MainActor [weak self] in
+          do { try await Task.sleep(for: .seconds(60)) } catch { return }
+          sink.cancel(error: RenderError.timedOut)
+          self?.synthesizer.stopSpeaking(at: .immediate)
+        }
+        defer { watchdog.cancel() }
         try await withCheckedThrowingContinuation {
           (continuation: CheckedContinuation<Void, Error>) in
           sink.begin(continuation, pause: part.pauseAfter)
@@ -146,10 +152,10 @@ private final class SpeechFileSink: @unchecked Sendable {
   }
 
   func close() { lock.withLock { file = nil } }
-  func cancel() {
+  func cancel(error: any Error = CancellationError()) {
     lock.withLock {
       cancelled = true
-      continuation?.resume(throwing: CancellationError())
+      continuation?.resume(throwing: error)
       continuation = nil
       file = nil
     }

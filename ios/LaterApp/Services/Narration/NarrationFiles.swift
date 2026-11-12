@@ -22,6 +22,22 @@ struct NarrationSnapshot: Codable {
   var pending: [NarrationCandidate] = []
   var explicit: Set<UUID> = []
   var conflicts: [UUID: OpenOriginalReason] = [:]
+  var failures: [UUID: String] = [:]
+
+  init() {}
+  private enum CodingKeys: String, CodingKey {
+    case manifests, pending, explicit, conflicts, failures
+  }
+  init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    manifests =
+      try values.decodeIfPresent([UUID: NarrationManifest].self, forKey: .manifests) ?? [:]
+    pending = try values.decodeIfPresent([NarrationCandidate].self, forKey: .pending) ?? []
+    explicit = try values.decodeIfPresent(Set<UUID>.self, forKey: .explicit) ?? []
+    conflicts =
+      try values.decodeIfPresent([UUID: OpenOriginalReason].self, forKey: .conflicts) ?? [:]
+    failures = try values.decodeIfPresent([UUID: String].self, forKey: .failures) ?? [:]
+  }
 }
 
 @MainActor
@@ -38,6 +54,13 @@ struct NarrationFiles {
     root = parent.appendingPathComponent(UserCacheCleaner.directoryName)
       .appendingPathComponent(userID.uuidString).appendingPathComponent("Narrations")
     self.write = write
+  }
+
+  /// Narration is a rebuildable cache. This never removes the separate Saved library/action queue.
+  func reset() throws {
+    if FileManager.default.fileExists(atPath: root.path) {
+      try FileManager.default.removeItem(at: root)
+    }
   }
 
   func load() throws -> NarrationSnapshot {

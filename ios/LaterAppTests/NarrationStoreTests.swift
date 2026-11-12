@@ -151,7 +151,7 @@ final class NarrationStoreTests: XCTestCase {
     XCTAssertTrue(store.snapshot.pending.contains { $0.id == items[0].id })
   }
 
-  func testFailureAndCancellationNeverPublishPartialAudio() async throws {
+  func testRenderFailureNeverPublishesPartialAudioAndExplicitRetryWorks() async throws {
     let directory = parent
     defer { try? FileManager.default.removeItem(at: directory) }
     let client = NarrationAPIStub()
@@ -162,11 +162,13 @@ final class NarrationStoreTests: XCTestCase {
     store.enqueue(item)
     await store.process()
     XCTAssertNil(store.manifest(for: item))
-    XCTAssertEqual(store.snapshot.pending.count, 1)
+    XCTAssertTrue(store.snapshot.pending.isEmpty)
+    XCTAssertEqual(store.snapshot.failures[item.id], "v1")
     XCTAssertNotNil(store.message)
     XCTAssertEqual(
       try FileManager.default.contentsOfDirectory(atPath: store.files.root.path), ["manifest.json"])
     renderer.fail = false
+    store.enqueue(item)
     await store.process()
     XCTAssertNotNil(store.manifest(for: item))
   }
@@ -227,15 +229,22 @@ final class FixtureNarrationRenderer: NarrationRendering {
 actor NarrationAPIStub: LaterAPIClient {
   var requests: [LaterAPIRequest] = []
   var failure: (any Error)?
+  var failures: [UUID: any Error] = [:]
   var version = "v1"
   var delay = false
   func fail(_ error: any Error) { failure = error }
+  func fail(_ id: UUID, error: any Error) { failures[id] = error }
   func setVersion(_ value: String) { version = value }
   func setDelay() { delay = true }
   func send(_ request: LaterAPIRequest) async throws -> Data {
     requests.append(request)
     if delay { try await Task.sleep(for: .milliseconds(100)) }
     if let failure { throw failure }
+    if let raw = request.path.split(separator: "/").last,
+      let id = UUID(uuidString: String(raw)), let failure = failures[id]
+    {
+      throw failure
+    }
     return try JSONSerialization.data(withJSONObject: [
       "captureId": request.path.split(separator: "/").last.map(String.init) ?? "",
       "textVersion": version,
@@ -314,7 +323,7 @@ extension NarrationStoreTests {
     XCTAssertFalse(FileManager.default.fileExists(atPath: store.files.root.path))
   }
 
-  func testOversizedAudioStaysRetryableWithoutPublishing() async throws {
+  func testOversizedAudioIsRecordedWithoutPublishing() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = try NarrationStore(
@@ -324,7 +333,8 @@ extension NarrationStoreTests {
     store.enqueue(item)
     await store.process()
     XCTAssertNil(store.manifest(for: item))
-    XCTAssertEqual(store.snapshot.pending.count, 1)
+    XCTAssertTrue(store.snapshot.pending.isEmpty)
+    XCTAssertEqual(store.snapshot.failures[item.id], "v1")
     XCTAssertNotNil(store.message)
     XCTAssertEqual(
       try FileManager.default.contentsOfDirectory(atPath: store.files.root.path), ["manifest.json"])
@@ -388,5 +398,106 @@ extension NarrationStoreTests {
     XCTAssertEqual(store.manifest(for: current)?.textVersion, "v2")
     XCTAssertNil(store.manifest(for: old))
     XCTAssertTrue(store.snapshot.pending.isEmpty)
+  }
+}
+
+extension NarrationStoreTests {
+  func testPermanentFirstItemFailureDoesNotStarveSecondOrRescheduleForever() async throws {
+    let errors: [any Error] = [
+      LaterAPIError.server(status: 404, message: nil), NarrationError.invalidText,
+    ]
+    for error in errors {
+      let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+        UUID().uuidString)
+      defer { try? FileManager.default.removeItem(at: directory) }
+      let client = NarrationAPIStub()
+      let files = NarrationFiles(userID: UUID(), parent: directory)
+      let store = try NarrationStore(
+        client: client, renderer: FixtureNarrationRenderer(), files: files)
+      let bad = try NarrationFixtures.item()
+      let good = try NarrationFixtures.item()
+      await client.fail(bad.id, error: error)
+      store.enqueue(bad)
+      store.enqueue(good)
+      await store.process()
+      XCTAssertNil(store.manifest(for: bad))
+      XCTAssertNotNil(store.manifest(for: good))
+      XCTAssertEqual(store.statusLabel(for: bad), "Audio not ready")
+      XCTAssertTrue(store.snapshot.pending.isEmpty)
+      XCTAssertTrue(store.snapshot.explicit.isEmpty)
+      let restored = try NarrationStore(
+        client: client, renderer: FixtureNarrationRenderer(), files: files)
+      restored.enqueueNewest([bad, good])
+      await restored.process()
+      let requests = await client.requests
+      XCTAssertEqual(
+        requests.count, 2, "Failed versions need an explicit retry, not another background run")
+    }
+  }
+
+  func testCompleteLibraryPrunesRemovedExplicitRequestsButAPageDoesNot() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = try NarrationStore(
+      client: NarrationAPIStub(), renderer: FixtureNarrationRenderer(),
+      files: NarrationFiles(userID: UUID(), parent: directory))
+    let older = try NarrationFixtures.item()
+    let newest = try NarrationFixtures.item()
+    store.enqueue(older)
+    store.enqueueNewest([newest])
+    XCTAssertTrue(
+      store.snapshot.pending.contains { $0.id == older.id }, "An unseen page is not deletion")
+    store.enqueueNewest([newest], libraryComplete: true)
+    XCTAssertFalse(store.snapshot.pending.contains { $0.id == older.id })
+    XCTAssertFalse(store.snapshot.explicit.contains(older.id))
+  }
+
+  func testConnectivityFailurePreservesQueueUntilRetry() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let client = NarrationAPIStub()
+    await client.fail(URLError(.notConnectedToInternet))
+    let store = try NarrationStore(
+      client: client, renderer: FixtureNarrationRenderer(),
+      files: NarrationFiles(userID: UUID(), parent: directory))
+    let items = try [NarrationFixtures.item(), NarrationFixtures.item()]
+    for item in items { store.enqueue(item) }
+    await store.process()
+    XCTAssertEqual(store.snapshot.pending.count, 2)
+    XCTAssertTrue(store.snapshot.failures.isEmpty)
+    let requests = await client.requests
+    XCTAssertEqual(requests.count, 1)
+  }
+}
+
+extension NarrationStoreTests {
+  func testStartingPlaybackDuringReplacementKeepsPlayingFile() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let client = NarrationAPIStub()
+    let renderer = SuspendedNarrationRenderer()
+    renderer.suspend = false
+    let store = try NarrationStore(
+      client: client, renderer: renderer, files: NarrationFiles(userID: UUID(), parent: directory))
+    let old = try NarrationFixtures.item()
+    store.enqueue(old)
+    await store.process()
+    let oldFile = store.files.audioURL(try XCTUnwrap(store.manifest(for: old)))
+    renderer.suspend = true
+    await client.setVersion("v2")
+    let current = try NarrationFixtures.item(id: old.id, version: "v2")
+    store.enqueue(current)
+    let work = Task { await store.process() }
+    for _ in 0..<100 {
+      if renderer.waiting { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    XCTAssertTrue(renderer.waiting)
+    store.playingID = old.id
+    renderer.finish()
+    await work.value
+    XCTAssertTrue(FileManager.default.fileExists(atPath: oldFile.path))
+    XCTAssertNotNil(store.manifest(for: old))
+    XCTAssertNil(store.manifest(for: current))
   }
 }

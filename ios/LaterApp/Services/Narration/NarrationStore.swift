@@ -55,13 +55,27 @@ final class NarrationStore {
   }
 
   /// Auto-queue only the newest ten; explicit requests survive refresh and process serially.
-  func enqueueNewest(_ items: [LaterKit.LibraryItem]) {
+  func enqueueNewest(_ items: [LaterKit.LibraryItem], libraryComplete: Bool = false) {
     let candidates = items.filter { $0.listen.state == .narratable }.sorted {
       ($0.savedDate ?? .distantPast) > ($1.savedDate ?? .distantPast)
     }.prefix(10)
     let automaticIDs = Set(candidates.map(\.id))
     var next = snapshot
-    next.pending.removeAll { !automaticIDs.contains($0.id) && !next.explicit.contains($0.id) }
+    let knownIDs = Set(items.map(\.id))
+    let unsupportedIDs = Set(items.filter { $0.listen.state != .narratable }.map(\.id))
+    let trackedIDs = Set(desired.keys).union(snapshot.explicit).union(snapshot.failures.keys)
+      .union(snapshot.conflicts.keys)
+    let removedIDs = unsupportedIDs.union(libraryComplete ? trackedIDs.subtracting(knownIDs) : [])
+    next.explicit.subtract(removedIDs)
+    next.pending.removeAll {
+      removedIDs.contains($0.id)
+        || (!automaticIDs.contains($0.id) && !next.explicit.contains($0.id))
+    }
+    for id in removedIDs {
+      desired[id] = nil
+      next.failures[id] = nil
+      next.conflicts[id] = nil
+    }
     commit(next)
     for item in items {
       desired[item.id] = item.listen.state == .narratable ? item.listen.textVersion : nil
@@ -74,6 +88,7 @@ final class NarrationStore {
       return
     }
     desired[item.id] = version
+    if !explicit && snapshot.failures[item.id] == version { return }
     guard manifest(for: item) == nil else { return }
     let candidate = NarrationCandidate(id: item.id, version: version)
     var next = snapshot
@@ -81,6 +96,7 @@ final class NarrationStore {
     next.pending.removeAll { $0.id == item.id }
     next.pending.append(candidate)
     next.conflicts[item.id] = nil
+    next.failures[item.id] = nil
     commit(next)
   }
 
@@ -119,17 +135,36 @@ final class NarrationStore {
       } catch is CancellationError {
         break
       } catch NarrationError.openOriginal(let reason) {
-        guard isActive(), !stopped, desired[candidate.id] == candidate.version else { break }
+        guard isActive(), !stopped else { break }
+        guard desired[candidate.id] == candidate.version, candidate.id != playingID else {
+          continue
+        }
         var next = snapshot
         next.pending.removeAll { $0.id == candidate.id }
+        next.explicit.remove(candidate.id)
         next.conflicts[candidate.id] = reason
         let previous = next.manifests.removeValue(forKey: candidate.id)
         if commit(next), let previous { try? files.remove(previous.directory) }
       } catch {
         guard isActive(), !stopped else { break }
+        guard desired[candidate.id] == candidate.version, candidate.id != playingID else {
+          continue
+        }
         message = "Couldn't prepare audio. Connect and tap Prepare to try again."
-        // Avoid ten repeated requests when connectivity, storage or the voice is unavailable.
-        break
+        if Self.isTransient(error) { break }
+        // A permanently bad item must not starve later items or reschedule forever.
+        var next = snapshot
+        next.pending.removeAll { $0 == candidate }
+        next.explicit.remove(candidate.id)
+        next.failures[candidate.id] = candidate.version
+        if case LaterAPIError.server(status: 404, message: _) = error {
+          desired[candidate.id] = nil
+          let previous = next.manifests.removeValue(forKey: candidate.id)
+          if commit(next), let previous { try? files.remove(previous.directory) }
+        } else {
+          commit(next)
+        }
+        continue
       }
     }
   }
@@ -160,6 +195,8 @@ final class NarrationStore {
     var next = snapshot
     let previous = next.manifests.updateValue(manifest, forKey: candidate.id)
     next.pending.removeAll { $0 == candidate }
+    next.explicit.remove(candidate.id)
+    next.failures[candidate.id] = nil
     next.conflicts[candidate.id] = nil
     let evicted = try evict(&next, preserving: candidate.id)
     try files.save(next)
@@ -169,9 +206,19 @@ final class NarrationStore {
     for value in evicted { try files.remove(value.directory) }
   }
 
+  private static func isTransient(_ error: any Error) -> Bool {
+    if SavedViewModel.isNetworkFailure(error) { return true }
+    if case LaterAPIError.server(let status, _) = error {
+      return status == 408 || status == 429 || status >= 500
+    }
+    return error as? LaterAPIError == .sessionEnded
+  }
+
   private func checkActive(_ candidate: NarrationCandidate) throws {
     try Task.checkCancellation()
-    guard isActive(), !stopped, desired[candidate.id] == candidate.version else {
+    guard isActive(), !stopped, desired[candidate.id] == candidate.version,
+      candidate.id != playingID
+    else {
       throw CancellationError()
     }
   }

@@ -1,4 +1,5 @@
 import Foundation
+import LaterKit
 import XCTest
 
 @testable import Later
@@ -74,5 +75,43 @@ extension NarrationFileTests {
     XCTAssertTrue((info["UIBackgroundModes"] as? [String] ?? []).contains("processing"))
     XCTAssertNotNil(info["SUPABASE_URL"])
     XCTAssertNotNil(info["CFBundleURLTypes"])
+  }
+}
+
+extension NarrationFileTests {
+  func testCorruptNarrationManifestDoesNotBlockSavedOrDeleteItsActionQueue() async throws {
+    let parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: parent) }
+    let files = NarrationFiles(userID: UUID(), parent: parent)
+    try files.save(NarrationSnapshot())
+    try Data("corrupt JSON".utf8).write(to: files.root.appendingPathComponent("manifest.json"))
+    let item = try SavedFixtures.item()
+    let action = PendingItemAction(captureId: item.id, action: .consume)
+    let cache = SavedMemoryCache()
+    cache.value = SavedSnapshot(items: [item], nextCursor: nil, hasLoaded: true, pending: [action])
+    let client = SavedAPIStub()
+    await client.setPages(first: try SavedFixtures.page([item]))
+    let model = SavedServiceFactory.makeModel(
+      client: client, cache: cache, narrationClient: NarrationAPIStub(),
+      renderer: FixtureNarrationRenderer(), files: files)
+    XCTAssertEqual(
+      cache.value?.pending, [action], "Only narration's rebuildable cache may be removed")
+    XCTAssertNotNil(model.narration)
+    await model.start()
+    XCTAssertTrue(model.snapshot.hasLoaded)
+    XCTAssertEqual(model.items, [item])
+    XCTAssertFalse(model.showEmpty)
+  }
+
+  func testManifestNewFieldsDefaultWhenReadingOlderSchema() throws {
+    struct Legacy: Encodable {
+      let manifests: [UUID: NarrationManifest] = [:]
+      let pending: [NarrationCandidate] = []
+    }
+    let snapshot = try JSONDecoder().decode(
+      NarrationSnapshot.self, from: JSONEncoder().encode(Legacy()))
+    XCTAssertTrue(snapshot.explicit.isEmpty)
+    XCTAssertTrue(snapshot.conflicts.isEmpty)
+    XCTAssertTrue(snapshot.failures.isEmpty)
   }
 }
