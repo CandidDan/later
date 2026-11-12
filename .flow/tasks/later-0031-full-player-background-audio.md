@@ -25,6 +25,8 @@ touches:
   - "ios/LaterKit/Sources/LaterKit/Playback/**"
   - "ios/LaterKit/Tests/LaterKitTests/Playback/**"
 labels: ["ios", "player", "offline"]
+notes:
+  - "2026-11-12 delivery: codex-20261112-player implemented PR65 at 5ccd525c0c3f6fd2c271a2456186dd5f25d81114. Local strict formatting and 3 isolated PlaybackQueue/ResumeStore tests passed (Swift 6.0.3). Hosted macOS ios-ci plus Linux/database Flow gates and independent reviews are running; no merge or hosted pass claimed yet. Queue API accepts ordered ready items; Previous restarts after 3 seconds, skips clamp within an item, resumes rewind 5 seconds with version/near-end reset. Next: address exact-head CI/review findings, then verify all required checks and merge. Physical locked-device/headphone/airplane-mode proof remains later-0036; signing not assumed. Existing v2 styling retained."
 ---
 
 ## Context
