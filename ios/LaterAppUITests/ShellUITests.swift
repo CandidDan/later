@@ -8,20 +8,21 @@ final class ShellUITests: XCTestCase {
   @MainActor
   func testTabsShowHonestEmptyStates() {
     let app = XCUIApplication()
+    app.launchArguments = ["--uitesting-auth", "--auth-signed-in"]
     app.launch()
 
     let tabs = app.tabBars.firstMatch
     XCTAssertTrue(tabs.waitForExistence(timeout: 10))
     XCTAssertEqual(tabs.buttons.count, 2, "v1 has exactly two tabs")
 
-    for (tab, identifier) in [("Listen", "listen.notConnected"), ("Saved", "saved.notConnected")] {
+    for (tab, identifier) in [("Listen", "listen.empty"), ("Saved", "saved.empty")] {
       let button = tabs.buttons[tab]
       XCTAssertTrue(button.exists, "\(tab) tab is missing")
       button.tap()
 
       let state = app.descendants(matching: .any)[identifier]
-      XCTAssertTrue(state.waitForExistence(timeout: 5), "\(tab) shows no not-connected state")
-      XCTAssertTrue(state.label.contains("Not connected yet"), "\(tab) says: \(state.label)")
+      XCTAssertTrue(state.waitForExistence(timeout: 5), "\(tab) shows no empty state")
+      XCTAssertTrue(state.label.contains("Nothing to"), "\(tab) says: \(state.label)")
 
       XCTAssertEqual(app.cells.count, 0, "\(tab) shows list rows")
       XCTAssertEqual(app.tables.count, 0, "\(tab) shows a list")
@@ -32,6 +33,7 @@ final class ShellUITests: XCTestCase {
   @MainActor
   func testAboutShowsVersionAndCloses() {
     let app = XCUIApplication()
+    app.launchArguments = ["--uitesting-auth", "--auth-signed-in"]
     app.launch()
 
     app.buttons["about.open"].firstMatch.tap()

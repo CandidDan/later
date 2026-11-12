@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>SUPABASE_URL</key><string>$(SUPABASE_URL)</string>
+    <key>SUPABASE_ANON_KEY</key><string>$(SUPABASE_ANON_KEY)</string>
+    <key>LATER_API_BASE_URL</key><string>$(LATER_API_BASE_URL)</string>
+    <key>LATER_APP_GROUP</key><string>$(LATER_APP_GROUP)</string>
+    <key>LATER_KEYCHAIN_ACCESS_GROUP</key><string>$(AppIdentifierPrefix)now.notfor.later.shared</string>
+    <key>LATER_CODE_SIGNING_ALLOWED</key><string>$(CODE_SIGNING_ALLOWED)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
