@@ -39,9 +39,7 @@ final class NarrationCoordinator {
     await auth.restore()
     guard !Task.isCancelled else { return }
     guard auth.session != nil else {
-      pause()
-      model = nil
-      generation = nil
+      resetSession()
       return
     }
     if generation != auth.sessionGeneration || model == nil {
@@ -59,6 +57,12 @@ final class NarrationCoordinator {
     await model?.start()
     await model?.narration?.process()
     schedule()
+  }
+
+  func resetSession() {
+    pause()
+    model = nil
+    generation = nil
   }
 
   func pause() { model?.narration?.pause() }

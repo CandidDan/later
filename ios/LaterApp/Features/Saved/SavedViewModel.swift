@@ -63,7 +63,7 @@ final class SavedViewModel {
   func reconnect() async {
     if !started {
       await start()
-    } else if isOffline {
+    } else if isOffline || !snapshot.hasLoaded {
       await refresh()
     } else {
       await retryPending()
@@ -74,7 +74,10 @@ final class SavedViewModel {
     guard started, !isLoading, isActive() else { return }
     isLoading = true
     message = nil
-    defer { isLoading = false }
+    defer {
+      isLoading = false
+      if !snapshot.hasLoaded && Task.isCancelled { started = false }
+    }
     do {
       let page = try await service.page(before: cursor)
       guard isActive(), !Task.isCancelled else { return }

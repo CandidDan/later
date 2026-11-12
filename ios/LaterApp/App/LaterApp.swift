@@ -20,7 +20,15 @@ struct LaterApp: App {
         RootView()
           .environment(auth)
           .environment(narration)
-          .task(id: auth.session?.user.id) { await narration.resume() }
+          .task(id: auth.session?.user.id) {
+            // Restoration has its own task. Starting a load while this ID is nil lets the
+            // nil-to-user transition cancel that same load before it can populate Saved.
+            if auth.session != nil {
+              await narration.resume()
+            } else {
+              narration.resetSession()
+            }
+          }
           .onChange(of: scenePhase) { _, phase in
             if phase == .active {
               Task { await narration.resume() }
