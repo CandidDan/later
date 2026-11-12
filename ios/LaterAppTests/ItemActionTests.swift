@@ -62,7 +62,9 @@ final class ItemActionTests: XCTestCase {
     await resumed.retryPending()
     let posts = await client.requests.filter { $0.method == .post }
     XCTAssertEqual(posts.count, 2, "One uncertain attempt and one successful retry")
-    XCTAssertEqual(posts[0].body, posts[1].body)
+    XCTAssertEqual(
+      try JSONDecoder().decode([String: String].self, from: XCTUnwrap(posts[0].body)),
+      try JSONDecoder().decode([String: String].self, from: XCTUnwrap(posts[1].body)))
     let body = try XCTUnwrap(
       JSONSerialization.jsonObject(with: XCTUnwrap(posts[1].body)) as? [String: String])
     XCTAssertEqual(body["requestId"], persistedID.uuidString)
@@ -83,7 +85,9 @@ final class ItemActionTests: XCTestCase {
     _ = await model.perform(.consume, on: item)
     let posts = await client.requests.filter { $0.method == .post }
     XCTAssertEqual(posts.count, 2)
-    XCTAssertEqual(posts[0].body, posts[1].body)
+    XCTAssertEqual(
+      try JSONDecoder().decode([String: String].self, from: XCTUnwrap(posts[0].body)),
+      try JSONDecoder().decode([String: String].self, from: XCTUnwrap(posts[1].body)))
     let body = try XCTUnwrap(
       JSONSerialization.jsonObject(with: XCTUnwrap(posts[1].body)) as? [String: String])
     XCTAssertEqual(body["action"], "consume")
@@ -140,7 +144,9 @@ final class ItemActionTests: XCTestCase {
     await model.retryPending()
     let posts = await client.requests.filter { $0.method == .post }
     XCTAssertEqual(posts.count, 2)
-    XCTAssertEqual(posts[0].body, posts[1].body)
+    XCTAssertEqual(
+      try JSONDecoder().decode([String: String].self, from: XCTUnwrap(posts[0].body)),
+      try JSONDecoder().decode([String: String].self, from: XCTUnwrap(posts[1].body)))
     XCTAssertEqual(model.pendingCount, 0)
   }
 }

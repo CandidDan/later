@@ -109,7 +109,9 @@ final class LibraryServiceTests: XCTestCase {
     let requests = await client.requests
     XCTAssertEqual(requests[0].method, .post)
     XCTAssertEqual(requests[0].path, "api/revisit/actions/\(pending.captureId.uuidString)")
-    XCTAssertEqual(requests[0].body, requests[1].body)
+    XCTAssertEqual(
+      try JSONDecoder().decode([String: String].self, from: XCTUnwrap(requests[0].body)),
+      try JSONDecoder().decode([String: String].self, from: XCTUnwrap(requests[1].body)))
     let body = try XCTUnwrap(
       JSONSerialization.jsonObject(with: XCTUnwrap(requests[0].body)) as? [String: String])
     XCTAssertEqual(body, ["requestId": pending.requestId.uuidString, "action": "open"])
