@@ -14,7 +14,16 @@ final class NarrationCoordinator {
   private let auth: AuthService
   private var generation: Int?
 
-  init(auth: AuthService) { self.auth = auth }
+  private let makeModel: @MainActor (AuthService) throws -> SavedViewModel
+
+  init(
+    auth: AuthService,
+    makeModel: @escaping @MainActor (AuthService) throws -> SavedViewModel = SavedServiceFactory
+      .make
+  ) {
+    self.auth = auth
+    self.makeModel = makeModel
+  }
 
   /// Called during app construction, before launch completes. The same coordinator owns both
   /// foreground and background work, preventing concurrent renderers for the same account.
@@ -38,12 +47,13 @@ final class NarrationCoordinator {
     }
   }
 
-  func resume() async {
+  /// This entry point restores identity and caches only; it never refreshes tokens or content.
+  func prepareLocal() async -> Bool {
     await auth.restore()
-    guard !Task.isCancelled else { return }
+    guard !Task.isCancelled else { return false }
     guard auth.session != nil else {
       resetSession()
-      return
+      return false
     }
     if generation != auth.sessionGeneration || model == nil {
       pause()
@@ -51,7 +61,7 @@ final class NarrationCoordinator {
       player = nil
       model = nil
       do {
-        model = try SavedServiceFactory.make(auth: auth)
+        model = try makeModel(auth)
         generation = auth.sessionGeneration
         if let store = model?.narration, let userID = auth.session?.user.id {
           let sessionGeneration = auth.sessionGeneration
@@ -76,9 +86,14 @@ final class NarrationCoordinator {
         configurationFailed = false
       } catch {
         configurationFailed = true
-        return
+        return false
       }
     }
+    return model?.restoreLocal() == true
+  }
+
+  func resume() async {
+    guard await prepareLocal() else { return }
     await model?.start()
     await model?.narration?.process()
     #if DEBUG && targetEnvironment(simulator)
