@@ -3,6 +3,8 @@ import LaterKit
 
 /// Read the shared credential on every request. Never refresh or rewrite the app's session
 /// from an extension: the app may have signed out or changed accounts while this sheet was open.
+// Supabase 2.55.6 SessionStorage uses the default JSONEncoder, not its wire encoder.
+// Keep the SDK encoding regression test: stored keys are camelCase.
 struct ShareSession: Decodable, Sendable {
   let accessToken: String
   let expiresAt: TimeInterval
@@ -10,12 +12,6 @@ struct ShareSession: Decodable, Sendable {
 
   struct User: Decodable, Sendable {
     let id: UUID
-  }
-
-  enum CodingKeys: String, CodingKey {
-    case accessToken = "access_token"
-    case expiresAt = "expires_at"
-    case user
   }
 }
 

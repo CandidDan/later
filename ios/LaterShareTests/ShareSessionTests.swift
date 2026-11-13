@@ -84,9 +84,14 @@ final class ShareSessionTests: XCTestCase {
   private func session(
     owner: UUID, expiry: TimeInterval = 4_000_000_000, token: String = "current-token"
   ) -> Data {
-    try! JSONSerialization.data(withJSONObject: [
-      "access_token": token, "expires_at": expiry, "user": ["id": owner.uuidString],
-    ])
+    let date = Date(timeIntervalSince1970: 1_700_000_000)
+    return try! JSONEncoder().encode(
+      Session(
+        accessToken: token, tokenType: "bearer", expiresIn: 3600,
+        expiresAt: expiry, refreshToken: "test-refresh-token",
+        user: User(
+          id: owner, appMetadata: [:], userMetadata: [:], aud: "authenticated",
+          email: "tester@later.invalid", createdAt: date, updatedAt: date)))
   }
 }
 
