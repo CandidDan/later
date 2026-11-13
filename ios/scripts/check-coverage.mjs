@@ -7,11 +7,12 @@
 // The floors live here, not in CI config, so they travel with the code they measure. They may
 // only be raised: a floor lowered to make a red build green proves nothing.
 
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 export const FLOORS = Object.freeze({
   LaterKit: 80, // lines, LaterKit package sources (Linux, llvm-cov export)
+  LaterShare: 40, // extension-owned Swift sources exercised by the dedicated test harness
   Later: 40, // lines, the Later app target (macOS, xccov report)
 });
 
@@ -40,6 +41,28 @@ export function measureLlvmCov(report, target) {
 export function measureXccov(report, target) {
   if (!Array.isArray(report?.targets)) {
     throw new Error("not an xccov report (expected a targets array)");
+  }
+  if (target === "LaterShare") {
+    // App extensions cannot be launched as standalone unit-test hosts. The dedicated harness
+    // compiles the same extension sources. Count production files only, never test bodies or
+    // generated runners. Reused app services retain their independent app coverage gate.
+    const harness = report.targets.find((t) => t.name === "LaterShareTests.xctest");
+    const names = readdirSync(new URL("../LaterShare/", import.meta.url)).filter((n) => n.endsWith(".swift"));
+    let count = 0;
+    let covered = 0;
+    for (const name of names) {
+      const matches = (harness?.files ?? []).filter((f) => String(f.path).endsWith(`/LaterShare/${name}`));
+      if (matches.length !== 1) throw new Error(`missing or duplicate extension coverage for ${name}`);
+      const file = matches[0];
+      if (!Number.isFinite(file.executableLines) || !Number.isFinite(file.coveredLines)
+        || file.executableLines < 0 || file.coveredLines < 0 || file.coveredLines > file.executableLines) {
+        throw new Error(`invalid extension coverage for ${name}`);
+      }
+      count += file.executableLines;
+      covered += file.coveredLines;
+    }
+    if (!count) throw new Error("no executable extension source lines");
+    return covered / count * 100;
   }
   const found = report.targets.find((t) => t.name === `${target}.app` || t.name === target);
   if (!found) {

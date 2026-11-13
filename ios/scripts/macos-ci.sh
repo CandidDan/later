@@ -69,7 +69,7 @@ main() {
   local out="${IOS_CI_OUTPUT:-$IOS_DIR/build}"
   local result="$out/Later.xcresult"
   mkdir -p "$out"
-  rm -rf "$result"
+  rm -rf "$result" "$out/screenshots"
 
   select_xcode
   install_xcodegen
@@ -89,10 +89,20 @@ main() {
     CODE_SIGNING_ALLOWED=NO
   )
   xcodebuild build-for-testing "${xcodebuild_args[@]}"
-  xcodebuild test-without-building "${xcodebuild_args[@]}" -resultBundlePath "$result"
+  local test_status=0
+  xcodebuild test-without-building "${xcodebuild_args[@]}" -resultBundlePath "$result" || test_status=$?
+
+  # Export retained test attachments for visual inspection without requiring Xcode locally.
+  # Tests use synthetic content; these are simulator captures, never physical-device proof.
+  local export_status=0
+  xcrun xcresulttool export attachments --path "$result" --output-path "$out/screenshots" || export_status=$?
+  # Preserve the test failure even if export also fails; neither may silently pass.
+  if [[ "$test_status" -ne 0 ]]; then return "$test_status"; fi
+  if [[ "$export_status" -ne 0 ]]; then return "$export_status"; fi
 
   xcrun xccov view --report --json "$result" >"$out/coverage.json"
   node "$SCRIPTS_DIR/check-coverage.mjs" xccov Later "$out/coverage.json"
+  node "$SCRIPTS_DIR/check-coverage.mjs" xccov LaterShare "$out/coverage.json"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

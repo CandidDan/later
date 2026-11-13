@@ -23,11 +23,27 @@ private struct SavedContent: View {
   let model: SavedViewModel
   @Environment(\.scenePhase) private var scenePhase
   @State private var selected: LaterKit.LibraryItem?
+  @Environment(AuthService.self) private var auth
+  @State private var confirmingShares = false
+  @State private var confirmedShareIDs: [UUID] = []
 
   var body: some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 20) {
+        if let captures = model.captures, !captures.unassigned.isEmpty {
+          Text("You shared \(captures.unassigned.count) \(captures.unassigned.count == 1 ? "item" : "items") while signed out.")
+          Button("Save shared items to this account") {
+            confirmedShareIDs = captures.unassigned.map { $0.request.requestId }
+            confirmingShares = true
+          }
+          .accessibilityIdentifier("saved.assign-shares")
+        }
         if let notice = model.narrationNotice { Text(notice) }
+        if let notice = model.captureConfigurationNotice { Text(notice) }
+        if let captures = model.captures, let message = captures.message {
+          Text(message).accessibilityIdentifier("saved.capture-notice")
+          Button("Dismiss") { Task { await captures.dismissNotice() } }
+        }
         if model.isOffline {
           Text(
             model.snapshot.hasLoaded
@@ -98,6 +114,18 @@ private struct SavedContent: View {
           - 80
     } action: { _, atEnd in
       if atEnd { Task { await model.loadNextPage() } }
+    }
+    .alert("Save these shared items?", isPresented: $confirmingShares) {
+      Button("Save to this account") {
+        let ids = confirmedShareIDs
+        Task {
+          await model.captures?.assignConfirmed(ids)
+          await model.refresh()
+        }
+      }
+      Button("Cancel", role: .cancel) { confirmedShareIDs = [] }
+    } message: {
+      Text("Save \(confirmedShareIDs.count) \(confirmedShareIDs.count == 1 ? "item" : "items") to \(auth.session?.user.email ?? "the signed-in account")? Items shared after this confirmation opened will stay unassigned.")
     }
     .sheet(item: $selected) { item in SavedDetailView(selected: item, model: model) }
     .task {

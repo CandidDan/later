@@ -185,3 +185,32 @@ library/audio only. It never refreshes tokens, drains actions, downloads or gene
 
 Simulator unit tests and App Intents metadata extraction do not prove locked-device voice
 invocation. That remains a signed physical-device release check.
+
+### Share extension (in progress)
+
+`LaterShare` is embedded in the app and built with extension-only APIs. It accepts one web URL
+or plain text, hosts the existing themed save sheet, and keeps success visible until Done.
+It uses the same App Group and Keychain service/session key as the app; configuration failure
+never falls back to a private outbox. The extension does not link app library or narration code.
+Unsigned simulator builds prove compilation; real Safari/WhatsApp sharing requires signed
+App Group and Keychain entitlements and remains part of device release verification.
+`LaterShareTests` compiles the production extension sources in a dedicated simulator test
+harness. CI enforces 40% line coverage across every Swift file in `LaterShare/`, excluding
+all test/generated sources; missing or duplicate production-file coverage fails. Shared app
+services retain the existing app coverage gate. The extension is also built and embedded by
+`Later`, but these unit tests do not claim signed execution inside Safari or WhatsApp.
+The app now retries account-bound shares during library launch/foreground/reconnect and existing
+background processing. Rejected shares leave a content-free, account-specific notice on disk
+before removal. Signed-out shares remain queued until Saved asks for confirmation of the destination account.
+Confirmation applies only to the displayed request IDs; subsequent shares remain unassigned.
+An immutable, protected assignment record prevents an interrupted writer or a different
+account from transferring an already assigned request.
+
+### Simulator screenshots
+
+The hosted `ios-ci` run exports retained XCTest attachments into the
+`Later-simulator-screenshots` artifact, alongside the original `Later-xcresult`.
+The export manifest maps each image to its test. Share captures render the production
+SwiftUI sheet in the simulator test harness with synthetic input and injected storage/API;
+they do not prove signed sharing from Safari or WhatsApp. Inspect images before publishing,
+label them simulator output, and select only changed representative screens.

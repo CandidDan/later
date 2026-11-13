@@ -41,6 +41,7 @@ struct KeychainSessionStorage: SessionStorageClearing {
     case invalidStoredData
   }
 
+  static let sessionKey = "later.auth.session"
   static let service = "now.notfor.later.auth"
   let accessGroup: String?
   private let backend: any KeychainBackend

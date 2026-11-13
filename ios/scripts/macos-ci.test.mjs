@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,8 +22,14 @@ function stub(dir, name, body) {
   chmodSync(file, 0o755);
 }
 
+const shareCoverage = (coveredLines = 60) => ({
+  name: "LaterShareTests.xctest",
+  files: readdirSync(new URL("../LaterShare/", import.meta.url)).filter((n) => n.endsWith(".swift"))
+    .map((name) => ({ path: `/r/ios/LaterShare/${name}`, executableLines: 100, coveredLines })),
+});
+
 // One sandbox per test: stub tools on PATH, a fake Xcode.app, and a log of every tool call.
-function sandbox({ failOn = "", coverage = { targets: [{ name: "Later.app", executableLines: 100, coveredLines: 60 }] } } = {}) {
+function sandbox({ failOn = "", coverage = { targets: [{ name: "Later.app", executableLines: 100, coveredLines: 60 }, shareCoverage()] } } = {}) {
   const root = mkdtempSync(join(tmpdir(), "macos-ci-"));
   const bin = join(root, "bin");
   const xcode = join(root, "Xcode.app");
@@ -40,6 +46,7 @@ function sandbox({ failOn = "", coverage = { targets: [{ name: "Later.app", exec
       `case "$*" in`,
       `  *--show-sdk-version*) echo 26.5 ;;`,
       `  simctl*) cat "${root}/simctl.json" ;;`,
+      `  xcresulttool*) [[ "$STUB_FAIL_ON" == export ]] && exit 1; exit 0 ;;`,
       `  xccov*) cat "${root}/coverage.json" ;;`,
       `  *) exit 1 ;;`,
       `esac`,
@@ -91,6 +98,7 @@ test("generates, builds without signing, tests on the picked simulator, then che
   const r = run(env);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /Later line coverage 60\.00% meets the floor of 40%/);
+  assert.match(r.stdout, /LaterShare line coverage 60\.00% meets the floor of 40%/);
   const steps = calls().map((c) => c.split(" ").slice(0, 2).join(" "));
   assert.deepEqual(steps, [
     "xcodebuild -version",
@@ -99,6 +107,7 @@ test("generates, builds without signing, tests on the picked simulator, then che
     "xcrun simctl",
     "xcodebuild build-for-testing",
     "xcodebuild test-without-building",
+    "xcrun xcresulttool",
     "xcrun xccov",
   ]);
   for (const call of calls().filter((c) => /^xcodebuild (build|test)/.test(c))) {
@@ -137,4 +146,39 @@ test("exits non-zero when the pinned Xcode is missing", () => {
   assert.match(r.stderr, /Xcode 26\.6 not found/);
   assert.ok(!existsSync(join(root, "out", "Later.xcresult")));
   assert.deepEqual(calls(), []);
+});
+
+test("exits non-zero when extension coverage fails despite healthy app coverage", () => {
+  const { env } = sandbox({ coverage: { targets: [
+    { name: "Later.app", executableLines: 100, coveredLines: 90 }, shareCoverage(39),
+  ] } });
+  const result = run(env);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /LaterShare line coverage 39\.00% is below the floor of 40%/);
+});
+
+
+test("exports current simulator attachments and removes stale screenshots", () => {
+  const { env, calls } = sandbox();
+  const screenshots = join(env.IOS_CI_OUTPUT, "screenshots");
+  mkdirSync(screenshots, { recursive: true });
+  writeFileSync(join(screenshots, "old.png"), "stale");
+  assert.equal(run(env).status, 0);
+  assert.ok(!existsSync(join(screenshots, "old.png")));
+  const exported = calls().find((c) => c.startsWith("xcrun xcresulttool"));
+  assert.equal(exported, `xcrun xcresulttool export attachments --path ${env.IOS_CI_OUTPUT}/Later.xcresult --output-path ${screenshots}`);
+});
+
+test("does not silently ignore attachment export failures", () => {
+  const { env } = sandbox({ failOn: "export" });
+  assert.notEqual(run(env).status, 0);
+});
+
+
+test("exports failure attachments without hiding the test exit code", () => {
+  const { env, calls } = sandbox({ failOn: "test-without-building" });
+  const result = run(env);
+  assert.equal(result.status, 65);
+  assert.ok(calls().some((c) => c.startsWith("xcrun xcresulttool export attachments")));
+  assert.ok(!calls().some((c) => c.startsWith("xcrun xccov")));
 });

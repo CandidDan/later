@@ -13,12 +13,20 @@ final class SavedViewModel {
   private(set) var message: String?
   let narration: NarrationStore?
   let narrationNotice: String?
+  var captures: CaptureRetryModel?
+  var captureConfigurationNotice: String?
   private let service: LibraryService
   private let cache: any SavedCaching
   private let isActive: @MainActor () -> Bool
   private var started = false
   private var requestedInitialRefresh = false
   private var requestedCursors: Set<String> = []
+
+  /// Background success requires both configured queues to have finished for this session.
+  var backgroundWorkComplete: Bool {
+    isActive() && narrationNotice == nil && captureConfigurationNotice == nil
+      && narration?.snapshot.pending.isEmpty == true && captures?.hasPending == false
+  }
 
   var items: [LibraryItem] { snapshot.items }
   var showEmpty: Bool { snapshot.hasLoaded && items.isEmpty }
@@ -61,6 +69,7 @@ final class SavedViewModel {
   }
 
   func refresh() async {
+    _ = await captures?.retry()
     await load(before: nil)
     await retryPending()
   }
@@ -71,6 +80,10 @@ final class SavedViewModel {
   }
 
   func reconnect() async {
+    if (await captures?.retry() ?? 0) > 0 {
+      await refresh()
+      return
+    }
     if !started {
       await start()
     } else if isOffline || !snapshot.hasLoaded {

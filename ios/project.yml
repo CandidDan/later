@@ -64,6 +64,8 @@ targets:
         - processing
         - audio
     dependencies:
+      - target: LaterShare
+        embed: true
       - package: LaterKit
       - package: Supabase
         product: Auth
@@ -81,6 +83,49 @@ targets:
         PRODUCT_MODULE_NAME: Later
         PRODUCT_BUNDLE_IDENTIFIER: $(LATER_BUNDLE_ID)
         INFOPLIST_FILE: LaterApp/Info.plist
+  LaterShare:
+    type: app-extension
+    configFiles: *configFiles
+    platform: iOS
+    sources:
+      - path: LaterShare
+        excludes:
+          - Info.plist
+          - LaterShare.entitlements
+      - LaterApp/Theme
+      - LaterApp/Services/Auth/AppAuthConfiguration.swift
+      - LaterApp/Services/Auth/KeychainSessionStorage.swift
+      - LaterApp/Services/Capture/CaptureFileOutbox.swift
+    dependencies:
+      - package: LaterKit
+      - package: Supabase
+        product: Auth
+    info:
+      path: LaterShare/Info.plist
+      properties:
+        CFBundleDisplayName: Later
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        SUPABASE_URL: $(SUPABASE_URL)
+        SUPABASE_ANON_KEY: $(SUPABASE_ANON_KEY)
+        LATER_API_BASE_URL: $(LATER_API_BASE_URL)
+        LATER_APP_GROUP: $(LATER_APP_GROUP)
+        LATER_KEYCHAIN_ACCESS_GROUP: $(AppIdentifierPrefix)now.notfor.later.shared
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+    settings:
+      base:
+        APPLICATION_EXTENSION_API_ONLY: YES
+        CODE_SIGN_ENTITLEMENTS: LaterShare/LaterShare.entitlements
+        TARGETED_DEVICE_FAMILY: "1"
+        PRODUCT_BUNDLE_IDENTIFIER: $(LATER_SHARE_BUNDLE_ID)
+        PRODUCT_MODULE_NAME: LaterShare
+        SKIP_INSTALL: YES
   LaterAppTests:
     type: bundle.unit-test
     configFiles: *configFiles
@@ -93,6 +138,31 @@ targets:
       base:
         TARGETED_DEVICE_FAMILY: "1"
         PRODUCT_BUNDLE_IDENTIFIER: $(LATER_BUNDLE_ID).tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Later.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Later
+        BUNDLE_LOADER: $(TEST_HOST)
+  LaterShareTests:
+    type: bundle.unit-test
+    configFiles: *configFiles
+    platform: iOS
+    sources:
+      - LaterShareTests
+      - path: LaterShare
+        excludes:
+          - Info.plist
+          - LaterShare.entitlements
+      - LaterApp/Theme
+      - LaterApp/Services/Auth/AppAuthConfiguration.swift
+      - LaterApp/Services/Auth/KeychainSessionStorage.swift
+      - LaterApp/Services/Capture/CaptureFileOutbox.swift
+    dependencies:
+      # Package symbols come from the host, as for LaterAppTests. Linking the same
+      # static products in both the host and its test bundle is unnecessary.
+      - target: Later
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1"
+        PRODUCT_BUNDLE_IDENTIFIER: $(LATER_BUNDLE_ID).sharetests
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/Later.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Later
         BUNDLE_LOADER: $(TEST_HOST)
@@ -119,7 +189,9 @@ schemes:
       config: Debug
       gatherCoverageData: true
       coverageTargets:
+        - LaterShareTests
         - Later
       targets:
         - LaterAppTests
+        - LaterShareTests
         - LaterAppUITests
