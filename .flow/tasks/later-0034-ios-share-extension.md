@@ -1,7 +1,7 @@
 ---
 id: "later-0034"
 title: "Save a link or text to Later from the iPhone share sheet"
-status: "in_review"
+status: "done"
 priority: 2
 project: "later"
 owner: "codex-20261113-share"
