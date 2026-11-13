@@ -86,7 +86,10 @@ final class SavedViewModel {
     message = nil
     defer {
       isLoading = false
-      if !snapshot.hasLoaded && Task.isCancelled { started = false }
+      if !snapshot.hasLoaded && Task.isCancelled {
+        started = false
+        requestedInitialRefresh = false
+      }
     }
     do {
       let page = try await service.page(before: cursor)
