@@ -1,12 +1,12 @@
 ---
 id: "later-0034"
 title: "Save a link or text to Later from the iPhone share sheet"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "later"
-owner: ""
+owner: "codex-20261113-share"
 created: "2026-10-26"
-started: ""
+started: "2026-11-13T03:34:39.716Z"
 branch: ""
 pr: ""
 issue: ""
