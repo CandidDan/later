@@ -15,7 +15,9 @@ final class ShareControllerTests: XCTestCase {
     let controller = ShareViewController()
     controller.loadInput = { _ in input }
     var composed: ShareInput?
-    controller.makeModel = { received, _ in composed = received; return model }
+    controller.makeModel = { received, _ in
+      composed = received; return model
+    }
     var completions = 0
     controller.onComplete = { completions += 1 }
     let window = try host(controller)
@@ -55,10 +57,12 @@ final class ShareControllerTests: XCTestCase {
       let window = try host(controller)
       await controller.loadTask?.value
       await render(controller)
-      let expected = isInputError
+      let expected =
+        isInputError
         ? "Share a web link or plain text with Later."
         : "Couldn't open Later. Open the app and try sharing again."
-      try attach(controller, name: isInputError ? "Unsupported share" : "Share configuration failure")
+      try attach(
+        controller, name: isInputError ? "Unsupported share" : "Share configuration failure")
       XCTAssertEqual(controller.presentation, .failure(expected))
       XCTAssertEqual(controller.children.count, 1)
       controller.finish()
@@ -85,7 +89,9 @@ final class ShareControllerTests: XCTestCase {
   }
 
   func testSignedOutAndInvalidSheetStatesRenderWithoutSending() async throws {
-    for input in [ShareInput(url: nil, text: "Read"), ShareInput(url: "file:///private", text: nil)] {
+    for input in [
+      ShareInput(url: nil, text: "Read"), ShareInput(url: "file:///private", text: nil),
+    ] {
       let storage = ControllerOutbox()
       let model = ShareViewModel(
         url: input.url, text: input.text, ownerID: nil, storage: storage, delivery: nil)
@@ -113,7 +119,8 @@ final class ShareControllerTests: XCTestCase {
 
   private func attach(_ controller: UIViewController, name: String) throws {
     let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
-      XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true),
+      XCTAssertTrue(
+        controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true),
         "The view hierarchy must actually render")
     }
     let pixels = try XCTUnwrap(image.cgImage?.dataProvider?.data) as Data
@@ -125,7 +132,8 @@ final class ShareControllerTests: XCTestCase {
   }
 
   private func host(_ controller: UIViewController) throws -> UIWindow {
-    let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+    let scene = try XCTUnwrap(
+      UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
     let window = UIWindow(windowScene: scene)
     window.frame = scene.coordinateSpace.bounds
     window.rootViewController = controller

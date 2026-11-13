@@ -28,16 +28,19 @@ final class ShareViewController: UIViewController {
         try Task.checkCancellation()
         let model = try makeModel(input, Bundle.main.infoDictionary ?? [:])
         presentation = .ready
-        show(AnyView(ShareSheet(
-          input: input, model: model,
-          cancel: { [weak self] in self?.finish() },
-          complete: { [weak self] in self?.finish() })))
+        show(
+          AnyView(
+            ShareSheet(
+              input: input, model: model,
+              cancel: { [weak self] in self?.finish() },
+              complete: { [weak self] in self?.finish() })))
       } catch is CancellationError {
         return
       } catch {
         guard !Task.isCancelled, presentation != .finished else { return }
         // Never show Keychain, provider or configuration error details to the host app.
-        let message = (error as? ShareInputError)?.localizedDescription
+        let message =
+          (error as? ShareInputError)?.localizedDescription
           ?? "Couldn't open Later. Open the app and try sharing again."
         presentation = .failure(message)
         show(AnyView(ShareFailureView(message: message, close: { [weak self] in self?.finish() })))

@@ -31,7 +31,9 @@ private struct SavedContent: View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 20) {
         if let captures = model.captures, !captures.unassigned.isEmpty {
-          Text("You shared \(captures.unassigned.count) \(captures.unassigned.count == 1 ? "item" : "items") while signed out.")
+          Text(
+            "You shared \(captures.unassigned.count) \(captures.unassigned.count == 1 ? "item" : "items") while signed out."
+          )
           Button("Save shared items to this account") {
             confirmedShareIDs = captures.unassigned.map { $0.request.requestId }
             confirmingShares = true
@@ -125,7 +127,9 @@ private struct SavedContent: View {
       }
       Button("Cancel", role: .cancel) { confirmedShareIDs = [] }
     } message: {
-      Text("Save \(confirmedShareIDs.count) \(confirmedShareIDs.count == 1 ? "item" : "items") to \(auth.session?.user.email ?? "the signed-in account")? Items shared after this confirmation opened will stay unassigned.")
+      Text(
+        "Save \(confirmedShareIDs.count) \(confirmedShareIDs.count == 1 ? "item" : "items") to \(auth.session?.user.email ?? "the signed-in account")? Items shared after this confirmation opened will stay unassigned."
+      )
     }
     .sheet(item: $selected) { item in SavedDetailView(selected: item, model: model) }
     .task {

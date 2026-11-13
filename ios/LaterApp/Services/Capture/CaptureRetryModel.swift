@@ -74,7 +74,7 @@ final class CaptureRetryModel {
     do {
       try await storage.dismissRejection(ownerID: ownerID)
       if isActive() { message = nil }
-    } catch { }
+    } catch {}
   }
 
   static func make(auth: AuthService) throws -> CaptureRetryModel {
@@ -91,7 +91,8 @@ final class CaptureRetryModel {
     let provider = CaptureAccountTokenProvider(auth: auth, isActive: active)
     return CaptureRetryModel(
       ownerID: ownerID, storage: CaptureFileOutbox(parent: parent),
-      client: try URLSessionLaterAPIClient(baseURL: configuration.apiBaseURL, tokenProvider: provider),
+      client: try URLSessionLaterAPIClient(
+        baseURL: configuration.apiBaseURL, tokenProvider: provider),
       isActive: active)
   }
 }

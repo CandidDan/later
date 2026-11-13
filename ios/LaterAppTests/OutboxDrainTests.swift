@@ -6,14 +6,18 @@ import XCTest
 
 @MainActor
 final class OutboxDrainTests: XCTestCase {
-  func testBackgroundCompletionWaitsForCaptureDeliveryAndRejectsConfigurationFailure() async throws {
+  func testBackgroundCompletionWaitsForCaptureDeliveryAndRejectsConfigurationFailure() async throws
+  {
     let parent = temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: parent) }
     let owner = UUID()
     let storage = CaptureFileOutbox(parent: parent)
     try await storage.insert(PendingCapture(request: CaptureRequest(text: "Read"), ownerID: owner))
-    let client = DrainTestClient(results: [.failure(.server(status: 503, message: nil)), .success(receipt)])
-    let captures = CaptureRetryModel(ownerID: owner, storage: storage, client: client, isActive: { true })
+    let client = DrainTestClient(results: [
+      .failure(.server(status: 503, message: nil)), .success(receipt),
+    ])
+    let captures = CaptureRetryModel(
+      ownerID: owner, storage: storage, client: client, isActive: { true })
     let narration = try NarrationStore(
       client: client, renderer: FixtureNarrationRenderer(),
       files: NarrationFiles(userID: owner, parent: parent))
@@ -41,8 +45,11 @@ final class OutboxDrainTests: XCTestCase {
     let storage = CaptureFileOutbox(parent: parent)
     let capture = PendingCapture(request: CaptureRequest(text: "Read this"), ownerID: owner)
     try await storage.insert(capture)
-    let client = DrainTestClient(results: [.failure(.server(status: 503, message: nil)), .success(receipt)])
-    let model = CaptureRetryModel(ownerID: owner, storage: storage, client: client, isActive: { true })
+    let client = DrainTestClient(results: [
+      .failure(.server(status: 503, message: nil)), .success(receipt),
+    ])
+    let model = CaptureRetryModel(
+      ownerID: owner, storage: storage, client: client, isActive: { true })
     let offline = await model.retry()
     XCTAssertEqual(offline, 0)
     XCTAssertTrue(model.hasPending)
@@ -64,13 +71,15 @@ final class OutboxDrainTests: XCTestCase {
     let storage = CaptureFileOutbox(parent: parent)
     try await storage.insert(PendingCapture(request: CaptureRequest(text: "Read"), ownerID: owner))
     let client = DrainTestClient(results: [.failure(.server(status: 400, message: nil))])
-    let model = CaptureRetryModel(ownerID: owner, storage: storage, client: client, isActive: { true })
+    let model = CaptureRetryModel(
+      ownerID: owner, storage: storage, client: client, isActive: { true })
     _ = await model.retry()
     XCTAssertEqual(model.message, "Couldn't save a shared item. Please share it again.")
     let pending = try await storage.pending()
     XCTAssertTrue(pending.isEmpty)
     let reopened = CaptureFileOutbox(parent: parent)
-    let next = CaptureRetryModel(ownerID: owner, storage: reopened, client: client, isActive: { true })
+    let next = CaptureRetryModel(
+      ownerID: owner, storage: reopened, client: client, isActive: { true })
     _ = await next.retry()
     XCTAssertEqual(next.message, model.message)
     let anotherAccount = await reopened.hasRejection(ownerID: UUID())
@@ -106,9 +115,11 @@ final class OutboxDrainTests: XCTestCase {
     let storage = CaptureFileOutbox(parent: parent)
     try await storage.insert(PendingCapture(request: CaptureRequest(text: "Mine"), ownerID: owner))
     let client = DrainTestClient(results: [])
-    let inactive = CaptureRetryModel(ownerID: owner, storage: storage, client: client, isActive: { false })
+    let inactive = CaptureRetryModel(
+      ownerID: owner, storage: storage, client: client, isActive: { false })
     _ = await inactive.retry()
-    let other = CaptureRetryModel(ownerID: UUID(), storage: storage, client: client, isActive: { true })
+    let other = CaptureRetryModel(
+      ownerID: UUID(), storage: storage, client: client, isActive: { true })
     _ = await other.retry()
     let requests = await client.requests
     XCTAssertTrue(requests.isEmpty)
@@ -123,7 +134,8 @@ final class OutboxDrainTests: XCTestCase {
     let storage = CaptureFileOutbox(parent: parent)
     try await storage.insert(PendingCapture(request: CaptureRequest(text: "Read"), ownerID: owner))
     let client = SuspendedDrainClient()
-    let model = CaptureRetryModel(ownerID: owner, storage: storage, client: client, isActive: { true })
+    let model = CaptureRetryModel(
+      ownerID: owner, storage: storage, client: client, isActive: { true })
     let first = Task { await model.retry() }
     await client.waitUntilRequested()
     let concurrent = await model.retry()
@@ -147,7 +159,8 @@ final class OutboxDrainTests: XCTestCase {
     let first = PendingCapture(request: CaptureRequest(text: "First"), ownerID: nil)
     try await storage.insert(first)
     let client = DrainTestClient(results: [.success(receipt)])
-    let model = CaptureRetryModel(ownerID: owner, storage: storage, client: client, isActive: { true })
+    let model = CaptureRetryModel(
+      ownerID: owner, storage: storage, client: client, isActive: { true })
     _ = await model.retry()
     let beforeConfirmation = await client.requests
     XCTAssertTrue(beforeConfirmation.isEmpty)
@@ -195,7 +208,7 @@ final class OutboxDrainTests: XCTestCase {
     do {
       try await reopened.assign(requestID: capture.request.requestId, ownerID: UUID())
       XCTFail("An account choice must not be overwritten")
-    } catch { }
+    } catch {}
     let pending = try await reopened.pending()
     XCTAssertEqual(pending.first?.ownerID, owner)
     XCTAssertEqual(pending.first?.request, capture.request)
@@ -218,7 +231,7 @@ final class OutboxDrainTests: XCTestCase {
     do {
       try await failing.assign(requestID: capture.request.requestId, ownerID: UUID())
       XCTFail("A failed assignment must propagate")
-    } catch { }
+    } catch {}
     let pending = try await storage.pending()
     XCTAssertEqual(pending, [capture])
   }

@@ -87,7 +87,10 @@ final class SavedUITests: XCTestCase {
     assign.tap()
     let alert = app.alerts["Save these shared items?"]
     XCTAssertTrue(alert.waitForExistence(timeout: 5))
-    XCTAssertTrue(alert.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Save 1 item to tester@later.invalid?")).firstMatch.exists)
+    XCTAssertTrue(
+      alert.staticTexts.containing(
+        NSPredicate(format: "label CONTAINS %@", "Save 1 item to tester@later.invalid?")
+      ).firstMatch.exists)
     let capture = XCTAttachment(screenshot: app.screenshot())
     capture.name = "Confirm account for signed-out share"
     capture.lifetime = .keepAlways
@@ -96,7 +99,9 @@ final class SavedUITests: XCTestCase {
     XCTAssertTrue(assign.exists, "Cancelling must preserve the unassigned item")
     assign.tap()
     alert.buttons["Save to this account"].tap()
-    XCTAssertTrue(assign.waitForNonExistence(timeout: 10), "Successful assignment and delivery clear the pending banner")
+    XCTAssertTrue(
+      assign.waitForNonExistence(timeout: 10),
+      "Successful assignment and delivery clear the pending banner")
     XCTAssertFalse(app.staticTexts["saved.capture-notice"].exists)
   }
 

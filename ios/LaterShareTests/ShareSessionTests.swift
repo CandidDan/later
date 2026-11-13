@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import LaterKit
 import XCTest
@@ -5,6 +6,23 @@ import XCTest
 @MainActor
 final class ShareSessionTests: XCTestCase {
   private let owner = UUID()
+
+  func testDecodesSDKSessionEncoding() async throws {
+    let date = Date(timeIntervalSince1970: 1_700_000_000)
+    let session = Session(
+      accessToken: "sdk-test-token", tokenType: "bearer", expiresIn: 3600,
+      expiresAt: 4_000_000_000, refreshToken: "sdk-test-refresh",
+      user: User(
+        id: owner, appMetadata: [:], userMetadata: [:], aud: "authenticated",
+        email: "tester@later.invalid", createdAt: date, updatedAt: date))
+    let encoded = try JSONEncoder().encode(session)
+    let decoded = try JSONDecoder().decode(ShareSession.self, from: encoded)
+    XCTAssertEqual(decoded.user.id, owner)
+    XCTAssertEqual(decoded.expiresAt, session.expiresAt)
+    let provider = ShareTokenProvider(ownerID: owner, readSession: { encoded })
+    let token = try await provider.accessToken()
+    XCTAssertEqual(token, session.accessToken)
+  }
 
   func testUsesCurrentCredentialForBoundOwner() async throws {
     let data = session(owner: owner)

@@ -52,17 +52,21 @@ actor CaptureFileOutbox: CaptureOutboxStorage {
     }
     var captures: [PendingCapture] = []
     for file in files where file.pathExtension == "json" {
-      guard UUID(uuidString: file.deletingPathExtension().lastPathComponent) != nil else { continue }
+      guard UUID(uuidString: file.deletingPathExtension().lastPathComponent) != nil else {
+        continue
+      }
       do {
         let capture = try JSONDecoder().decode(PendingCapture.self, from: Data(contentsOf: file))
-        guard file.lastPathComponent == self.file(capture.request.requestId).lastPathComponent else {
+        guard file.lastPathComponent == self.file(capture.request.requestId).lastPathComponent
+        else {
           throw StorageError.conflictingRequest
         }
         let assigned = try assignmentOwner(capture.request.requestId)
         if let original = capture.ownerID, let assigned, original != assigned {
           throw StorageError.conflictingRequest
         }
-        captures.append(PendingCapture(request: capture.request, ownerID: capture.ownerID ?? assigned))
+        captures.append(
+          PendingCapture(request: capture.request, ownerID: capture.ownerID ?? assigned))
       } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
         // Another process completed this request after the directory listing.
         continue
@@ -84,7 +88,8 @@ actor CaptureFileOutbox: CaptureOutboxStorage {
   func reject(_ capture: PendingCapture) throws {
     guard let owner = capture.ownerID else { throw StorageError.conflictingRequest }
     let notice = directory.appendingPathComponent("rejected-" + owner.uuidString)
-    try writeData(Data("Couldn't save".utf8), notice,
+    try writeData(
+      Data("Couldn't save".utf8), notice,
       [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     try remove(requestID: capture.request.requestId)
   }
@@ -96,8 +101,9 @@ actor CaptureFileOutbox: CaptureOutboxStorage {
 
   func dismissRejection(ownerID: UUID) throws {
     let notice = directory.appendingPathComponent("rejected-" + ownerID.uuidString)
-    do { try FileManager.default.removeItem(at: notice) }
-    catch let error as CocoaError where error.code == .fileNoSuchFile { return }
+    do { try FileManager.default.removeItem(at: notice) } catch let error as CocoaError
+      where error.code == .fileNoSuchFile
+    { return }
   }
 
   /// Assignment is a separate immutable record: concurrent app sessions cannot overwrite a
@@ -116,7 +122,8 @@ actor CaptureFileOutbox: CaptureOutboxStorage {
     }
     let temporary = directory.appendingPathComponent(".assignment-" + UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: temporary) }
-    try writeData(Data(ownerID.uuidString.utf8), temporary,
+    try writeData(
+      Data(ownerID.uuidString.utf8), temporary,
       [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     do {
       try FileManager.default.linkItem(at: temporary, to: assignmentFile(requestID))
@@ -128,8 +135,9 @@ actor CaptureFileOutbox: CaptureOutboxStorage {
 
   private func assignmentOwner(_ requestID: UUID) throws -> UUID? {
     let data: Data
-    do { data = try Data(contentsOf: assignmentFile(requestID)) }
-    catch let error as CocoaError where error.code == .fileReadNoSuchFile { return nil }
+    do { data = try Data(contentsOf: assignmentFile(requestID)) } catch let error as CocoaError
+      where error.code == .fileReadNoSuchFile
+    { return nil }
     guard let text = String(data: data, encoding: .utf8), let owner = UUID(uuidString: text) else {
       throw StorageError.conflictingRequest
     }

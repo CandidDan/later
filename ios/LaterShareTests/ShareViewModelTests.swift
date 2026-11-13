@@ -80,7 +80,8 @@ final class ShareViewModelTests: XCTestCase {
 
   func testInvalidInputCannotSave() async {
     let storage = ShareMemoryOutbox()
-    let model = ShareViewModel(url: "file:///private", ownerID: nil, storage: storage, delivery: nil)
+    let model = ShareViewModel(
+      url: "file:///private", ownerID: nil, storage: storage, delivery: nil)
     XCTAssertFalse(model.canSave)
     XCTAssertNotNil(model.validationMessage)
     await model.save()

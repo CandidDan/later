@@ -343,7 +343,8 @@ final class AuthServiceTests: XCTestCase {
     let signOutCount = backend.signOutCount
     await provider.sessionEnded()
     XCTAssertEqual(backend.signOutCount, signOutCount)
-    XCTAssertNotNil(auth.session, "A late 401 from the old drain must not end the replacement login")
+    XCTAssertNotNil(
+      auth.session, "A late 401 from the old drain must not end the replacement login")
   }
 
   private func makeService(_ backend: ServiceBackend) -> AuthService {

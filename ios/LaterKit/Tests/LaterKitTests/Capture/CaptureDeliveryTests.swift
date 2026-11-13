@@ -69,6 +69,18 @@ final class CaptureDeliveryTests: XCTestCase, @unchecked Sendable {
     XCTAssertEqual(sent.count, 1)
   }
 
+  func testDisconnectedNetworkRetainsCapture() async throws {
+    let owner = UUID()
+    let capture = PendingCapture(request: CaptureRequest(text: "Read offline"), ownerID: owner)
+    let storage = MemoryCaptureOutbox([capture])
+    let drainer = CaptureOutboxDrainer(
+      storage: storage, delivery: CaptureDelivery(api: DisconnectedCaptureAPI()))
+    let report = try await drainer.drain(ownerID: owner)
+    XCTAssertEqual(report.saved, 0)
+    let pending = await storage.pending()
+    XCTAssertEqual(pending, [capture])
+  }
+
   private var receipt: Data {
     Data("{\"captureId\":\"00000000-0000-4000-8000-000000000001\",\"repeated\":true}".utf8)
   }
@@ -92,5 +104,11 @@ private actor CaptureTestAPI: LaterAPIClient {
     requests.append(request)
     guard !results.isEmpty else { throw LaterAPIError.invalidResponse }
     return try results.removeFirst().get()
+  }
+}
+
+private struct DisconnectedCaptureAPI: LaterAPIClient {
+  func send(_ request: LaterAPIRequest) async throws -> Data {
+    throw URLError(.notConnectedToInternet)
   }
 }

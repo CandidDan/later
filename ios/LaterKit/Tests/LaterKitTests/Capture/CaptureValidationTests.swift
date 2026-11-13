@@ -35,7 +35,8 @@ final class CaptureValidationTests: XCTestCase {
       text: String(repeating: "界", count: 16000), note: String(repeating: "界", count: 16000))
     XCTAssertNotNil(request.validationMessage)
     XCTAssertThrowsError(try request.encodedBody())
-    XCTAssertNotNil(CaptureRequest(text: String(repeating: "\u{0001}", count: 16000)).validationMessage)
+    XCTAssertNotNil(
+      CaptureRequest(text: String(repeating: "\u{0001}", count: 16000)).validationMessage)
   }
 
   func testEmptyShareRejectedAndContentPreserved() throws {
@@ -43,6 +44,7 @@ final class CaptureValidationTests: XCTestCase {
     XCTAssertNotNil(CaptureRequest(text: " \n ").validationMessage)
     let request = CaptureRequest(text: "  My exact text\n", note: "")
     XCTAssertNil(request.validationMessage)
-    XCTAssertEqual(try JSONDecoder().decode(CaptureRequest.self, from: request.encodedBody()), request)
+    XCTAssertEqual(
+      try JSONDecoder().decode(CaptureRequest.self, from: request.encodedBody()), request)
   }
 }

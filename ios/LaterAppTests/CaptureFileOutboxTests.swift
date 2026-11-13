@@ -33,7 +33,8 @@ final class CaptureFileOutboxTests: XCTestCase, @unchecked Sendable {
       XCTAssertTrue(options.contains(.completeFileProtectionUntilFirstUserAuthentication))
       try data.write(to: url, options: options)
     }
-    try await outbox.insert(PendingCapture(request: CaptureRequest(text: "Private"), ownerID: UUID()))
+    try await outbox.insert(
+      PendingCapture(request: CaptureRequest(text: "Private"), ownerID: UUID()))
     let pending = try await outbox.pending()
     XCTAssertEqual(pending.count, 1)
   }
@@ -45,7 +46,8 @@ final class CaptureFileOutboxTests: XCTestCase, @unchecked Sendable {
       throw CocoaError(.fileWriteOutOfSpace)
     }
     do {
-      try await outbox.insert(PendingCapture(request: CaptureRequest(text: "Private"), ownerID: nil))
+      try await outbox.insert(
+        PendingCapture(request: CaptureRequest(text: "Private"), ownerID: nil))
       XCTFail("A failed write must propagate")
     } catch let error as CocoaError {
       XCTAssertEqual(error.code, .fileWriteOutOfSpace)
