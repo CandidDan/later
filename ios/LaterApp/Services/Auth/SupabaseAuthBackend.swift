@@ -14,7 +14,7 @@ protocol LaterAuthBackend {
 /// The SDK owns PKCE and refresh tokens. Only its Auth product is linked into the app.
 @MainActor
 final class SupabaseAuthBackend: LaterAuthBackend {
-  static let storageKey = "later.auth.session"
+  static let storageKey = KeychainSessionStorage.sessionKey
   private let client: AuthClient
   private let storage: any AuthLocalStorage
 

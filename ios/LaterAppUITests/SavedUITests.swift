@@ -79,6 +79,33 @@ final class SavedUITests: XCTestCase {
   }
 
   @MainActor
+  func testSignedOutShareRequiresAccountConfirmation() {
+    let app = launch(extra: ["--uitesting-unassigned-share"])
+    let assign = app.buttons["saved.assign-shares"]
+    XCTAssertTrue(assign.waitForExistence(timeout: 10))
+    XCTAssertTrue(app.staticTexts["You shared 1 item while signed out."].exists)
+    assign.tap()
+    let alert = app.alerts["Save these shared items?"]
+    XCTAssertTrue(alert.waitForExistence(timeout: 5))
+    XCTAssertTrue(
+      alert.staticTexts.containing(
+        NSPredicate(format: "label CONTAINS %@", "Save 1 item to tester@later.invalid?")
+      ).firstMatch.exists)
+    let capture = XCTAttachment(screenshot: app.screenshot())
+    capture.name = "Confirm account for signed-out share"
+    capture.lifetime = .keepAlways
+    add(capture)
+    alert.buttons["Cancel"].tap()
+    XCTAssertTrue(assign.exists, "Cancelling must preserve the unassigned item")
+    assign.tap()
+    alert.buttons["Save to this account"].tap()
+    XCTAssertTrue(
+      assign.waitForNonExistence(timeout: 10),
+      "Successful assignment and delivery clear the pending banner")
+    XCTAssertFalse(app.staticTexts["saved.capture-notice"].exists)
+  }
+
+  @MainActor
   private func launch(extra: [String] = []) -> XCUIApplication {
     let app = XCUIApplication()
     app.launchArguments = ["--uitesting-auth", "--auth-signed-in", "--uitesting-library"] + extra

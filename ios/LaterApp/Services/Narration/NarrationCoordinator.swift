@@ -41,7 +41,7 @@ final class NarrationCoordinator {
         }
         await work.value
         handle.finish(
-          success: !work.isCancelled && self.model?.narration?.snapshot.pending.isEmpty == true)
+          success: !work.isCancelled && self.model?.backgroundWorkComplete == true)
         self.schedule()
       }
     }
@@ -94,6 +94,9 @@ final class NarrationCoordinator {
 
   func resume() async {
     guard await prepareLocal() else { return }
+    if (await model?.captures?.retry() ?? 0) > 0 {
+      await model?.refresh()
+    }
     await model?.start()
     await model?.narration?.process()
     #if DEBUG && targetEnvironment(simulator)
@@ -139,7 +142,9 @@ final class NarrationCoordinator {
   }
 
   func schedule() {
-    guard auth.session != nil, model?.narration?.snapshot.pending.isEmpty == false else { return }
+    guard auth.session != nil,
+      model?.narration?.snapshot.pending.isEmpty == false || model?.captures?.hasPending == true
+    else { return }
     let request = BGProcessingTaskRequest(identifier: Self.backgroundIdentifier)
     request.requiresNetworkConnectivity = true
     request.requiresExternalPower = false

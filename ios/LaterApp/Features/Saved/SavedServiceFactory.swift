@@ -19,8 +19,12 @@ enum SavedServiceFactory {
             files: NarrationFiles(userID: userID, parent: FileManager.default.temporaryDirectory),
             isActive: active)
         }
-        return SavedViewModel(
+        let model = SavedViewModel(
           client: SavedTestSupport.Client(), cache: SavedTestSupport.Cache(), isActive: active)
+        if ProcessInfo.processInfo.arguments.contains("--uitesting-unassigned-share") {
+          model.captures = try SavedTestSupport.makeCaptures(owner: userID, isActive: active)
+        }
+        return model
       }
     #endif
     let configuration = try AppAuthConfiguration(info: Bundle.main.infoDictionary ?? [:])
@@ -28,11 +32,15 @@ enum SavedServiceFactory {
       for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
     let narrationClient = try URLSessionLaterAPIClient(
       baseURL: configuration.apiBaseURL, tokenProvider: auth, transport: NarrationHTTPTransport())
-    return makeModel(
+    let model = makeModel(
       client: try URLSessionLaterAPIClient(baseURL: configuration.apiBaseURL, tokenProvider: auth),
       cache: SavedFileCache(userID: userID, parent: parent),
       narrationClient: narrationClient, renderer: DeviceNarrationRenderer(),
       files: NarrationFiles(userID: userID, parent: parent), isActive: active)
+    do { model.captures = try CaptureRetryModel.make(auth: auth) } catch {
+      model.captureConfigurationNotice = "Couldn't open shared items. Please reopen Later to retry."
+    }
+    return model
   }
 
   static func makeModel(
@@ -75,6 +83,25 @@ enum SavedConnectivity {
 #if DEBUG && targetEnvironment(simulator)
   /// Simulator UI fixtures are excluded from device and release builds.
   enum SavedTestSupport {
+    @MainActor
+    static func makeCaptures(
+      owner: UUID, isActive: @escaping @MainActor () -> Bool
+    ) throws -> CaptureRetryModel {
+      // Seed a synthetic on-disk outbox before launch work starts, without asynchronous races.
+      let parent = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "share-ui-" + UUID().uuidString)
+      let directory = parent.appendingPathComponent("LaterCaptureOutbox")
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      let capture = PendingCapture(
+        request: CaptureRequest(text: "A safe test article"), ownerID: nil)
+      try JSONEncoder().encode(capture).write(
+        to: directory.appendingPathComponent(capture.request.requestId.uuidString + ".json"),
+        options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+      return CaptureRetryModel(
+        ownerID: owner, storage: CaptureFileOutbox(parent: parent), client: Client(),
+        isActive: isActive)
+    }
+
     struct Client: LaterAPIClient {
       func send(_ request: LaterAPIRequest) async throws -> Data {
         let args = ProcessInfo.processInfo.arguments
@@ -88,6 +115,10 @@ enum SavedConnectivity {
             "paragraphs": ["The complete article."], "outro": "End of A quiet morning.",
             "wordCount": 3,
           ])
+        }
+        if request.path == "api/app/captures", request.method == .post {
+          return Data(
+            #"{"captureId":"00000000-0000-4000-8000-000000000001","repeated":false}"#.utf8)
         }
         if request.method == .post {
           if args.contains("--saved-unavailable") {

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,7 +30,7 @@ function run(format, target, report) {
 }
 
 test("floors are LaterKit 80% and Later 40% lines", () => {
-  assert.deepEqual({ ...FLOORS }, { LaterKit: 80, Later: 40 });
+  assert.deepEqual({ ...FLOORS }, { LaterKit: 80, Later: 40, LaterShare: 40 });
 });
 
 test("llvm-cov counts only the package's Sources files", () => {
@@ -88,4 +88,32 @@ test("an unknown format, target or missing argument fails", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "xccov"], { encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /usage/);
+});
+
+function shareReport(coveredLines = 50) {
+  const files = readdirSync(new URL("../LaterShare/", import.meta.url))
+    .filter((name) => name.endsWith(".swift"))
+    .map((name) => ({ path: `/r/ios/LaterShare/${name}`, executableLines: 100, coveredLines }));
+  files.push({ path: "/r/ios/LaterShareTests/Test.swift", executableLines: 10000, coveredLines: 10000 });
+  return { targets: [{ name: "LaterShareTests.xctest", files }] };
+}
+
+test("extension coverage excludes test bodies and enforces the 40 percent floor", () => {
+  assert.equal(measureXccov(shareReport(), "LaterShare"), 50);
+  assert.equal(run("xccov", "LaterShare", shareReport(39)).status, 1);
+  assert.equal(run("xccov", "LaterShare", shareReport(40)).status, 0);
+});
+
+test("extension coverage fails closed for absent, duplicate or invalid production files", () => {
+  for (const mutation of [
+    (r) => r.targets[0].files.shift(),
+    (r) => r.targets[0].files.push(r.targets[0].files[0]),
+    (r) => { r.targets[0].files[0].coveredLines = 101; },
+    (r) => { r.targets[0].files[0].executableLines = "100"; },
+  ]) {
+    const report = shareReport();
+    mutation(report);
+    assert.equal(checkCoverage({ format: "xccov", target: "LaterShare", report }).ok, false);
+  }
+  assert.equal(checkCoverage({ format: "xccov", target: "LaterShare", report: { targets: [] } }).ok, false);
 });

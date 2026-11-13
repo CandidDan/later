@@ -313,6 +313,40 @@ final class AuthServiceTests: XCTestCase {
     XCTAssertEqual(caches.clearCount, 1)
   }
 
+  func testCaptureTokenProviderCannotReuseOrEndAReplacementSession() async throws {
+    let backend = ServiceBackend()
+    backend.issuedSession = AuthTestSupport.session
+    backend.initialSession = backend.issuedSession
+    let auth = makeService(backend)
+    await auth.restore()
+    let owner = try XCTUnwrap(auth.session?.user.id)
+    let generation = auth.sessionGeneration
+    let provider = CaptureAccountTokenProvider(auth: auth) {
+      auth.session?.user.id == owner && auth.sessionGeneration == generation
+    }
+    let initial = try await provider.accessToken()
+    XCTAssertEqual(initial, AuthTestSupport.session.accessToken)
+    let refreshed = try await provider.refreshToken()
+    XCTAssertEqual(refreshed, "refreshed-token")
+    await auth.signOut()
+    await auth.handleCallback(try XCTUnwrap(URL(string: "later://auth-callback?code=replacement")))
+    XCTAssertEqual(auth.session?.user.id, owner, "Even the same user's new login is a new session")
+    XCTAssertNotEqual(auth.sessionGeneration, generation)
+    for refresh in [false, true] {
+      do {
+        _ = try await (refresh ? provider.refreshToken() : provider.accessToken())
+        XCTFail("An old capture drain must not acquire the replacement login's token")
+      } catch {
+        XCTAssertEqual(error as? LaterAPIError, .sessionEnded)
+      }
+    }
+    let signOutCount = backend.signOutCount
+    await provider.sessionEnded()
+    XCTAssertEqual(backend.signOutCount, signOutCount)
+    XCTAssertNotNil(
+      auth.session, "A late 401 from the old drain must not end the replacement login")
+  }
+
   private func makeService(_ backend: ServiceBackend) -> AuthService {
     AuthService(backend: backend, storage: TestSessionStorage(), caches: TestCacheCleaner())
   }
@@ -335,6 +369,7 @@ final class AuthServiceTests: XCTestCase {
 @MainActor
 private final class ServiceBackend: LaterAuthBackend {
   var initialSession: Session?
+  var issuedSession: Session?
   var fail = false
   var tokenError: (any Error)?
   var requestCount = 0
@@ -348,14 +383,14 @@ private final class ServiceBackend: LaterAuthBackend {
   func completeSession(from url: URL) async throws -> Session {
     callbackCount += 1
     if fail { throw URLError(.badServerResponse) }
-    return AuthTestSupport.session
+    return issuedSession ?? AuthTestSupport.session
   }
   func currentSession() async throws -> Session {
     if let tokenError { throw tokenError }
-    return AuthTestSupport.session
+    return issuedSession ?? AuthTestSupport.session
   }
   func refreshSession() async throws -> Session {
-    var session = AuthTestSupport.session
+    var session = issuedSession ?? AuthTestSupport.session
     session.accessToken = "refreshed-token"
     return session
   }
