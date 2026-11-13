@@ -1,7 +1,7 @@
 ---
 id: "later-0033"
 title: "Start a Later listen hands-free with a named Siri App Shortcut, even when locked"
-status: "in_review"
+status: "done"
 priority: 2
 project: "later"
 owner: "codex-20261113-siri"
