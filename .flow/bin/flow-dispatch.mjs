@@ -15,7 +15,11 @@
 //      Nothing → skipped, reason=nothing-ready.
 //   3. Resolve the task's tier with task-model.mjs (unset is `sonnet`).
 //   4. No `FLOW_ROUTINE_<TIER>_ID` or no `FLOW_ROUTINE_<TIER>_TOKEN` → skipped,
-//      reason=no-routine-for-<tier>, exit 0. A repo that has not set up routines stays green.
+//      reason=no-routine-for-<tier>, exit 0. A repo that has not set up routines stays green, but
+//      it is not silent (flow-0211): one open issue per tier, labelled `flow-dispatch`, says which
+//      ready tasks wait on that tier and which two settings are missing (names only, never values).
+//      A later run updates that issue rather than opening another, and closes it once it fires the
+//      tier's routine. Issue calls that fail leave the run green and say so in the job summary.
 //   5. Re-read the task from `main` as it is NOW (git fetch). Not `ready` any more → skipped,
 //      reason=no-longer-ready. The tier is resolved again from that copy, so a task escalated
 //      since the checkout fires the routine for its new tier.
@@ -31,11 +35,21 @@
 //   flow-dispatch: decision=skipped reason=<reason> [...]
 //   flow-dispatch: decision=failed reason=<reason> [...]
 //
+// THE ISSUE (flow-0211) needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY` in the environment, and
+// `issues: write` granted by the CALLER: `_flow-dispatch.yml` declares no permissions of its own
+// and inherits the caller's grant, so a repo whose caller has not been synced gets a 403 here and
+// a summary line, never a failed run. Without the two variables, no issue call is made at all.
+//
 // THE TOKEN IS NEVER PRINTED. It is read from the environment, used in one request header, and
 // scrubbed from the one place a server could echo it back (the error body). The workflow passes it
 // only through `secrets:` and a step's `env:`, never interpolated into `run:`.
 //
 //   node .flow/bin/flow-dispatch.mjs
+//
+// STORE OVERRIDE. `FLOW_DISPATCH_FLOW_DIR=<dir>` makes the CLI read `<dir>/tasks/` and
+// `<dir>/config.yml` instead of the `.flow/` this file sits in. It exists so a test can run the
+// CLI against a fixture store and never read the real tasks of the repo it runs in (flow-0198).
+// Unset or empty: the default, this file's own `.flow/`.
 //
 // Pure core, thin CLI. Zero dependencies (Node >= 18, for the global fetch).
 
@@ -45,6 +59,7 @@ import { dirname, join, relative, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { yamlScalar } from "./flow-doctor.mjs";
+import { DEFAULT_CANONICAL_REPO } from "./flow-init.mjs";
 import { parseTask, pickTask, readTasks } from "./pick-task.mjs";
 import { findTaskFile, resolve as resolveModel } from "./task-model.mjs";
 
@@ -151,6 +166,130 @@ export function readLatestFromMain(file, { cwd = process.cwd() } = {}) {
   return git(["show", `FETCH_HEAD:${rel}`]);
 }
 
+// ── the no-routine issue (flow-0211) ────────────────────────────────────────────────────
+// Module-private on purpose: canonical's adapter must re-export every named export
+// (adapters.test.mjs), and these are reached only through `dispatch`.
+
+const ISSUE_LABEL = "flow-dispatch";
+const ROUTINES_DOC = "docs/flow-routines.md";
+const GITHUB_TIMEOUT_MS = 15_000;
+
+/** The hidden line that tells this tier's issue apart from every other issue carrying the label. */
+const issueMarker = (tier) => `<!-- flow-dispatch:no-routine:${tier} -->`;
+
+function issueTitle(tier) {
+  return `Flow cannot start ${tier} tasks: no routine is configured for the ${tier} tier`;
+}
+
+/** The issue body. Built from setting NAMES and task ids only, so it can hold no secret value. */
+function issueBody(tier, ids) {
+  const names = routineEnvNames(tier);
+  const n = ids.length;
+  return [
+    issueMarker(tier),
+    "",
+    `${n} ready task${n === 1 ? "" : "s"} ${n === 1 ? "uses" : "use"} the **${tier}** model tier, but this ` +
+      `repo has no ${tier} routine set up, so Flow cannot start ${n === 1 ? "it" : "them"}.`,
+    "",
+    `Waiting: ${ids.map((id) => `\`${id}\``).join(", ")}`,
+    "",
+    "Missing settings (set both):",
+    "",
+    `- the repository variable \`${names.id}\``,
+    `- the repository secret \`${names.token}\``,
+    "",
+    `How to set them up: \`${ROUTINES_DOC}\` in ${DEFAULT_CANONICAL_REPO}.`,
+    "",
+    `Flow updates this issue on each dispatch run and closes it once it starts a ${tier} task.`,
+  ].join("\n");
+}
+
+/** Ids of every `ready` task whose resolved tier is `tier`, in store order. */
+function readyIdsForTier(tasksDir, tier) {
+  const ids = [];
+  for (const t of readTasks(tasksDir)) {
+    if (t.status !== "ready") continue;
+    const file = findTaskFile(tasksDir, t.id);
+    if (!file) continue;
+    try {
+      if (resolveModel(readFileSync(file, "utf8")).tier === tier) ids.push(t.id);
+    } catch { /* a task with a bad model is reported when it is picked, not here */ }
+  }
+  return ids;
+}
+
+/**
+ * A small GitHub issues client over `fetchImpl`, or null when the environment cannot authenticate
+ * (no `GITHUB_TOKEN`, or no well-formed `GITHUB_REPOSITORY`). Every non-2xx answer throws, naming
+ * the status and never the body.
+ */
+function githubIssues(env, fetchImpl) {
+  const token = String(env?.GITHUB_TOKEN ?? "").trim();
+  const repo = String(env?.GITHUB_REPOSITORY ?? "").trim();
+  if (!token || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return null;
+  const api = String(env?.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
+  const call = async (method, path, body) => {
+    const res = await fetchImpl(`${api}/repos/${repo}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        ...(body ? { "Content-Type": "application/json" } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`GitHub answered HTTP ${res.status} to ${method} ${path.split("?")[0]}`);
+    return res.status === 204 ? null : res.json();
+  };
+  return {
+    listLabelled: () => call("GET", `/issues?state=open&labels=${ISSUE_LABEL}&per_page=100`),
+    listRecent: () => call("GET", "/issues?state=open&sort=created&direction=desc&per_page=100"),
+    create: (title, body) => call("POST", "/issues", { title, body, labels: [ISSUE_LABEL] }),
+    update: (number, title, body) => call("PATCH", `/issues/${number}`, { title, body }),
+    comment: (number, body) => call("POST", `/issues/${number}/comments`, { body }),
+    close: (number) => call("PATCH", `/issues/${number}`, { state: "closed", state_reason: "completed" }),
+  };
+}
+
+// The body marker, not the label, is what identifies a tier's issue. The label query comes first
+// because it is the cheap, exact one; the newest open issues are read as well when it finds
+// nothing, because GitHub silently drops labels a token may not set, and an issue that lost its
+// label must still be found, or every run would open another one.
+async function findTierIssue(github, tier) {
+  const pick = (list) => (Array.isArray(list) ? list : [])
+    .filter((i) => !i.pull_request && String(i.body ?? "").includes(issueMarker(tier)))
+    .sort((a, b) => a.number - b.number)[0] ?? null;
+  return pick(await github.listLabelled()) ?? pick(await github.listRecent());
+}
+
+/** Make sure exactly one open issue names this tier, carrying the current ids. */
+async function ensureNoRoutineIssue(github, tier, ids) {
+  const title = issueTitle(tier);
+  const body = issueBody(tier, ids);
+  const found = await findTierIssue(github, tier);
+  if (!found) {
+    const made = await github.create(title, body);
+    return { action: "opened", number: made?.number, url: made?.html_url };
+  }
+  if (found.body === body && found.title === title) {
+    return { action: "unchanged", number: found.number, url: found.html_url };
+  }
+  await github.update(found.number, title, body);
+  return { action: "updated", number: found.number, url: found.html_url };
+}
+
+/** Close this tier's issue, if one is open, with a one-line comment. */
+async function closeTierIssue(github, tier, taskId) {
+  const found = await findTierIssue(github, tier);
+  if (!found) return { action: "none" };
+  await github.comment(found.number,
+    `Flow started \`${taskId}\` on the ${tier} routine, so the ${tier} tier is set up now. Closing.`);
+  await github.close(found.number);
+  return { action: "closed", number: found.number, url: found.html_url };
+}
+
 /**
  * One dispatch run. Returns the exit code; prints exactly one decision line through `log`.
  *
@@ -163,13 +302,43 @@ export function readLatestFromMain(file, { cwd = process.cwd() } = {}) {
 export async function dispatch({
   tasksDir, configText = "", env = process.env, fetchImpl = globalThis.fetch,
   readLatest = (file) => readLatestFromMain(file), log = console.log, error = console.error,
+  github = githubIssues(env, fetchImpl),
 } = {}) {
+  const summary = (text) => {
+    if (!env.GITHUB_STEP_SUMMARY) return;
+    try { appendFileSync(env.GITHUB_STEP_SUMMARY, `${text}\n`); } catch { /* summary is a nicety */ }
+  };
   const say = (decision, fields) => {
     const line = decisionLine(decision, fields);
     log(line);
-    if (env.GITHUB_STEP_SUMMARY) {
-      try { appendFileSync(env.GITHUB_STEP_SUMMARY, `\`${line}\`\n`); } catch { /* summary is a nicety */ }
+    summary(`\`${line}\``);
+  };
+  // Every token in the environment is taken out of any GitHub error text before it is printed.
+  const scrub = (text) => {
+    let out = String(text ?? "");
+    for (const [k, v] of Object.entries(env ?? {})) {
+      const value = String(v ?? "").trim();
+      if (value && /^(FLOW_ROUTINE_\w+_TOKEN|GITHUB_TOKEN)$/.test(k)) out = out.split(value).join("***");
     }
+    return out.split("\n")[0];
+  };
+  // flow-0211: the skip stays green, but the owner hears about it, once, in an issue.
+  const noRoutine = async (tier, taskId) => {
+    say("skipped", { reason: `no-routine-for-${tier}`, task: taskId });
+    if (!github) {
+      summary(`The ${tier} tier has no routine. No issue was written: this run has no GITHUB_TOKEN or GITHUB_REPOSITORY.`);
+      return 0;
+    }
+    try {
+      const ids = readyIdsForTier(tasksDir, tier);
+      const r = await ensureNoRoutineIssue(github, tier, ids.length ? ids : [taskId]);
+      summary(`The ${tier} tier has no routine. Issue ${r.action}: ${r.url ?? `#${r.number}`}`);
+    } catch (e) {
+      const why = scrub(e?.message ?? e);
+      summary(`The ${tier} tier has no routine. The issue could not be written: ${why}`);
+      error(`::warning::flow-dispatch: the no-routine issue for the ${tier} tier could not be written: ${why}`);
+    }
+    return 0;
   };
   const fail = (fields, message) => {
     say("failed", fields);
@@ -196,10 +365,7 @@ export async function dispatch({
   try { tier = resolveModel(readFileSync(file, "utf8")).tier; } catch (e) {
     return fail({ reason: "bad-model", task: taskId }, `${taskId}: ${e.message}`);
   }
-  if (!routineFor(tier, env)) {
-    say("skipped", { reason: `no-routine-for-${tier}`, task: taskId });
-    return 0;
-  }
+  if (!routineFor(tier, env)) return noRoutine(tier, taskId);
 
   // Step 5: the task as `main` holds it at the moment of the call.
   let latest;
@@ -216,10 +382,7 @@ export async function dispatch({
     return fail({ reason: "bad-model", task: taskId }, `${taskId}: ${e.message}`);
   }
   const routine = routineFor(tier, env);
-  if (!routine) {
-    say("skipped", { reason: `no-routine-for-${tier}`, task: taskId });
-    return 0;
-  }
+  if (!routine) return noRoutine(tier, taskId);
   if (!ROUTINE_ID.test(routine.id)) {
     const { id } = routineEnvNames(tier);
     return fail({ reason: "bad-routine-id", task: taskId, tier },
@@ -252,6 +415,16 @@ export async function dispatch({
       (body ? `: ${safeSnippet(body, routine.token)}` : ""));
   }
   say("fired", { task: taskId, tier });
+  // flow-0211: the tier works now, so its no-routine issue, if one is open, is closed. Best effort:
+  // the task has already been fired, and nothing here can change the run's result.
+  if (github) {
+    try {
+      const r = await closeTierIssue(github, tier, taskId);
+      if (r.action === "closed") summary(`Closed the ${tier} no-routine issue: ${r.url ?? `#${r.number}`}`);
+    } catch (e) {
+      summary(`The ${tier} no-routine issue could not be checked or closed: ${scrub(e?.message ?? e)}`);
+    }
+  }
   return 0;
 }
 
@@ -269,6 +442,9 @@ export async function runDispatchCli(argv, { flowDir, ...io } = {}) {
 // ── CLI ── In an adopting repo this file is copied to `.flow/bin/`, so the store is that repo's
 // `.flow/`. In canonical it would be the template's fixture store — canonical runs its adapter.
 if (__isMain) {
-  const flowDir = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
+  const override = (process.env.FLOW_DISPATCH_FLOW_DIR ?? "").trim();
+  const flowDir = override
+    ? resolvePath(override)
+    : resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
   process.exit(await runDispatchCli(process.argv.slice(2), { flowDir }));
 }

@@ -132,11 +132,13 @@ test("no variable or secret for the picked task's tier: nothing POSTed, skipped 
 
 test("no routine configured at all exits 0 through the CLI shell too", async (t) => {
   const { dir } = store(t, { "p-1.md": task("P-1") });
-  const r = spawnSync(process.execPath, [join(BIN, "flow-dispatch.mjs")], { encoding: "utf8", env: { PATH: process.env.PATH } });
-  // The template's own CLI reads the template's fixture store; what matters is exit 0 with a
-  // skipped line and no routine env. The fixture-store case is asserted through runDispatchCli.
+  // Always an explicit store (flow-0198): without FLOW_DISPATCH_FLOW_DIR the CLI reads the tasks
+  // of whatever repo this suite runs in, and one malformed task there turns this test red.
+  const r = spawnSync(process.execPath, [join(BIN, "flow-dispatch.mjs")],
+    { encoding: "utf8", env: { PATH: process.env.PATH, FLOW_DISPATCH_FLOW_DIR: dir } });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^flow-dispatch: decision=skipped reason=/m);
+  assert.equal(r.stdout.trim(), "flow-dispatch: decision=skipped reason=no-routine-for-sonnet task=P-1",
+    "the CLI read the fixture store, not the repo it ran in");
 
   const out = [];
   const code = await runDispatchCli([], { flowDir: dir, env: {}, log: (s) => out.push(s), error: () => {},
@@ -301,6 +303,28 @@ test("exactly one decision line per run, whatever the outcome", async (t) => {
   }
 });
 
+test("the CLI ignores a bad task in the surrounding repo's own store when given a fixture store", (t) => {
+  // A throwaway adopting repo: this bin copied into `.flow/bin/`, and in its own `.flow/tasks/` the
+  // task that broke inflight#95 — model set, model_reason empty — which fails the run if it is read.
+  const root = mkdtempSync(join(tmpdir(), "flow-dispatch-badstore-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, ".flow", "tasks"), { recursive: true });
+  cpSync(BIN, join(root, ".flow", "bin"), { recursive: true });
+  writeFileSync(join(root, ".flow", "tasks", "bad-1.md"),
+    task("BAD-1", { model: "sonnet" }).replace('model_reason: "because"', 'model_reason: ""'));
+  const { dir } = store(t, { "p-1.md": task("P-1") });
+  const cli = join(root, ".flow", "bin", "flow-dispatch.mjs");
+  const run = (extra) => spawnSync(process.execPath, [cli],
+    { cwd: root, encoding: "utf8", env: { PATH: process.env.PATH, ...extra } });
+
+  const isolated = run({ FLOW_DISPATCH_FLOW_DIR: dir });
+  assert.equal(isolated.status, 0, isolated.stderr);
+  assert.equal(isolated.stdout.trim(), "flow-dispatch: decision=skipped reason=no-routine-for-sonnet task=P-1");
+
+  const outcome = run({}); // no override: the default is still the repo's own `.flow/`
+  assert.match(outcome.stdout + outcome.stderr, /BAD-1/, "the default store is unchanged: it reads the repo's own tasks");
+});
+
 test("the decision line is also written to the step summary when there is one", async (t) => {
   const { dir, tasksDir } = store(t, { "p-1.md": task("P-1") });
   const summary = join(dir, "summary.md");
@@ -401,4 +425,253 @@ test("the CLI refuses arguments", async () => {
   const err = [];
   assert.equal(await runDispatchCli(["--x"], { flowDir: BIN, error: (s) => err.push(s) }), 2);
   assert.match(err.join(""), /usage/);
+});
+
+// ── flow-0211: a tier with ready work and no routine gets one issue, not silence ─────────────
+//
+// A fake GitHub behind the same `fetchImpl` the fire call uses. It routes on URL, keeps issues in
+// memory, and records every request, so "no second issue" and "no token in any request" are
+// asserted from what reached the API.
+const GH_TOKEN = "ghs_job_token_0211";
+const GH_REPO = "acme/widgets";
+
+function fakeGitHub({ fail = false, issues = [] } = {}) {
+  const state = { issues: issues.map((i) => ({ ...i })), next: 100, requests: [], fires: [] };
+  const json = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) });
+  const fetchImpl = async (url, init = {}) => {
+    const body = init.body ? JSON.parse(init.body) : undefined;
+    if (url.startsWith("https://api.anthropic.com/")) {
+      state.fires.push({ url, body });
+      return json(200, { claude_code_session_id: "s1" });
+    }
+    state.requests.push({ url, method: init.method, headers: init.headers, body });
+    if (fail) return json(403, { message: "Resource not accessible by integration" });
+    const path = url.replace(`https://api.github.com/repos/${GH_REPO}`, "");
+    if (init.method === "GET" && path.startsWith("/issues?state=open&labels=flow-dispatch")) {
+      return json(200, state.issues.filter((i) => i.state === "open" && i.labels.includes("flow-dispatch")));
+    }
+    if (init.method === "GET" && path.startsWith("/issues?state=open&sort=created")) {
+      return json(200, state.issues.filter((i) => i.state === "open").reverse());
+    }
+    if (init.method === "POST" && path === "/issues") {
+      const issue = { number: state.next++, state: "open", title: body.title, body: body.body,
+        labels: body.labels, html_url: `https://github.com/${GH_REPO}/issues/${state.next - 1}`, comments: [] };
+      state.issues.push(issue);
+      return json(201, issue);
+    }
+    const m = path.match(/^\/issues\/(\d+)(\/comments)?$/);
+    const issue = m && state.issues.find((i) => i.number === Number(m[1]));
+    if (issue && m[2] && init.method === "POST") { issue.comments.push(body.body); return json(201, {}); }
+    if (issue && init.method === "PATCH") { Object.assign(issue, body); return json(200, issue); }
+    return json(404, { message: "Not Found" });
+  };
+  return { state, fetchImpl };
+}
+
+async function runWithGitHub(tasksDir, gh, { tiers = {}, extraEnv = {}, summaryFile } = {}) {
+  const out = []; const err = [];
+  const code = await dispatch({
+    tasksDir,
+    env: { ...env(tiers), GITHUB_TOKEN: GH_TOKEN, GITHUB_REPOSITORY: GH_REPO,
+      ...(summaryFile ? { GITHUB_STEP_SUMMARY: summaryFile } : {}), ...extraEnv },
+    fetchImpl: gh.fetchImpl,
+    readLatest: (file) => readFileSync(file, "utf8"),
+    log: (s) => out.push(s), error: (s) => err.push(s),
+  });
+  return { code, out, err };
+}
+const openIssues = (gh) => gh.state.issues.filter((i) => i.state === "open");
+
+test("flow-0211: a ready sonnet task with no sonnet routine exits 0 and opens exactly one labelled issue naming the tier, the task and both setting names", async (t) => {
+  const { dir, tasksDir } = store(t, { "p-1.md": task("P-1") });
+  const gh = fakeGitHub();
+  const summaryFile = join(dir, "summary.md");
+  const r = await runWithGitHub(tasksDir, gh, { summaryFile });
+
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.out, ["flow-dispatch: decision=skipped reason=no-routine-for-sonnet task=P-1"]);
+  assert.equal(gh.state.fires.length, 0, "nothing is fired");
+  const open = openIssues(gh);
+  assert.equal(open.length, 1);
+  const [issue] = open;
+  assert.deepEqual(issue.labels, ["flow-dispatch"]);
+  assert.equal(issue.title, "Flow cannot start sonnet tasks: no routine is configured for the sonnet tier");
+  assert.match(issue.body, /`P-1`/);
+  assert.match(issue.body, /1 ready task uses the \*\*sonnet\*\* model tier/);
+  assert.match(issue.body, /`FLOW_ROUTINE_SONNET_ID`/);
+  assert.match(issue.body, /`FLOW_ROUTINE_SONNET_TOKEN`/);
+  assert.match(issue.body, /docs\/flow-routines\.md/);
+  // The request authenticates with the job's own token, as the GitHub API expects.
+  assert.equal(gh.state.requests[0].headers.Authorization, `Bearer ${GH_TOKEN}`);
+  assert.match(gh.state.requests[0].url, /^https:\/\/api\.github\.com\/repos\/acme\/widgets\/issues\?state=open&labels=flow-dispatch/);
+  // The run page says so too.
+  const summary = readFileSync(summaryFile, "utf8");
+  assert.match(summary, /decision=skipped reason=no-routine-for-sonnet/);
+  assert.match(summary, /Issue opened: https:\/\/github\.com\/acme\/widgets\/issues\/100/);
+});
+
+test("flow-0211: with the issue already open, a second run with two ready sonnet tasks opens no second issue and lists both ids", async (t) => {
+  const { tasksDir } = store(t, { "p-1.md": task("P-1") });
+  const gh = fakeGitHub();
+  await runWithGitHub(tasksDir, gh);
+  writeFileSync(join(tasksDir, "p-2.md"), task("P-2", { priority: 2 }));
+  // An opus task is not counted on the sonnet issue.
+  writeFileSync(join(tasksDir, "p-3.md"), task("P-3", { priority: 3, model: "opus", effort: "high" }));
+  const r = await runWithGitHub(tasksDir, gh, { tiers: { opus: "trig_opus" } });
+
+  assert.equal(r.code, 0);
+  const open = openIssues(gh);
+  assert.equal(open.length, 1, "one issue per tier, never one per run");
+  assert.match(open[0].body, /2 ready tasks use the \*\*sonnet\*\* model tier/);
+  assert.match(open[0].body, /`P-1`, `P-2`/);
+  assert.doesNotMatch(open[0].body, /P-3/);
+  assert.equal(gh.state.requests.filter((q) => q.method === "POST").length, 1, "created once");
+  assert.equal(gh.state.requests.filter((q) => q.method === "PATCH").length, 1, "then updated in place");
+
+  // A third run with nothing new leaves the issue alone.
+  const before = gh.state.requests.length;
+  await runWithGitHub(tasksDir, gh, { tiers: { opus: "trig_opus" } });
+  assert.deepEqual(gh.state.requests.slice(before).map((q) => q.method), ["GET"], "unchanged: read, no write");
+});
+
+test("flow-0211: an open sonnet issue is closed with a comment when a run fires the sonnet routine", async (t) => {
+  const { dir, tasksDir } = store(t, { "p-1.md": task("P-1") });
+  const gh = fakeGitHub({ issues: [
+    { number: 7, state: "open", title: "x", body: "<!-- flow-dispatch:no-routine:opus -->", labels: ["flow-dispatch"], comments: [] },
+    { number: 9, state: "open", title: "pr", body: "<!-- flow-dispatch:no-routine:sonnet -->", labels: ["flow-dispatch"], comments: [], pull_request: {} },
+  ] });
+  await runWithGitHub(tasksDir, gh);
+  const sonnet = openIssues(gh).find((i) => i.body.includes("no-routine:sonnet") && !i.pull_request);
+  assert.ok(sonnet);
+
+  const summaryFile = join(dir, "summary.md");
+  const r = await runWithGitHub(tasksDir, gh, { tiers: { sonnet: "trig_sonnet" }, summaryFile });
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.out, ["flow-dispatch: decision=fired task=P-1 tier=sonnet"]);
+  assert.equal(gh.state.fires.length, 1);
+  assert.equal(sonnet.state, "closed");
+  assert.equal(sonnet.state_reason, "completed");
+  assert.equal(sonnet.comments.length, 1);
+  assert.match(sonnet.comments[0], /^Flow started `P-1` on the sonnet routine/);
+  assert.equal(gh.state.issues.find((i) => i.number === 7).state, "open", "another tier's issue is left alone");
+  assert.equal(gh.state.issues.find((i) => i.number === 9).state, "open", "a pull request is never touched");
+  assert.match(readFileSync(summaryFile, "utf8"), /Closed the sonnet no-routine issue/);
+
+  // Firing with no issue open makes no write at all: two reads, nothing else.
+  const before = gh.state.requests.length;
+  writeFileSync(join(tasksDir, "p-1.md"), task("P-1", { status: "in_progress" }));
+  writeFileSync(join(tasksDir, "p-2.md"), task("P-2"));
+  await runWithGitHub(tasksDir, gh, { tiers: { sonnet: "trig_sonnet" } });
+  assert.deepEqual(gh.state.requests.slice(before).map((q) => q.method), ["GET", "GET"]);
+});
+
+test("flow-0211: at-capacity, nothing-ready and no-longer-ready skips open or change no issue", async (t) => {
+  const cap = store(t, { "a.md": task("A-1", { status: "in_progress" }), "b.md": task("B-1") });
+  const none = store(t, { "a.md": task("A-1", { status: "done" }) });
+  const gone = store(t, { "a.md": task("A-1") });
+  for (const [tasksDir, reason, opts] of [
+    [cap.tasksDir, "at-capacity", { configText: "dispatch:\n  max_in_progress: 1\n" }],
+    [none.tasksDir, "nothing-ready", {}],
+    [gone.tasksDir, "no-longer-ready", { readLatest: () => task("A-1", { status: "in_progress" }) }],
+  ]) {
+    const gh = fakeGitHub();
+    const out = [];
+    const code = await dispatch({
+      tasksDir, env: { ...env({ sonnet: "trig_sonnet" }), GITHUB_TOKEN: GH_TOKEN, GITHUB_REPOSITORY: GH_REPO },
+      fetchImpl: gh.fetchImpl, readLatest: opts.readLatest ?? ((f) => readFileSync(f, "utf8")),
+      configText: opts.configText ?? "", log: (s) => out.push(s), error: () => {},
+    });
+    assert.equal(code, 0);
+    assert.match(out[0], new RegExp(`reason=${reason}`));
+    assert.deepEqual(gh.state.requests, [], `${reason}: no GitHub call at all`);
+  }
+});
+
+test("flow-0211: no request ever carries a routine token or id value, only setting names", async (t) => {
+  const { tasksDir } = store(t, { "p-1.md": task("P-1"), "p-2.md": task("P-2", { model: "opus", effort: "high" }) });
+  const gh = fakeGitHub();
+  // Opus is configured with a recognisable token and id; sonnet is not configured at all.
+  await runWithGitHub(tasksDir, gh, { tiers: { opus: "trig_opus_ID_VALUE" } });
+  writeFileSync(join(tasksDir, "p-1.md"), task("P-1", { status: "in_progress" }));
+  await runWithGitHub(tasksDir, gh, { tiers: { opus: "trig_opus_ID_VALUE" }, extraEnv: { FLOW_ROUTINE_SONNET_ID: "half_set_ID_VALUE" } });
+  const sent = JSON.stringify(gh.state.requests.map(({ url, body }) => ({ url, body })));
+  assert.ok(gh.state.requests.length > 0);
+  assert.ok(!sent.includes(TOKEN), "no routine token in any GitHub request");
+  assert.ok(!sent.includes("ID_VALUE"), "no routine id value in any GitHub request");
+  for (const q of gh.state.requests) assert.equal(q.headers.Authorization, `Bearer ${GH_TOKEN}`);
+});
+
+test("flow-0211: when the GitHub issue calls fail, the skip still exits 0 and the summary says the issue could not be written", async (t) => {
+  const { dir, tasksDir } = store(t, { "p-1.md": task("P-1") });
+  const gh = fakeGitHub({ fail: true });
+  const summaryFile = join(dir, "summary.md");
+  const r = await runWithGitHub(tasksDir, gh, { summaryFile });
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.out, ["flow-dispatch: decision=skipped reason=no-routine-for-sonnet task=P-1"]);
+  const summary = readFileSync(summaryFile, "utf8");
+  assert.match(summary, /The sonnet tier has no routine\. The issue could not be written: GitHub answered HTTP 403 to GET \/issues/);
+  assert.match(r.err.join("\n"), /::warning::flow-dispatch: the no-routine issue for the sonnet tier could not be written/);
+  assert.ok(!summary.includes(GH_TOKEN) && !r.err.join("").includes(GH_TOKEN));
+
+  // A fired run whose close call fails is still fired, still 0.
+  const fired = await runWithGitHub(tasksDir, gh, { tiers: { sonnet: "trig_sonnet" }, summaryFile });
+  assert.equal(fired.code, 0);
+  assert.deepEqual(fired.out, ["flow-dispatch: decision=fired task=P-1 tier=sonnet"]);
+  assert.match(readFileSync(summaryFile, "utf8"), /could not be checked or closed: GitHub answered HTTP 403/);
+
+  // A fetch that throws (network down) is the same: green, and said.
+  const thrown = await dispatch({
+    tasksDir, env: { GITHUB_TOKEN: GH_TOKEN, GITHUB_REPOSITORY: GH_REPO, GITHUB_STEP_SUMMARY: summaryFile },
+    fetchImpl: async () => { throw new Error(`socket hang up ${GH_TOKEN}`); },
+    readLatest: (f) => readFileSync(f, "utf8"), log: () => {}, error: () => {},
+  });
+  assert.equal(thrown.valueOf(), 0);
+  assert.match(readFileSync(summaryFile, "utf8"), /could not be written: socket hang up \*\*\*/);
+});
+
+test("flow-0211: with no GITHUB_TOKEN or repository, no issue call is made and the summary says why", async (t) => {
+  const { dir, tasksDir } = store(t, { "p-1.md": task("P-1") });
+  const summaryFile = join(dir, "summary.md");
+  for (const extra of [{ GITHUB_REPOSITORY: GH_REPO }, { GITHUB_TOKEN: GH_TOKEN }, { GITHUB_TOKEN: GH_TOKEN, GITHUB_REPOSITORY: "not a repo" }]) {
+    const calls = [];
+    const code = await dispatch({
+      tasksDir, env: { ...extra, GITHUB_STEP_SUMMARY: summaryFile },
+      fetchImpl: async (url) => { calls.push(url); throw new Error("no call expected"); },
+      readLatest: (f) => readFileSync(f, "utf8"), log: () => {}, error: () => {},
+    });
+    assert.equal(code, 0);
+    assert.deepEqual(calls, []);
+  }
+  assert.match(readFileSync(summaryFile, "utf8"), /No issue was written: this run has no GITHUB_TOKEN or GITHUB_REPOSITORY/);
+});
+
+test("flow-0211: GITHUB_API_URL is honoured, for GitHub Enterprise", async (t) => {
+  const { tasksDir } = store(t, { "p-1.md": task("P-1") });
+  const urls = [];
+  await dispatch({
+    tasksDir, env: { GITHUB_TOKEN: GH_TOKEN, GITHUB_REPOSITORY: GH_REPO, GITHUB_API_URL: "https://ghe.example.com/api/v3/" },
+    fetchImpl: async (url, init) => { urls.push(`${init.method} ${url}`); return { ok: true, status: 200, json: async () => (init.method === "GET" ? [] : { number: 1 }) }; },
+    readLatest: (f) => readFileSync(f, "utf8"), log: () => {}, error: () => {},
+  });
+  assert.deepEqual(urls, [
+    `GET https://ghe.example.com/api/v3/repos/${GH_REPO}/issues?state=open&labels=flow-dispatch&per_page=100`,
+    `GET https://ghe.example.com/api/v3/repos/${GH_REPO}/issues?state=open&sort=created&direction=desc&per_page=100`,
+    `POST https://ghe.example.com/api/v3/repos/${GH_REPO}/issues`,
+  ]);
+});
+
+test("flow-0211: an issue whose label was dropped is still found by its marker, so no second issue is opened", async (t) => {
+  const { tasksDir } = store(t, { "p-1.md": task("P-1") });
+  // GitHub drops labels a token may not set: the issue exists, unlabelled.
+  const gh = fakeGitHub({ issues: [
+    { number: 5, state: "open", title: "old", body: "<!-- flow-dispatch:no-routine:sonnet -->\nold", labels: [], comments: [] },
+  ] });
+  await runWithGitHub(tasksDir, gh);
+  assert.equal(gh.state.issues.length, 1, "found by marker, not re-opened");
+  assert.match(gh.state.issues[0].body, /`P-1`/, "and updated in place");
+  assert.deepEqual(gh.state.requests.map((q) => q.method), ["GET", "GET", "PATCH"]);
+
+  // Firing then closes it the same way.
+  await runWithGitHub(tasksDir, gh, { tiers: { sonnet: "trig_sonnet" } });
+  assert.equal(gh.state.issues[0].state, "closed");
 });

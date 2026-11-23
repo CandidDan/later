@@ -13,9 +13,10 @@
 //   node .flow/bin/flow-sync.mjs extra-jobs --local .github/workflows/flow-gates.yml \
 //        --incoming "$CANON_TPL/.github/workflows/flow-gates.yml"       # -> "edge-parse\nmcp-build"
 //   node .flow/bin/flow-sync.mjs pin-callers --file .github/workflows/flow-gates.yml --ref v3.4.0
+//   node .flow/bin/flow-sync.mjs carry-inputs --local "$PREV" --file .github/workflows/flow-gates.yml
 //   node .flow/bin/flow-sync.mjs pr-title --local 1.0.0 --canonical 1.2.0
 //   node .flow/bin/flow-sync.mjs pr-body  --local 1.0.0 --canonical 1.2.0 --files "$CHANGED" \
-//        --kept "$KEPT"
+//        --kept "$KEPT" --kept-inputs "$KEPT_INPUTS"
 //
 // `--files` is `git diff --cached --no-renames --name-status` output — `<STATUS>\t<path>` per
 // line, computed AFTER `git add -A`. It was the pre-`add` worktree diff until flow-0054, which
@@ -287,6 +288,158 @@ export function pinCallers(text, ref) {
     .join("\n");
 }
 
+// ── carrying a caller's own `with:` inputs into the copy (flow-0197) ─────────────────────
+//
+// The customised-caller guard above keeps a caller only when it declares a JOB canonical's template
+// does not. A caller that differs in a `with:` input is overwritten, and the input is lost. Found
+// on CandidDan/mapd#52 (the 4.1.0 sync): mapd's flow-gates.yml passed `setup_node_version:
+// "24.22.1"`, a pin to a Node security release; the copy dropped it, which would have moved mapd's
+// CI back to Node 22. So after a caller is copied (and pinned), every `with:` key the repo's
+// previous copy set on a Flow-reusable job is carried into the new copy of the same job, with the
+// repo's value. A key canonical also sets keeps the repo's value; a key only canonical sets stays.
+//
+// Scope, stated: only `with:` entries move. Nothing else in the repo's copy — `secrets:`, `on:`,
+// a schedule — is carried, and the job set is still the guard's business, not this function's.
+//
+// "Flow-reusable job" is the same definition pin-callers uses: a job whose live `uses:` line names
+// `<owner>/<repo>/.github/workflows/_flow-*.yml@<ref>` (REUSABLE_USES_LINE). Any owner, so a repo
+// repinned at a release repo (flow-0030) is covered too. The job must be one in BOTH files.
+//
+// Same posture as the rest of this file: no YAML parser, a line scan, byte-preserving. A carried
+// entry is moved as its own lines — its key line, any deeper continuation lines (a block scalar),
+// and the full-line comments directly above it — so its trailing comment and its explaining
+// comment travel with it.
+
+const strip = (line) => line.replace(/\r$/, "");
+const leadOf = (line) => strip(line).match(/^[ \t]*/)[0];
+const isBlank = (line) => /^[ \t]*$/.test(strip(line));
+const isComment = (line) => /^[ \t]*#/.test(line);
+
+/** [start, end) line ranges of each top-level job, keyed by job id. */
+function jobBlocks(lines) {
+  const blocks = new Map();
+  let i = lines.findIndex((l) => /^jobs:[ \t]*(?:#.*)?$/.test(strip(l)));
+  if (i < 0) return blocks;
+  let indent = null;
+  let current = null;
+  for (i += 1; i < lines.length; i++) {
+    const line = strip(lines[i]);
+    if (isBlank(line) || isComment(line)) continue;
+    const lead = leadOf(line);
+    if (lead === "") break;
+    if (indent === null) indent = lead;
+    if (lead !== indent) continue;
+    const match = line.match(JOB_KEY_LINE);
+    if (!match) continue;
+    if (current) current.end = i;
+    current = { start: i, end: lines.length };
+    if (!blocks.has(match[2])) blocks.set(match[2], current);
+  }
+  // A job's block ends at the last non-blank, non-comment line before the next job or top-level key,
+  // so trailing blank lines and a comment heading the NEXT job stay outside it.
+  for (const block of blocks.values()) {
+    let end = Math.min(block.end, lines.length);
+    for (let j = block.start + 1; j < end; j++) {
+      if (!isBlank(lines[j]) && leadOf(lines[j]) === "") { end = j; break; }
+    }
+    while (end > block.start + 1 && (isBlank(lines[end - 1]) || isComment(lines[end - 1]))) end--;
+    block.end = end;
+  }
+  return blocks;
+}
+
+/** The `with:` block of one job: where it is and its entries, or null when the job has none. */
+function readJob(lines, { start, end }) {
+  let bodyIndent = null;
+  let uses = false;
+  let withAt = -1;
+  for (let i = start + 1; i < end; i++) {
+    if (isBlank(lines[i]) || isComment(lines[i])) continue;
+    const lead = leadOf(lines[i]);
+    if (bodyIndent === null) bodyIndent = lead;
+    if (lead !== bodyIndent) continue;
+    if (REUSABLE_USES_LINE.test(lines[i])) uses = true;
+    if (/^[ \t]*with:[ \t]*(?:#.*)?$/.test(strip(lines[i]))) withAt = i;
+  }
+  const job = { bodyIndent: bodyIndent ?? "", uses, withAt, entries: [], entryIndent: null, withEnd: withAt + 1 };
+  if (withAt < 0) return job;
+  // Entries: every line deeper than `with:` until the next line at or above the body indent.
+  let i = withAt + 1;
+  let pendingComments = [];
+  for (; i < end; i++) {
+    if (isBlank(lines[i])) { pendingComments = []; continue; }
+    const lead = leadOf(lines[i]);
+    if (lead.length <= job.bodyIndent.length) break;
+    if (isComment(lines[i]) && (job.entryIndent === null || lead === job.entryIndent)) {
+      pendingComments.push(i);
+      continue;
+    }
+    if (job.entryIndent === null) job.entryIndent = lead;
+    const key = lead === job.entryIndent && strip(lines[i]).match(/^[ \t]*([A-Za-z_][A-Za-z0-9_-]*):(?:[ \t]|$)/);
+    if (key) {
+      job.entries.push({ key: key[1], from: pendingComments[0] ?? i, keyAt: i, to: i + 1 });
+      pendingComments = [];
+    } else if (job.entries.length) {
+      job.entries[job.entries.length - 1].to = i + 1;   // a continuation line of the last entry
+      pendingComments = [];
+    }
+  }
+  job.withEnd = job.entries.length ? job.entries[job.entries.length - 1].to : withAt + 1;
+  return job;
+}
+
+/** Re-indent lines from one entry indent to another. */
+function reindent(lines, from, to) {
+  if (from === to) return lines;
+  return lines.map((line) => isBlank(line) ? line
+    : line.startsWith(from) ? to + line.slice(from.length) : to + line.replace(/^[ \t]*/, ""));
+}
+
+/**
+ * `incomingText` with every `with:` input that `localText` sets on a Flow-reusable job carried into
+ * the same job, keeping the local value. Returns the new text and the inputs that changed it, as
+ * `{ job, key }` in the local file's order. An input whose entry is already identical in the
+ * incoming copy is not reported: nothing was carried.
+ */
+export function carryInputs(localText, incomingText) {
+  const local = String(localText ?? "").split("\n");
+  const out = String(incomingText ?? "").split("\n");
+  const carried = [];
+  const localJobs = jobBlocks(local);
+  // Work job by job, re-reading the incoming file each time: an edit shifts every later line.
+  for (const [name, localBlock] of localJobs) {
+    const lj = readJob(local, localBlock);
+    if (!lj.uses || lj.entries.length === 0) continue;
+    const incomingBlock = jobBlocks(out).get(name);
+    if (!incomingBlock) continue;
+    let ij = readJob(out, incomingBlock);
+    if (!ij.uses) continue;
+    for (const entry of lj.entries) {
+      const entryLines = local.slice(entry.from, entry.to);
+      if (ij.withAt < 0) {
+        // No `with:` in the incoming job: open one at the job's body indent, after its last line.
+        const at = incomingBlock.end;
+        out.splice(at, 0, `${ij.bodyIndent}with:`);
+        ij = readJob(out, jobBlocks(out).get(name));
+      }
+      const indent = ij.entryIndent ?? (ij.bodyIndent + "  ");
+      const moved = reindent(entryLines, lj.entryIndent, indent);
+      const match = ij.entries.find((e) => e.key === entry.key);
+      if (match) {
+        const current = out.slice(match.keyAt, match.to);
+        const wanted = reindent(local.slice(entry.keyAt, entry.to), lj.entryIndent, indent);
+        if (current.join("\n") === wanted.join("\n")) continue;   // same value already
+        out.splice(match.from, match.to - match.from, ...moved);
+      } else {
+        out.splice(ij.withEnd, 0, ...moved);
+      }
+      carried.push({ job: name, key: entry.key });
+      ij = readJob(out, jobBlocks(out).get(name));
+    }
+  }
+  return { text: out.join("\n"), carried };
+}
+
 // The version stamp is reported on its own line above the file list, so it is deliberately NOT
 // counted as an "infra file" when deciding whether anything differed. Without that exclusion the
 // one true stamp-only case is unreachable: `_flow-sync.yml` rewrites this file on every sync, so
@@ -328,10 +481,12 @@ const GROUP_ORDER = ["Added", "Modified", "Removed", "Changed"];
 
 // PR title + body for an adoption. `files` is the sync's changed-file list, as `--name-status`
 // lines (see parseChanges).
-export function prContent({ local, canonical, files = [], kept = [] }) {
+export function prContent({ local, canonical, files = [], kept = [], keptInputs = [] }) {
   const title = `flow: adopt canonical Flow infra ${canonical}`;
   const changes = parseChanges(files);
   const keptCallers = parseKept(kept);
+  // Same `<path>\t<items>` line shape as `kept`; the items are `<job>.<input>` (flow-0197).
+  const carried = parseKept(keptInputs);
   // Added and removed files are listed apart from modified ones because a sync's whole payload
   // can be additions — new thin callers, new `.flow/bin/` helpers — and those are the files that
   // will execute in this repo's CI. Flattening them into one undifferentiated list is what let a
@@ -364,6 +519,19 @@ export function prContent({ local, canonical, files = [], kept = [] }) {
       ? `- \`${path}\` — extra jobs: ${jobs.map((j) => `\`${j}\``).join(", ")}`
       : `- \`${path}\` — extra jobs not recorded`),
   ];
+  // The inputs carried from this repo's copy into canonical's (flow-0197). Absent when there are
+  // none, for the same reason as the kept section above.
+  const inputsSection = carried.length === 0 ? [] : [
+    ``,
+    `### Kept inputs`,
+    ``,
+    `These callers were synced from canonical, but this repo's copy passed these \`with:\` inputs`,
+    `that canonical's copy does not set, or sets to a different value. Each one was carried into the`,
+    `synced copy with this repo's value, so the caller still receives this version's other changes.`,
+    `Check that each value is still wanted.`,
+    ``,
+    ...carried.map(({ path, jobs }) => `- \`${path}\` — ${jobs.map((j) => `\`${j}\``).join(", ")}`),
+  ];
   const body = [
     `Adopts Flow infra **${canonical}** from canonical (\`CandidDan/flow\`).`,
     ``,
@@ -373,6 +541,7 @@ export function prContent({ local, canonical, files = [], kept = [] }) {
     ``,
     fileLines,
     ...keptSection,
+    ...inputsSection,
     ``,
     `Opened by **flow-sync** (Phase 4 adopt mechanism). Flow infra is authored in canonical and`,
     `repos adopt it — this PR *is* that pull, kept reviewable so the update still clears the gate`,
@@ -450,6 +619,22 @@ if (__isMain) {
       if (after !== before) __writeFileSync(file, after);
       break;
     }
+    case "carry-inputs": {
+      // Rewrites --file in place with the `with:` inputs --local set, and prints one `<job>.<input>`
+      // per carried input (nothing when none). Both reads throw on an unreadable file, so `set -e`
+      // stops the sync rather than shipping a caller that silently lost an input.
+      const localPath = arg(rest, "local");
+      const file = arg(rest, "file");
+      if (!localPath || !file) {
+        console.error("usage: flow-sync.mjs carry-inputs --local FILE --file FILE");
+        process.exit(2);
+      }
+      const before = __readFileSync(file, "utf8");
+      const { text, carried } = carryInputs(__readFileSync(localPath, "utf8"), before);
+      if (text !== before) __writeFileSync(file, text);
+      if (carried.length) process.stdout.write(carried.map((c) => `${c.job}.${c.key}`).join("\n") + "\n");
+      break;
+    }
     case "pr-title":
       process.stdout.write(prContent({ local, canonical }).title + "\n");
       break;
@@ -462,11 +647,13 @@ if (__isMain) {
         // `<path>\t<jobs>` lines from the caller-copy loop. Omitted on a sync that kept nothing,
         // in which case the section does not render at all.
         kept: arg(rest, "kept") || "",
+        // `<path>\t<job>.<input> …` lines from the copy loop's carry-inputs step (flow-0197).
+        keptInputs: arg(rest, "kept-inputs") || "",
       }).body + "\n");
       break;
     }
     default:
-      console.error("usage: flow-sync.mjs <decide|branch|existing|extra-jobs|pin-callers|pr-title|pr-body> --local X --canonical Y [--files ...] [--kept ...]\n" +
+      console.error("usage: flow-sync.mjs <decide|branch|existing|extra-jobs|pin-callers|carry-inputs|pr-title|pr-body> --local X --canonical Y [--files ...] [--kept ...] [--kept-inputs ...]\n" +
         "       flow-sync.mjs extra-jobs --local <workflow file> --incoming <workflow file>\n" +
         "       flow-sync.mjs existing --branch-exists <yes|no> --open-pr <number|''> --head-canonical-sha <sha|''> --canonical-sha <sha>");
       process.exit(2);

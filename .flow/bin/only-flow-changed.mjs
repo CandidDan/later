@@ -27,6 +27,11 @@ import { fileURLToPath } from "node:url";
 
 export const FLOW_PATHS = [".flow/", "changes/", ".github/"];
 
+// One path (relative to the repository top) is Flow-only when it sits under one of FLOW_PATHS.
+// Exported so `deployable-sha.mjs` (flow-0210) steps over exactly the commits this hook skips:
+// "skipped by the deploy hook" and "safe to step over" read one list, so they cannot drift apart.
+export const isFlowOnlyPath = (path) => FLOW_PATHS.some((p) => String(path).startsWith(p));
+
 class Doubt extends Error {}
 
 export function parseArgs(argv) {
