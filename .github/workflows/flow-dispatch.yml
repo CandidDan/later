@@ -40,6 +40,7 @@ jobs:
   flow-dispatch:
     permissions:
       contents: read           # checkout, and the re-read of the task from main before firing
+      issues: write            # one issue per tier with ready tasks but no routine (flow-0211)
     uses: CandidDan/flow/.github/workflows/_flow-dispatch.yml@v4
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}

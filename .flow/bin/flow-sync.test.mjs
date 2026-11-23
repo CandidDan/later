@@ -773,3 +773,154 @@ test("flow-0174: an adopter that never had the caller is untouched by the step",
   execFileSync("bash", ["-euo", "pipefail", "-c", region], { cwd: repo, encoding: "utf8", env: { PATH: process.env.PATH } });
   assert.equal(git(repo, "status", "--porcelain"), "", "nothing to retire is a no-op");
 });
+
+// ── flow-0197: carrying the repo's own `with:` inputs into the copied caller ──
+
+import { carryInputs } from "./flow-sync.mjs";
+
+// Shaped like the incident: CandidDan/mapd#52's flow-gates.yml, and canonical's 4.1.0 template.
+const MAPD_LOCAL = `name: flow-gates
+on:
+  pull_request:
+
+jobs:
+  gate:
+    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v4.0.0
+    with:
+      node_version: "20"
+      # Node security release (CVE-2026-111497)
+      setup_node_version: "24.22.1"   # pinned until 24.23
+    secrets: inherit
+`;
+
+const CANON_410 = `name: flow-gates
+on:
+  pull_request:
+
+jobs:
+  gate:
+    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v4.1.0
+    with:
+      node_version: "22"
+      runner: ubuntu-latest
+    secrets: inherit
+`;
+
+test("flow-0197: a repo's setup_node_version absent from canonical's caller is kept with its value (criterion 1)", () => {
+  const { text, carried } = carryInputs(MAPD_LOCAL, CANON_410);
+  assert.match(text, /\n      setup_node_version: "24\.22\.1"   # pinned until 24\.23\n/,
+    "the input, its value and its trailing comment must all survive the copy");
+  assert.match(text, /\n      # Node security release \(CVE-2026-111497\)\n      setup_node_version/,
+    "the comment line explaining the pin travels with it");
+  assert.match(text, /_flow-gates\.yml@v4\.1\.0/, "everything outside `with:` is canonical's, pin included");
+  assert.deepEqual(carried.map((c) => `${c.job}.${c.key}`), ["gate.node_version", "gate.setup_node_version"]);
+});
+
+test("flow-0197: a key both set keeps the repo's value; a key only canonical sets is kept (criterion 2)", () => {
+  const { text } = carryInputs(MAPD_LOCAL, CANON_410);
+  assert.match(text, /\n      node_version: "20"\n/, "both set it: the repo's value wins");
+  assert.doesNotMatch(text, /node_version: "22"/, "…and canonical's value is gone, not duplicated");
+  assert.match(text, /\n      runner: ubuntu-latest\n/, "only canonical sets it: canonical's entry stays");
+  assert.equal(text.match(/^ {4}with:$/gm).length, 1, "still one `with:` block");
+});
+
+test("flow-0197: an input identical on both sides is not reported as carried, and a second run is a no-op", () => {
+  const once = carryInputs(MAPD_LOCAL, CANON_410).text;
+  const again = carryInputs(MAPD_LOCAL, once);
+  assert.equal(again.text, once, "idempotent");
+  assert.deepEqual(again.carried, [], "nothing differed, so nothing is listed in the PR body");
+  const same = carryInputs(CANON_410, CANON_410);
+  assert.equal(same.text, CANON_410);
+  assert.deepEqual(same.carried, []);
+});
+
+test("flow-0197: an incoming job with no `with:` gets one, at the job's own indent", () => {
+  const incoming = CANON_410.replace(/ {4}with:\n.*\n.*\n/, "");
+  const { text, carried } = carryInputs(MAPD_LOCAL, incoming);
+  assert.match(text, /\n    secrets: inherit\n    with:\n      node_version: "20"\n      # Node security release[^\n]*\n      setup_node_version: "24\.22\.1"/);
+  assert.equal(carried.length, 2);
+});
+
+test("flow-0197: a different entry indent is re-indented, and a block scalar moves whole", () => {
+  const local = `jobs:
+  gate:
+    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v4
+    with:
+        extra_paths: |
+          src/**
+          lib/**
+`;
+  const incoming = `jobs:
+    gate:
+        uses: OWNER/flow/.github/workflows/_flow-gates.yml@v4.1.0
+        with:
+            runner: ubuntu-latest
+`;
+  const { text } = carryInputs(local, incoming);
+  assert.equal(text, `jobs:
+    gate:
+        uses: OWNER/flow/.github/workflows/_flow-gates.yml@v4.1.0
+        with:
+            runner: ubuntu-latest
+            extra_paths: |
+              src/**
+              lib/**
+`);
+});
+
+test("flow-0197: only Flow-reusable jobs present in both files carry, and nothing outside `with:` moves", () => {
+  const local = `jobs:
+  gate:
+    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v4
+    with:
+      setup_node_version: "24.22.1"
+    secrets:
+      FLOW_PAT: \${{ secrets.MINE }}
+  build:
+    uses: someone/else/.github/workflows/build.yml@v1
+    with:
+      target: prod
+  gone:
+    uses: OWNER/flow/.github/workflows/_flow-old.yml@v4
+    with:
+      x: "1"
+`;
+  const incoming = `jobs:
+  gate:
+    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v4.1.0
+    secrets: inherit
+  build:
+    uses: someone/else/.github/workflows/build.yml@v2
+`;
+  const { text, carried } = carryInputs(local, incoming);
+  assert.deepEqual(carried, [{ job: "gate", key: "setup_node_version" }]);
+  assert.match(text, /secrets: inherit/, "secrets: is canonical's");
+  assert.doesNotMatch(text, /MINE|target: prod|x: "1"/,
+    "a non-Flow job, a job canonical dropped, and anything outside `with:` are not carried");
+});
+
+test("flow-0197: carry-inputs rewrites the file in place, prints what it carried, and refuses a missing file", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "flow-0197-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const prev = join(dir, "prev.yml");
+  const file = join(dir, "flow-gates.yml");
+  writeFileSync(prev, MAPD_LOCAL);
+  writeFileSync(file, CANON_410);
+  const out = execFileSync("node", [SYNC_CLI, "carry-inputs", "--local", prev, "--file", file], { encoding: "utf8" });
+  assert.equal(out, "gate.node_version\ngate.setup_node_version\n");
+  assert.match(readFileSync(file, "utf8"), /setup_node_version: "24\.22\.1"/);
+  // Nothing carried prints nothing: the workflow tests the output with `[ -n … ]`.
+  assert.equal(execFileSync("node", [SYNC_CLI, "carry-inputs", "--local", prev, "--file", file], { encoding: "utf8" }), "");
+  assert.throws(() => execFileSync("node", [SYNC_CLI, "carry-inputs", "--local", join(dir, "nope"), "--file", file],
+    { stdio: ["ignore", "pipe", "pipe"] }), (err) => err.status !== 0 && String(err.stdout) === "");
+  assert.throws(() => execFileSync("node", [SYNC_CLI, "carry-inputs", "--file", file],
+    { stdio: ["ignore", "pipe", "pipe"] }), (err) => err.status === 2);
+});
+
+test("flow-0197: prContent renders a 'Kept inputs' section only when an input was carried", () => {
+  const { body } = prContent({ local: "4.0.0", canonical: "4.1.0", files: "M\t.github/workflows/flow-gates.yml",
+    keptInputs: ".github/workflows/flow-gates.yml\tgate.node_version gate.setup_node_version" });
+  assert.match(body, /### Kept inputs\n/);
+  assert.match(body, /- `\.github\/workflows\/flow-gates\.yml` — `gate\.node_version`, `gate\.setup_node_version`/);
+  assert.doesNotMatch(prContent({ local: "4.0.0", canonical: "4.1.0", files: "M\tx" }).body, /Kept inputs/);
+});

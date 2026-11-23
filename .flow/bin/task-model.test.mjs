@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 
 import {
   TIERS, TIER_ORDER, EFFORTS, resolve, cliArgs, summaryLine, escalate,
@@ -39,7 +40,7 @@ const task = (fields = {}, extra = "") => [
 
 test("TIERS maps the four tiers to full model IDs, in escalation order", () => {
   assert.deepEqual(TIERS, {
-    haiku: "claude-haiku-4-5-20251001",
+    haiku: "claude-haiku-5-5",
     sonnet: "claude-sonnet-5-5",
     opus: "claude-opus-5-5",
     fable: "claude-fable-5-1",
@@ -48,6 +49,25 @@ test("TIERS maps the four tiers to full model IDs, in escalation order", () => {
   assert.deepEqual(EFFORTS, ["low", "medium", "high", "max"]);
   for (const id of Object.values(TIERS)) assert.match(id, /^claude-[a-z]+-\d+(-\d+)*$/, `${id} is not a full id`);
   assert.ok(Object.isFrozen(TIERS));
+});
+
+test("a task with model haiku resolves to claude-haiku-5-5", () => {
+  const r = resolve(task({ model: "haiku", model_reason: "mechanical" }));
+  assert.equal(r.tier, "haiku");
+  assert.equal(r.id, "claude-haiku-5-5");
+});
+
+test("no tracked file outside the store, changelog and fixtures still names the old Haiku 4.5 id", () => {
+  const OLD = ["claude-haiku-4-5", "20251001"].join("-"); // built in pieces so this file does not name it
+  let root, files;
+  try {
+    const cwd = import.meta.dirname;
+    root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" }).trim();
+    files = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" }).split("\0").filter(Boolean);
+  } catch { return; } // not a git checkout (a packed release): nothing tracked to search
+  const exempt = (f) => f.startsWith(".flow/tasks/") || f === "CHANGELOG.md" || f.startsWith("changes/") || /fixtures?\//.test(f);
+  const hits = files.filter((f) => !exempt(f) && readFileSync(join(root, f), "utf8").includes(OLD));
+  assert.deepEqual(hits, []);
 });
 
 // ── criterion 1: the default ─────────────────────────────────────────────
